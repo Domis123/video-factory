@@ -1,0 +1,41 @@
+{
+  "name": "video-factory",
+  "version": "1.0.0",
+  "description": "Automated video production pipeline for 30 social media brands",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test:connectivity": "tsx src/scripts/test-connectivity.ts",
+    "setup:r2": "tsx src/scripts/create-r2-structure.ts",
+    "test:pipeline": "tsx src/scripts/test-pipeline.ts",
+    "test:agents": "tsx src/scripts/test-agents.ts",
+    "test:agents:live": "tsx src/scripts/test-agents-live.ts",
+    "test:phase5": "tsx src/scripts/test-phase5.ts",
+    "start": "tsx src/index.ts",
+    "start:prod": "node dist/index.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3",
+    "@aws-sdk/lib-storage": "^3",
+    "@aws-sdk/s3-request-presigner": "^3",
+    "@google/generative-ai": "^0.24.1",
+    "@remotion/bundler": "^4.0.443",
+    "@remotion/cli": "^4.0.443",
+    "@remotion/renderer": "^4.0.443",
+    "@supabase/supabase-js": "^2",
+    "bullmq": "^5",
+    "dotenv": "^16",
+    "ioredis": "^5",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "remotion": "^4.0.443",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}
