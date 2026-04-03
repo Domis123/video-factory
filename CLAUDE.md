@@ -140,6 +140,15 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
 - `TransitionEffect` — 6 types (cut, fade, slide-left, slide-up, zoom, wipe)
 - `SegmentVideo` — Handles single or multi-clip segments automatically
 
+## Infrastructure
+- **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX22, Ubuntu, root user
+- **n8n server**: 46.224.56.174 — Hetzner, Ubuntu 24.04
+- **GitHub**: https://github.com/Domis123/video-factory (private)
+- **Deploy**: `ssh root@95.216.137.35` → `cd /home/video-factory && git pull && npm install && systemctl restart video-factory`
+- **Logs**: `journalctl -u video-factory -f`
+- **Service**: `systemctl start|stop|restart|status video-factory`
+- whisper.cpp installed at `/opt/whisper.cpp/build/bin/whisper-cli` with `base.en` model
+
 ## Important Technical Notes
 - Upstash Redis requires `tls: {}` and `maxRetriesPerRequest: null` in ioredis config
 - BullMQ Queue/Worker instances each need their own Redis connection (no sharing)
@@ -200,13 +209,19 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
   - HookTransformation: split-wipe before/after reveal with animated divider line
   - HookListicleCTA: numbered items with progress bar per step
   - `npm run build` compiles cleanly
-- Phase 5A (Renderer + Server): CODE COMPLETE
+- Phase 5A (Renderer + Server): DEPLOYED AND RUNNING
   - renderer.ts — Remotion render orchestration (download clips → bundle → render → upload to R2)
   - pipeline.ts — Full job lifecycle: planning (3 AI agents) + render pipeline (clip-prep → transcription → rendering → audio-mix → sync-check → export → QA)
   - index.ts — Server entry point, starts 3 BullMQ workers (planning, rendering, ingestion), graceful shutdown on SIGINT/SIGTERM
   - scripts/setup-vps.sh — Automated VPS setup (Node 20, FFmpeg, whisper.cpp, Chromium, systemd service)
-  - **Phase 5 test: 28/28 passed** (Redis queues, BullMQ enqueue/dequeue, Context Packet assembly, full 13-step job lifecycle idle→delivered, event logging, renderer module verification, state machine validation)
-  - Server startup verified: connects to all 4 queues, starts 3 workers, clean shutdown
+  - **Phase 5 test: 28/28 passed locally + 28/28 on VPS**
+  - **Live API test: 27/27 on VPS** (Claude Sonnet generating real briefs/copy from server)
+  - **Connectivity: 5/5 on VPS** (Supabase 5 brands, Redis PONG, R2 PUT/GET/DELETE)
+  - VPS deployed: Hetzner CX22 (2 vCPU, 4GB RAM) at 95.216.137.35
+  - Running as systemd service (`video-factory.service`), auto-restart on crash/reboot
+  - Worker listening on all 4 queues: ingestion, planning, rendering, export
+  - Memory usage: ~142MB (plenty of headroom)
+  - GitHub repo: https://github.com/Domis123/video-factory (deploy via `git pull && npm install`)
 - Phase 5B (Google Sheets): NEEDS MANUAL SETUP — create spreadsheet + configure tabs
 - Phase 5C (n8n Workflows): NEEDS MANUAL SETUP — 10 workflows in n8n UI
-- Phase 5D (End-to-end test): PENDING — needs VPS provisioned + real UGC clips ingested
+- Phase 5D (End-to-end test): PENDING — needs real UGC clips ingested

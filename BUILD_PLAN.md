@@ -25,7 +25,7 @@ Video Factory is a 95% automated video production pipeline for 30 brands (150 vi
 | 2B. Gemini Analyzer | ✅ COMPLETE | Tested on real video | 2 files (gemini.ts + test script) |
 | 3. AI Agents | ✅ COMPLETE | 28/28 mock, 27/27 live | 7 files (3 agents + 3 prompts + context-packet) |
 | 4. Remotion Templates | ✅ COMPLETE | Build clean | 9 files (6 components + 3 layouts + types + Root) |
-| 5A. Renderer + Server | ✅ CODE COMPLETE | 28/28 phase5 | 4 files (renderer, pipeline, index, setup-vps.sh) |
+| 5A. Renderer + Server | ✅ DEPLOYED | 28/28 + 27/27 live + 5/5 connectivity on VPS | 4 files + VPS running |
 | 5B. Google Sheets | NEEDS SETUP | — | Manual: create spreadsheet + configure n8n |
 | 5C. n8n Workflows | NEEDS SETUP | — | 10 workflows to build in n8n UI |
 | 5D. End-to-end test | PENDING | — | Needs VPS + real UGC clips |
@@ -219,8 +219,15 @@ All video templates built as React components. Each layout consumes a Context Pa
 
 **Server startup verified:** `npm start` connects to all 4 BullMQ queues, starts 3 workers, graceful shutdown on SIGINT/SIGTERM.
 
-**VPS requirements:** Hetzner CX41 (4 vCPU, 16GB RAM, Ubuntu 22.04) — $30/mo
-- Provision with: `bash scripts/setup-vps.sh`
+**VPS deployed:** Hetzner CX22 (2 vCPU, 4GB RAM, Ubuntu 24.04) — ~$4.50/mo
+- IP: 95.216.137.35
+- Node 20, FFmpeg, whisper.cpp (base.en model), Chromium deps installed
+- Code cloned from GitHub, .env configured, npm installed
+- Running as systemd service: `video-factory.service` (auto-restart, auto-start on boot)
+- All tests passing on VPS: 5/5 connectivity, 28/28 phase5, 27/27 live agents
+- GitHub: https://github.com/Domis123/video-factory
+- Deploy updates: `cd /home/video-factory && git pull && npm install && systemctl restart video-factory`
+- Logs: `journalctl -u video-factory -f`
 
 ### Test Results ✅ 28/28 passed
 - Redis: PING + all 4 queues accessible (ingestion, planning, rendering, export)
