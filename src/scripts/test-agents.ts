@@ -48,6 +48,9 @@ const mockBrand: BrandConfig = {
   voice_guidelines: 'Warm, encouraging, fitness-positive. Avoid aggressive sales language.',
   hook_style_preference: ['pov', 'question', 'challenge'],
   content_pillars: ['pilates', 'flexibility', 'wellness', 'daily routine'],
+  allowed_video_types: ['workout-demo', 'tips-listicle', 'transformation'],
+  color_grade_preset: 'warm-vibrant',
+  color_lut_r2_key: null,
   drive_input_folder_id: null,
   drive_output_folder_id: null,
   active: true,
@@ -78,12 +81,14 @@ async function main() {
   const brief = generateMockBrief({ ideaSeed, brandConfig: mockBrand });
   assert('Brief has brief_id', !!brief.brief_id);
   assert('Brief brand matches', brief.brand_id === 'nordpilates');
+  assert('Brief has video_type', !!brief.video_type);
   assert('Brief has template_id', !!brief.template_id);
-  assert('Brief has 3 segments', brief.segments.length === 3);
+  assert('Brief has 3+ segments', brief.segments.length >= 3);
   assert('First segment is hook', brief.segments[0].type === 'hook');
-  assert('Last segment is CTA', brief.segments[2].type === 'cta');
-  assert('Duration target is 30-60s', brief.total_duration_target >= 30 && brief.total_duration_target <= 60);
-  assert('Body has sub_segments', (brief.segments[1].sub_segments?.length ?? 0) > 0);
+  assert('Last segment is CTA', brief.segments[brief.segments.length - 1].type === 'cta');
+  assert('Duration target is 25-60s', brief.total_duration_target >= 25 && brief.total_duration_target <= 60);
+  assert('Segments have energy_level', brief.segments.every(s => typeof s.energy_level === 'number'));
+  assert('Segments have pacing', brief.segments.every(s => ['slow', 'medium', 'fast'].includes(s.pacing!)));
 
   // Test 2: Asset Curator
   console.log('\n── Agent 2: Asset Curator ──');
@@ -91,7 +96,7 @@ async function main() {
   assert('Clips reference correct brief', clips.brief_id === brief.brief_id);
   assert('Clips cover all segments', clips.clip_selections.length === brief.segments.length);
   assert('Hook segment has single clip', !!clips.clip_selections[0].r2_key);
-  assert('Body segment has multi-clip', (clips.clip_selections[1].clips?.length ?? 0) > 0);
+  assert('Body segments have clips', clips.clip_selections.filter(c => c.r2_key || c.clips).length === brief.segments.length);
   assert('All r2_keys start with assets/', clips.clip_selections.every(
     (s) => s.r2_key?.startsWith('assets/') || s.clips?.every((c) => c.r2_key.startsWith('assets/'))
   ));

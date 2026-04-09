@@ -2,10 +2,12 @@ import React from 'react';
 import { useCurrentFrame, interpolate } from 'remotion';
 
 interface TransitionEffectProps {
-  type: 'cut' | 'fade' | 'slide-left' | 'slide-up' | 'zoom' | 'wipe';
+  type: 'cut' | 'fade' | 'slide-left' | 'slide-up' | 'zoom' | 'wipe' | 'beat-flash' | 'beat-zoom';
   durationFrames?: number;
   startFrame: number;
   color?: string;
+  /** Frame aligned to a musical beat (overrides startFrame for beat-synced transitions) */
+  beatAlignedFrame?: number;
 }
 
 /**
@@ -18,9 +20,11 @@ export const TransitionEffect: React.FC<TransitionEffectProps> = ({
   durationFrames = 8,
   startFrame,
   color = '#000000',
+  beatAlignedFrame,
 }) => {
   const frame = useCurrentFrame();
-  const localFrame = frame - startFrame;
+  const effectiveStart = beatAlignedFrame ?? startFrame;
+  const localFrame = frame - effectiveStart;
 
   if (type === 'cut' || localFrame < 0 || localFrame > durationFrames) return null;
 
@@ -103,6 +107,27 @@ function getTransitionStyle(
           : `inset(0 0 0 ${100 - clipPercent}%)`,
       };
     }
+
+    case 'beat-flash':
+      // Quick white flash on beat — 4 frames total
+      return {
+        backgroundColor: '#ffffff',
+        opacity: interpolate(localFrame, [0, 2, durationFrames], [0.8, 0.6, 0], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        }),
+      };
+
+    case 'beat-zoom':
+      // Scale punch on beat — starts slightly zoomed, snaps back
+      return {
+        backgroundColor: color,
+        opacity: interpolate(localFrame, [0, durationFrames / 3, durationFrames], [0.5, 0.3, 0], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        }),
+        transform: `scale(${interpolate(localFrame, [0, durationFrames], [1.15, 1.0])})`,
+      };
 
     default:
       return {};

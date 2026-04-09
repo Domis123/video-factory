@@ -12,6 +12,13 @@ export interface TemplateProps {
   logoPath: string | null;
   /** Pre-resolved local path for background music */
   musicPath: string | null;
+  /** Beat map from music track (for beat-synced transitions) */
+  beatMap?: {
+    tempo_bpm: number;
+    first_beat_offset: number;
+    beat_positions: number[];
+    duration: number;
+  } | null;
 }
 
 /** Computed segment with frame-level timing */

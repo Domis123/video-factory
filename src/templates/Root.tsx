@@ -11,6 +11,7 @@ const defaultProps = {
   transcriptions: {},
   logoPath: null,
   musicPath: null,
+  beatMap: null,
 };
 
 /**

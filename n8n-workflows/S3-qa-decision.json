@@ -1,0 +1,298 @@
+{
+  "name": "S3: QA Decision (Sheet → Supabase)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "seconds", "secondsInterval": 30 }]
+        }
+      },
+      "id": "s3-trigger",
+      "name": "Every 30s",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "options": {}
+      },
+      "id": "s3-read",
+      "name": "Read Jobs Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-656, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "status-human-qa",
+              "leftValue": "={{ $json['Status'] }}",
+              "rightValue": "human_qa",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "has-qa-decision",
+              "leftValue": "={{ $json['QA Decision'] }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "s3-filter",
+      "name": "Filter Pending QA",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json['QA Decision'] }}",
+              "rightValue": "approve",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s3-decision",
+      "name": "QA Approve or Reject?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-224, 112]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?id=eq.{{ $json['Job ID'] }}&status=eq.human_qa",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"delivered\",\n  \"qa_decision\": \"approve\",\n  \"qa_reviewed_by\": \"{{ $('Filter Pending QA').item.json['QA Reviewed By'] }}\",\n  \"completed_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {}
+      },
+      "id": "s3-approve",
+      "name": "QA Approve → delivered",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json['QA Issues'] }}",
+              "rightValue": "clip_quality",
+              "operator": { "type": "string", "operation": "contains" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s3-issue-type",
+      "name": "Content or Technical?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [0, 240],
+      "notes": "Content issues (clip_quality, wrong_clip) → re-plan. Technical issues (audio_sync, timing_off) → re-render."
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?id=eq.{{ $('Filter Pending QA').item.json['Job ID'] }}&status=eq.human_qa",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"planning\",\n  \"qa_decision\": \"reject\",\n  \"qa_notes\": \"{{ $('Filter Pending QA').item.json['QA Notes'] }}\",\n  \"qa_issues\": \"{{ $('Filter Pending QA').item.json['QA Issues'] }}\",\n  \"qa_reviewed_by\": \"{{ $('Filter Pending QA').item.json['QA Reviewed By'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s3-reject-plan",
+      "name": "Reject → planning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [224, 160],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?id=eq.{{ $('Filter Pending QA').item.json['Job ID'] }}&status=eq.human_qa",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"queued\",\n  \"qa_decision\": \"reject\",\n  \"qa_notes\": \"{{ $('Filter Pending QA').item.json['QA Notes'] }}\",\n  \"qa_issues\": \"{{ $('Filter Pending QA').item.json['QA Issues'] }}\",\n  \"qa_reviewed_by\": \"{{ $('Filter Pending QA').item.json['QA Reviewed By'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s3-reject-render",
+      "name": "Reject → queued",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [224, 340],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://95.216.137.35:3000/enqueue",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue\": \"rendering\",\n  \"jobId\": \"{{ $('Filter Pending QA').item.json['Job ID'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s3-enqueue-render",
+      "name": "Enqueue Re-render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [448, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://95.216.137.35:3000/enqueue",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue\": \"planning\",\n  \"jobId\": \"{{ $('Filter Pending QA').item.json['Job ID'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s3-enqueue-plan",
+      "name": "Enqueue Re-plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [448, 160]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Row Status": "OK",
+            "Status": "={{ $('Filter Pending QA').item.json['QA Decision'] === 'approve' ? 'delivered' : ($('Content or Technical?').item.json ? 'planning' : 'queued') }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s3-update-sheet",
+      "name": "Update Sheet Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [672, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30s": { "main": [[{ "node": "Read Jobs Sheet", "type": "main", "index": 0 }]] },
+    "Read Jobs Sheet": { "main": [[{ "node": "Filter Pending QA", "type": "main", "index": 0 }]] },
+    "Filter Pending QA": { "main": [[{ "node": "QA Approve or Reject?", "type": "main", "index": 0 }]] },
+    "QA Approve or Reject?": {
+      "main": [
+        [{ "node": "QA Approve → delivered", "type": "main", "index": 0 }],
+        [{ "node": "Content or Technical?", "type": "main", "index": 0 }]
+      ]
+    },
+    "QA Approve → delivered": { "main": [[{ "node": "Update Sheet Status", "type": "main", "index": 0 }]] },
+    "Content or Technical?": {
+      "main": [
+        [{ "node": "Reject → planning", "type": "main", "index": 0 }],
+        [{ "node": "Reject → queued", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reject → planning": { "main": [[{ "node": "Enqueue Re-plan", "type": "main", "index": 0 }]] },
+    "Reject → queued": { "main": [[{ "node": "Enqueue Re-render", "type": "main", "index": 0 }]] },
+    "Enqueue Re-plan": { "main": [[{ "node": "Update Sheet Status", "type": "main", "index": 0 }]] },
+    "Enqueue Re-render": { "main": [[{ "node": "Update Sheet Status", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

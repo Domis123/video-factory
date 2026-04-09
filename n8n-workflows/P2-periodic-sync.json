@@ -1,0 +1,96 @@
+{
+  "name": "P2: Periodic Sync Catch-up (Supabase → Sheet)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "p2-trigger",
+      "name": "Every 5min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?status=not.in.(delivered,failed)&order=updated_at.desc&limit=50",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p2-fetch",
+      "name": "Fetch Active Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-656, 112],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map all active jobs to Sheet format\nconst data = $input.first().json;\nconst jobs = Array.isArray(data) ? data : [data];\n\nif (!jobs.length || !jobs[0].id) return [];\n\nreturn jobs.map(job => {\n  const autoQa = job.auto_qa_passed === true ? 'PASSED' : \n                 job.auto_qa_passed === false ? 'FLAGGED' : '';\n  \n  return {\n    json: {\n      'Job ID': job.id,\n      'Brand': job.brand_id,\n      'Status': job.status,\n      'Brief Summary': job.brief_summary || '',\n      'Hook Text': job.hook_text || '',\n      'CTA Text': job.cta_text || '',\n      'Template': job.template_id || '',\n      'Preview URL': job.preview_url || '',\n      'Auto QA': autoQa,\n      'Video Type': job.video_type || '',\n      'Created At': job.created_at,\n      'Completed At': job.completed_at || '',\n      'Row Status': 'OK'\n    }\n  };\n});"
+      },
+      "id": "p2-map",
+      "name": "Map to Sheet Columns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["Job ID"]
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "p2-update-sheet",
+      "name": "Sync Jobs Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-224, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5min": { "main": [[{ "node": "Fetch Active Jobs", "type": "main", "index": 0 }]] },
+    "Fetch Active Jobs": { "main": [[{ "node": "Map to Sheet Columns", "type": "main", "index": 0 }]] },
+    "Map to Sheet Columns": { "main": [[{ "node": "Sync Jobs Sheet", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

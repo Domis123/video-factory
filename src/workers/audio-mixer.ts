@@ -36,10 +36,10 @@ export async function mixAudio(
   console.log(`[audio-mixer] Downloading music: ${musicSelection.r2_key}`);
   await downloadToFile(musicSelection.r2_key, musicLocalPath);
 
-  // Mix: UGC audio (full volume) + background music (ducked)
-  const volume = musicSelection.volume_level ?? 0.15;
-  console.log(`[audio-mixer] Mixing audio with music at volume ${volume}`);
-  await execOrThrow(buildAudioMixCommand(videoPath, musicLocalPath, outputPath, volume));
+  // Mix: UGC audio + background music with dynamic ducking
+  const volume = musicSelection.volume_level ?? 0.30;
+  console.log(`[audio-mixer] Mixing audio with music at volume ${volume} (ducking enabled)`);
+  await execOrThrow(buildAudioMixCommand(videoPath, musicLocalPath, outputPath, volume, { ducking: true }));
 
   console.log(`[audio-mixer] Audio mixed: ${outputPath}`);
   return {

@@ -1,0 +1,124 @@
+{
+  "name": "P4: Monthly Archive (Sheet → Sheet)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "p4-trigger",
+      "name": "1st of Month at 2am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112],
+      "notes": "Runs on the 1st of every month at 2:00 AM"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "options": {}
+      },
+      "id": "p4-read",
+      "name": "Read All Jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-656, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "is-terminal",
+              "leftValue": "={{ $json['Status'] }}",
+              "rightValue": "delivered",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "p4-filter",
+      "name": "Filter Delivered/Failed",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate archive sheet name from previous month\nconst now = new Date();\nconst prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);\nconst monthName = prevMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });\nconst sheetName = `Archive - ${monthName}`;\n\n// Filter only jobs from the previous month\nconst prevMonthStr = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`;\n\nconst items = $input.all();\nconst archiveItems = items.filter(item => {\n  const created = item.json['Created At'] || '';\n  return created.startsWith(prevMonthStr);\n});\n\nreturn archiveItems.map(item => ({\n  json: {\n    ...item.json,\n    _archiveSheetName: sheetName\n  }\n}));"
+      },
+      "id": "p4-filter-month",
+      "name": "Filter Previous Month",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-224, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": "={{ $json._archiveSheetName }}",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "p4-write-archive",
+      "name": "Write to Archive Tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [0, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      },
+      "notes": "n8n auto-creates the archive tab if it doesn't exist (e.g., 'Archive - March 2026')"
+    }
+  ],
+  "connections": {
+    "1st of Month at 2am": { "main": [[{ "node": "Read All Jobs", "type": "main", "index": 0 }]] },
+    "Read All Jobs": { "main": [[{ "node": "Filter Delivered/Failed", "type": "main", "index": 0 }]] },
+    "Filter Delivered/Failed": { "main": [[{ "node": "Filter Previous Month", "type": "main", "index": 0 }]] },
+    "Filter Previous Month": { "main": [[{ "node": "Write to Archive Tab", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

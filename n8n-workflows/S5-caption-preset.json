@@ -1,0 +1,151 @@
+{
+  "name": "S5: Caption Preset Update (Sheet → Supabase)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "s5-trigger",
+      "name": "Every 5min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Caption Presets",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "s5-read",
+      "name": "Read Caption Presets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-656, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-brand-id",
+              "leftValue": "={{ $json['Brand ID'] }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "s5-filter",
+      "name": "Filter Valid Rows",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reassemble flattened caption columns into nested JSONB\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const d = item.json;\n  \n  const captionPreset = {\n    preset_name: d['Preset Name'] || `${d['Brand ID']}_default`,\n    engine: 'remotion_caption_component',\n    style: {\n      font_family: d['Font Family'] || 'Inter',\n      font_size: parseInt(d['Font Size'] || '42'),\n      font_weight: parseInt(d['Font Weight'] || '700'),\n      text_color: d['Text Color'] || '#FFFFFF',\n      stroke_color: d['Stroke Color'] || '#000000',\n      stroke_width: parseInt(d['Stroke Width'] || '3'),\n      background: d['Background'] || 'none',\n      position: d['Position'] || 'bottom_center',\n      margin_bottom_px: parseInt(d['Margin Bottom'] || '160'),\n      max_width_percent: parseInt(d['Max Width %'] || '85'),\n      text_align: d['Text Align'] || 'center',\n      animation: {\n        type: d['Animation Type'] || 'word_by_word',\n        highlight_color: d['Highlight Color'] || '#FFFFFF',\n        highlight_style: d['Highlight Style'] || 'background_pill',\n        word_gap_ms: parseInt(d['Word Gap ms'] || '50')\n      },\n      shadow: {\n        color: d['Shadow Color'] || 'rgba(0,0,0,0.5)',\n        blur: parseInt(d['Shadow Blur'] || '4'),\n        offset_x: 0,\n        offset_y: 2\n      }\n    }\n  };\n  \n  results.push({\n    json: {\n      brand_id: d['Brand ID'],\n      caption_preset: captionPreset\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "s5-reassemble",
+      "name": "Reassemble JSONB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-224, 112]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/brand_configs?brand_id=eq.{{ $json.brand_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ caption_preset: $json.caption_preset }) }}",
+        "options": {}
+      },
+      "id": "s5-update-supa",
+      "name": "Update Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 112],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Caption Presets",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "Row Status": "OK" }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s5-write-ok",
+      "name": "Write OK",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [224, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5min": { "main": [[{ "node": "Read Caption Presets", "type": "main", "index": 0 }]] },
+    "Read Caption Presets": { "main": [[{ "node": "Filter Valid Rows", "type": "main", "index": 0 }]] },
+    "Filter Valid Rows": { "main": [[{ "node": "Reassemble JSONB", "type": "main", "index": 0 }]] },
+    "Reassemble JSONB": { "main": [[{ "node": "Update Supabase", "type": "main", "index": 0 }]] },
+    "Update Supabase": { "main": [[{ "node": "Write OK", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

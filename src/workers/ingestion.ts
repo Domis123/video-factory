@@ -8,6 +8,7 @@ import { uploadFile } from '../lib/r2-storage.js';
 import { buildProbeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow } from '../lib/exec.js';
 import { analyzeClip } from '../lib/gemini.js';
+import { analyzeClipMetadata } from '../lib/clip-analysis.js';
 import type { Asset } from '../types/database.js';
 
 export interface IngestionInput {
@@ -104,6 +105,11 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
     console.log(`[ingestion] Found ${analysis.usable_segments.length} usable segments`);
   }
 
+  // 2b. FFmpeg clip metadata (color, motion, brightness)
+  console.log(`[ingestion] Extracting visual metadata with FFmpeg...`);
+  const clipMeta = await analyzeClipMetadata(input.filePath);
+  console.log(`[ingestion] Color: ${clipMeta.dominant_color_hex}, Motion: ${clipMeta.motion_intensity}, Brightness: ${clipMeta.avg_brightness}, Cuts: ${clipMeta.scene_cuts}`);
+
   // 3. Upload to R2
   const stream = createReadStream(input.filePath);
   await uploadFile(r2Key, stream, 'video/mp4');
@@ -131,6 +137,10 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
     transcript_summary: analysis.transcript_summary,
     visual_elements: analysis.visual_elements,
     usable_segments: analysis.usable_segments,
+    dominant_color_hex: clipMeta.dominant_color_hex,
+    motion_intensity: clipMeta.motion_intensity,
+    avg_brightness: clipMeta.avg_brightness,
+    scene_cuts: clipMeta.scene_cuts,
     tags: allTags,
   };
 

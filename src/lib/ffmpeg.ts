@@ -51,8 +51,8 @@ export function buildNormalizeCommand(
       '-y',
       '-i', inputPath,
       '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,fps=${fps}`,
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
-      '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+      '-c:a', 'aac', '-b:a', '192k', '-ar', '44100',
       '-af', 'loudnorm=I=-14:LRA=11:TP=-1',
       '-movflags', '+faststart',
       outputPath,
@@ -82,21 +82,34 @@ export function buildAudioMixCommand(
   videoPath: string,
   musicPath: string,
   outputPath: string,
-  musicVolume: number = 0.15,
+  musicVolume: number = 0.30,
+  opts: { ducking?: boolean } = {},
 ): FfCommand {
+  const { ducking = true } = opts;
+
+  // Dynamic audio ducking: music dips under speech, rises in silent gaps.
+  // Sidechain compressor uses UGC audio as the key signal.
+  // Attack 50ms (fast duck), release 300ms (natural return).
+  const filterComplex = ducking
+    ? [
+        `[1:a]volume=${musicVolume}[music]`,
+        `[0:a]agate=threshold=0.01:attack=5:release=50[gate]`,
+        `[music][gate]sidechaincompress=threshold=0.02:ratio=6:attack=50:release=300[ducked]`,
+        `[0:a][ducked]amix=inputs=2:duration=first[out]`,
+      ].join(';')
+    : `[0:a]volume=1.0[ugc];[1:a]volume=${musicVolume}[music];[ugc][music]amix=inputs=2:duration=first[out]`;
+
   return {
     command: 'ffmpeg',
     args: [
       '-y',
       '-i', videoPath,
       '-i', musicPath,
-      '-filter_complex',
-      `[0:a]volume=1.0[ugc];[1:a]volume=${musicVolume}[music];[ugc][music]amix=inputs=2:duration=first[out]`,
+      '-filter_complex', filterComplex,
       '-map', '0:v',
       '-map', '[out]',
       '-c:v', 'copy',
       '-c:a', 'aac', '-b:a', '192k',
-      '-af', 'loudnorm=I=-14:LRA=11:TP=-1',
       '-movflags', '+faststart',
       outputPath,
     ],
@@ -122,11 +135,10 @@ export function buildExportCommand(
     args: [
       '-y',
       '-i', inputPath,
-      '-c:v', 'libx264', '-preset', 'slow', '-b:v', maxBitrate,
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
       '-maxrate', maxBitrate, '-bufsize', `${parseInt(maxBitrate) * 2}M`,
       '-c:a', 'aac', '-b:a', '192k',
       '-movflags', '+faststart',
-      '-t', '60',
       outputPath,
     ],
   };

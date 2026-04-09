@@ -59,6 +59,9 @@ const mockBrand: BrandConfig = {
   voice_guidelines: 'Warm, encouraging, fitness-positive.',
   hook_style_preference: ['pov', 'question', 'challenge'],
   content_pillars: ['pilates', 'flexibility', 'wellness'],
+  allowed_video_types: ['workout-demo', 'tips-listicle', 'transformation'],
+  color_grade_preset: 'warm-vibrant',
+  color_lut_r2_key: null,
   drive_input_folder_id: null,
   drive_output_folder_id: null,
   active: true,
@@ -175,14 +178,33 @@ async function main() {
     .order('created_at', { ascending: true });
   assert('13 events logged', (events?.length ?? 0) === 13, `got ${events?.length}`);
 
-  // ── Test 5: Renderer Module Imports ──
-  console.log('\n── 5. Renderer Module Verification ──');
+  // ── Test 5: Worker Module Imports ──
+  console.log('\n── 5. Worker Module Verification ──');
   const renderer = await import('../workers/renderer.js');
   assert('renderVideo function exists', typeof renderer.renderVideo === 'function');
 
   const pipeline = await import('../workers/pipeline.js');
   assert('runPlanning function exists', typeof pipeline.runPlanning === 'function');
   assert('runRenderPipeline function exists', typeof pipeline.runRenderPipeline === 'function');
+
+  const clipPrep = await import('../workers/clip-prep.js');
+  assert('prepareClips function exists', typeof clipPrep.prepareClips === 'function');
+
+  const transcriber = await import('../workers/transcriber.js');
+  assert('transcribeAll function exists', typeof transcriber.transcribeAll === 'function');
+
+  const audioMixer = await import('../workers/audio-mixer.js');
+  assert('mixAudio function exists', typeof audioMixer.mixAudio === 'function');
+
+  const syncChecker = await import('../workers/sync-checker.js');
+  assert('checkSync function exists', typeof syncChecker.checkSync === 'function');
+
+  const exporter = await import('../workers/exporter.js');
+  assert('exportPlatforms function exists', typeof exporter.exportPlatforms === 'function');
+
+  const qaChecker = await import('../workers/qa-checker.js');
+  assert('runQAChecks function exists', typeof qaChecker.runQAChecks === 'function');
+  assert('allChecksPassed function exists', typeof qaChecker.allChecksPassed === 'function');
 
   // ── Test 6: Temp Directory Management ──
   console.log('\n── 6. Temp Directory Management ──');

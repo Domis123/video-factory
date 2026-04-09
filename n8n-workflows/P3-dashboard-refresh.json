@@ -1,0 +1,187 @@
+{
+  "name": "P3: Dashboard Refresh (Supabase → Sheet)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "p3-trigger",
+      "name": "Every 5min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/v_brand_stats?select=*",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p3-fetch-stats",
+      "name": "Fetch Brand Stats",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-656, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/brand_configs?select=brand_id,brand_name&active=eq.true",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p3-fetch-brands",
+      "name": "Fetch Brand Names",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-656, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?select=brand_id,status&status=not.in.(delivered,failed)",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p3-fetch-active",
+      "name": "Fetch In-Progress Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-656, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge stats, brand names, and in-progress counts\nconst stats = $('Fetch Brand Stats').first().json;\nconst brands = $('Fetch Brand Names').first().json;\nconst activeJobs = $('Fetch In-Progress Jobs').first().json;\n\nconst statsArr = Array.isArray(stats) ? stats : [stats];\nconst brandsArr = Array.isArray(brands) ? brands : [brands];\nconst activeArr = Array.isArray(activeJobs) ? activeJobs : [activeJobs];\n\nconst brandNameMap = {};\nfor (const b of brandsArr) {\n  if (b.brand_id) brandNameMap[b.brand_id] = b.brand_name;\n}\n\nconst inProgressMap = {};\nfor (const j of activeArr) {\n  if (j.brand_id) inProgressMap[j.brand_id] = (inProgressMap[j.brand_id] || 0) + 1;\n}\n\nconst now = new Date().toISOString();\n\nreturn statsArr.filter(s => s.brand_id).map(s => ({\n  json: {\n    'Brand ID': s.brand_id,\n    'Brand Name': brandNameMap[s.brand_id] || s.brand_id,\n    'Total Jobs': s.total_jobs || 0,\n    'Delivered': s.delivered || 0,\n    'Failed': s.failed || 0,\n    'In Progress': inProgressMap[s.brand_id] || 0,\n    'Avg Turnaround (hrs)': s.avg_turnaround_seconds ? (s.avg_turnaround_seconds / 3600).toFixed(1) : '—',\n    'Last Updated': now\n  }\n}));"
+      },
+      "id": "p3-build",
+      "name": "Build Dashboard Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-336, 200]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "clear",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Dashboard",
+          "mode": "name"
+        },
+        "clear": "exceptFirstRow",
+        "options": {}
+      },
+      "id": "p3-clear",
+      "name": "Clear Dashboard",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-112, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Dashboard",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "p3-write",
+      "name": "Write Dashboard Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [112, 200],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5min": {
+      "main": [
+        [
+          { "node": "Fetch Brand Stats", "type": "main", "index": 0 },
+          { "node": "Fetch Brand Names", "type": "main", "index": 0 },
+          { "node": "Fetch In-Progress Jobs", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Brand Stats": { "main": [[{ "node": "Build Dashboard Data", "type": "main", "index": 0 }]] },
+    "Fetch Brand Names": { "main": [[{ "node": "Build Dashboard Data", "type": "main", "index": 0 }]] },
+    "Fetch In-Progress Jobs": { "main": [[{ "node": "Build Dashboard Data", "type": "main", "index": 0 }]] },
+    "Build Dashboard Data": { "main": [[{ "node": "Clear Dashboard", "type": "main", "index": 0 }]] },
+    "Clear Dashboard": { "main": [[{ "node": "Write Dashboard Rows", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

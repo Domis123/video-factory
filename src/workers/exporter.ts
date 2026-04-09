@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { stat } from 'node:fs/promises';
+import { stat, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { env } from '../config/env.js';
 import { uploadFile } from '../lib/r2-storage.js';
@@ -29,6 +29,7 @@ export async function exportPlatforms(
   slug: string,
 ): Promise<ExportResult> {
   const workDir = join(env.RENDER_TEMP_DIR, jobId, 'exports');
+  await mkdir(workDir, { recursive: true });
   const date = new Date().toISOString().slice(0, 10);
   const month = date.slice(0, 7);
 

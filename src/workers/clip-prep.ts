@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 import { downloadToFile } from '../lib/r2-storage.js';
 import { buildTrimCommand, buildNormalizeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow } from '../lib/exec.js';
+import { buildGradingFilter, type ColorPreset } from '../lib/color-grading.js';
 import type { ContextPacket } from '../types/database.js';
 
 export interface ClipPrepResult {
@@ -20,9 +21,19 @@ export interface PreparedClip {
   trimEnd: number;
 }
 
+export interface ClipPrepOptions {
+  /** Local path to downloaded .cube LUT file (null = no LUT) */
+  lutPath?: string | null;
+  /** Brand color grade preset */
+  colorPreset?: ColorPreset | null;
+  /** Per-asset brightness values from ingestion (keyed by r2_key) */
+  assetBrightness?: Record<string, number>;
+}
+
 export async function prepareClips(
   jobId: string,
   contextPacket: ContextPacket,
+  options: ClipPrepOptions = {},
 ): Promise<ClipPrepResult> {
   const workDir = join(env.RENDER_TEMP_DIR, jobId);
   const rawDir = join(workDir, 'raw');
@@ -60,6 +71,30 @@ export async function prepareClips(
       const inputForNorm = clip.trim ? trimmedPath : rawPath;
       console.log(`[clip-prep] Normalizing to 1080x1920 30fps`);
       await execOrThrow(buildNormalizeCommand(inputForNorm, normalizedPath));
+
+      // 4. Color grading (auto-level + brand LUT or preset)
+      if (options.colorPreset || options.lutPath) {
+        const gradedPath = join(clipsDir, `seg${sel.segment_id}${suffix}_graded.mp4`);
+        const gradingFilter = buildGradingFilter({
+          preset: options.colorPreset ?? null,
+          lutPath: options.lutPath ?? null,
+          avgBrightness: options.assetBrightness?.[clip.r2_key] ?? null,
+        });
+        console.log(`[clip-prep] Color grading: ${options.lutPath ? 'LUT' : options.colorPreset}`);
+        await execOrThrow({
+          command: 'ffmpeg',
+          args: [
+            '-y', '-i', normalizedPath,
+            '-vf', gradingFilter,
+            '-c:v', 'libx264', '-preset', 'slow', '-crf', '18',
+            '-c:a', 'copy',
+            '-movflags', '+faststart',
+            gradedPath,
+          ],
+        });
+        // Replace normalized with graded
+        await execOrThrow({ command: 'mv', args: [gradedPath, normalizedPath] });
+      }
 
       preparedClips.push({
         segmentId: sel.segment_id,

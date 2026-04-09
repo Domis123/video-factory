@@ -1,0 +1,97 @@
+{
+  "name": "P1: Job Status Push (Supabase → Sheet)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "job-status-update",
+        "options": {}
+      },
+      "id": "p1-webhook",
+      "name": "Webhook: Job Updated",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-880, 112],
+      "notes": "Called by VPS worker after each state transition. POST body: { jobId, status, ... }"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?id=eq.{{ $json.body.jobId }}&select=*",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "p1-fetch",
+      "name": "Fetch Job from Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-656, 112],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Map Supabase job to Sheet columns\nconst job = $input.first().json[0] || $input.first().json;\n\nconst autoQa = job.auto_qa_passed === true ? 'PASSED' : \n               job.auto_qa_passed === false ? 'FLAGGED' : '';\n\nlet autoQaDetails = '';\nif (job.auto_qa_results) {\n  const failed = Object.entries(job.auto_qa_results)\n    .filter(([k, v]) => !v.passed)\n    .map(([k, v]) => `${k}: ${v.details}`);\n  if (failed.length > 0) autoQaDetails = ` (${failed.join('; ')})`;\n}\n\nreturn [{\n  json: {\n    'Job ID': job.id,\n    'Status': job.status,\n    'Brief Summary': job.brief_summary || '',\n    'Hook Text': job.hook_text || '',\n    'CTA Text': job.cta_text || '',\n    'Template': job.template_id || '',\n    'Preview URL': job.preview_url || '',\n    'Auto QA': autoQa + autoQaDetails,\n    'Video Type': job.video_type || '',\n    'Created At': job.created_at,\n    'Completed At': job.completed_at || '',\n    'Row Status': 'OK'\n  }\n}];"
+      },
+      "id": "p1-map",
+      "name": "Map to Sheet Columns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["Job ID"]
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "p1-update-sheet",
+      "name": "Update Jobs Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-224, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: Job Updated": { "main": [[{ "node": "Fetch Job from Supabase", "type": "main", "index": 0 }]] },
+    "Fetch Job from Supabase": { "main": [[{ "node": "Map to Sheet Columns", "type": "main", "index": 0 }]] },
+    "Map to Sheet Columns": { "main": [[{ "node": "Update Jobs Sheet", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

@@ -31,6 +31,10 @@ export function createWorker<T = unknown>(
   return new Worker<T>(name, processor, {
     connection: new Redis(redisOpts),
     concurrency: env.WORKER_CONCURRENCY,
+    // Slow idle polling to stay within Upstash free tier (500K cmds/mo).
+    // Default is ~2s which burns ~777K cmds/day with 3 workers doing nothing.
+    // 30s drainDelay = ~26K cmds/day idle → fits comfortably in free tier.
+    drainDelay: 30,
     ...opts,
   });
 }

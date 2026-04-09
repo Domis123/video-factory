@@ -11,6 +11,7 @@
     "test:agents": "tsx src/scripts/test-agents.ts",
     "test:agents:live": "tsx src/scripts/test-agents-live.ts",
     "test:phase5": "tsx src/scripts/test-phase5.ts",
+    "test:quality": "tsx src/scripts/test-quality-upgrade.ts",
     "start": "tsx src/index.ts",
     "start:prod": "node dist/index.js"
   },

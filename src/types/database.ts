@@ -40,6 +40,9 @@ export interface BrandConfig {
   voice_guidelines: string | null;
   hook_style_preference: string[];
   content_pillars: string[];
+  allowed_video_types: string[];
+  color_grade_preset: string | null;
+  color_lut_r2_key: string | null;
   drive_input_folder_id: string | null;
   drive_output_folder_id: string | null;
   active: boolean;
@@ -65,6 +68,10 @@ export interface Asset {
   transcript_summary: string | null;
   visual_elements: string[];
   usable_segments: UsableSegment[];
+  dominant_color_hex: string | null;
+  motion_intensity: string | null;
+  avg_brightness: number | null;
+  scene_cuts: number | null;
   tags: string[];
   used_count: number;
   last_used_at: string | null;
@@ -81,6 +88,7 @@ export interface Job {
   brief_summary: string | null;
   hook_text: string | null;
   cta_text: string | null;
+  video_type: string | null;
   template_id: string | null;
   clip_selections: ClipSelectionList | null;
   copy_package: CopyPackage | null;
@@ -182,6 +190,12 @@ export interface ContextPacket {
     track_id: string;
     r2_key: string;
     volume_level: number;
+    beat_map?: {
+      tempo_bpm: number;
+      first_beat_offset: number;
+      beat_positions: number[];
+      duration: number;
+    };
   } | null;
   created_at: string;
 }
@@ -191,6 +205,7 @@ export interface ContextPacket {
 export interface CreativeBrief {
   brief_id: string;
   brand_id: string;
+  video_type: string;
   template_id: string;
   total_duration_target: number;
   segments: BriefSegment[];
@@ -207,7 +222,10 @@ export interface CreativeBrief {
 export interface BriefSegment {
   segment_id: number;
   type: 'hook' | 'body' | 'cta';
+  label?: string;
   duration_target: number;
+  energy_level?: number;
+  pacing?: 'slow' | 'medium' | 'fast';
   clip_requirements: {
     content_type: string[];
     mood: string | string[];

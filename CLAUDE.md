@@ -7,6 +7,7 @@ A 95% automated video production pipeline for 30 social media brands. Takes raw 
 - `VIDEO_PIPELINE_ARCHITECTURE_v2.md` — Full architecture, database schemas, workflow definitions, state machine
 - `CURSOR_AGENT_BUILD_GUIDE.md` — Build guide with file structure, dependencies, access patterns
 - `BUILD_PLAN.md` — Phased build plan (foundation → workers → agents → templates → integration)
+- `QUALITY_UPGRADE_PLAN.md` — 9-phase video quality upgrade plan (video types, beat sync, color grading, audio ducking, encoding, music selection)
 - `env.video-factory` — All credentials (Supabase, Redis, R2). Copy to `.env` for local dev.
 
 ## Architecture Rules (MUST follow)
@@ -52,8 +53,8 @@ Terminal states: DELIVERED, FAILED. Rejection loops exist at BRIEF_REVIEW and HU
 ```
 src/
 ├── config/          — env.ts, supabase.ts, redis.ts, r2.ts
-├── types/           — database.ts (all DB + Context Packet types)
-├── lib/             — job-manager.ts, r2-storage.ts, ffmpeg.ts, exec.ts, gemini.ts
+├── types/           — database.ts (all DB + Context Packet types), video-types.ts (VideoType configs)
+├── lib/             — job-manager.ts, r2-storage.ts, ffmpeg.ts, exec.ts, gemini.ts, video-type-selector.ts, clip-analysis.ts, beat-detector.ts, color-grading.ts, music-selector.ts, template-config-builder.ts
 ├── workers/         — ingestion, clip-prep, transcriber, audio-mixer, sync-checker, exporter, qa-checker, renderer, pipeline
 ├── agents/
 │   ├── prompts/     — creative-director.md, asset-curator.md, copywriter.md
@@ -64,8 +65,20 @@ src/
 │   ├── Root.tsx     — Remotion composition registry
 │   ├── components/  — CaptionTrack, HookText, CTAScreen, LogoWatermark, TransitionEffect, SegmentVideo
 │   └── layouts/     — HookDemoCTA, HookListicleCTA, HookTransformation
-├── index.ts         — Server entry point (starts all BullMQ workers)
+├── index.ts         — Server entry point (BullMQ workers + HTTP API on port 3000)
 └── scripts/         — test-connectivity, test-pipeline, test-agents, test-agents-live, test-gemini, test-phase5, create-r2-structure, migrate.sql
+
+n8n-workflows/       — Importable n8n workflow JSONs (10 total)
+├── S1-new-job.json          — New job from Sheet → Supabase (30s poll)
+├── S2-brief-review.json     — Brief approve/reject → Supabase + BullMQ (30s poll)
+├── S3-qa-decision.json      — QA approve/reject → Supabase (30s poll)
+├── S4-brand-config.json     — Brand edits → Supabase with validation (5min poll)
+├── S5-caption-preset.json   — Caption preset → reassemble JSONB → Supabase (5min poll)
+├── S6-music-track.json      — New music tracks → Supabase (5min poll)
+├── P1-job-status-push.json  — Webhook: Supabase → Sheet (event-driven)
+├── P2-periodic-sync.json    — Active jobs Supabase → Sheet (5min catch-up)
+├── P3-dashboard-refresh.json — Brand stats → Dashboard tab (5min)
+└── P4-monthly-archive.json  — Archive delivered/failed jobs (1st of month)
 ```
 
 ## Google Sheets Admin Panel ("Video Factory Control Panel")
@@ -89,8 +102,9 @@ npm run build              # TypeScript compilation
 npm run test:connectivity  # Verify Supabase + Redis + R2
 npm run setup:r2           # Initialize R2 folder structure
 npm run test:pipeline      # Full integration test (FFprobe, FFmpeg, ingestion, job manager, QA)
-npm run test:agents        # AI agents mock mode test (28 checks)
+npm run test:agents        # AI agents mock mode test (30 checks)
 npm run test:agents:live   # AI agents live test with Claude Sonnet API (27 checks)
+npm run test:quality       # Quality upgrade modules test (41 checks)
 npm run test:phase5        # Phase 5 integration test (28 checks: queues, lifecycle, renderer)
 npm start                  # Start all BullMQ workers (dev mode via tsx)
 npm run start:prod         # Start workers in production (compiled JS)
@@ -211,10 +225,10 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
   - `npm run build` compiles cleanly
 - Phase 5A (Renderer + Server): DEPLOYED AND RUNNING
   - renderer.ts — Remotion render orchestration (download clips → bundle → render → upload to R2)
-  - pipeline.ts — Full job lifecycle: planning (3 AI agents) + render pipeline (clip-prep → transcription → rendering → audio-mix → sync-check → export → QA)
+  - pipeline.ts — Full job lifecycle: planning (3 AI agents) + render pipeline (clip-prep → transcription → rendering → audio-mix → sync-check → export → QA). **All workers fully wired** — no stubs remaining.
   - index.ts — Server entry point, starts 3 BullMQ workers (planning, rendering, ingestion), graceful shutdown on SIGINT/SIGTERM
   - scripts/setup-vps.sh — Automated VPS setup (Node 20, FFmpeg, whisper.cpp, Chromium, systemd service)
-  - **Phase 5 test: 28/28 passed locally + 28/28 on VPS**
+  - **Phase 5 test: 36/36 passed locally** (includes 8 worker module import verifications)
   - **Live API test: 27/27 on VPS** (Claude Sonnet generating real briefs/copy from server)
   - **Connectivity: 5/5 on VPS** (Supabase 5 brands, Redis PONG, R2 PUT/GET/DELETE)
   - VPS deployed: Hetzner CX22 (2 vCPU, 4GB RAM) at 95.216.137.35
@@ -222,6 +236,52 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
   - Worker listening on all 4 queues: ingestion, planning, rendering, export
   - Memory usage: ~142MB (plenty of headroom)
   - GitHub repo: https://github.com/Domis123/video-factory (deploy via `git pull && npm install`)
-- Phase 5B (Google Sheets): NEEDS MANUAL SETUP — create spreadsheet + configure tabs
-- Phase 5C (n8n Workflows): NEEDS MANUAL SETUP — 10 workflows in n8n UI
-- Phase 5D (End-to-end test): PENDING — needs real UGC clips ingested
+- Phase 5B (Google Sheets): READY — setup guide in `SHEETS_SETUP.md`, 6 tabs with exact columns, dropdowns, and formatting
+- Phase 5C (n8n Workflows): READY — 10 importable JSON workflows in `n8n-workflows/`
+  - S1-S6: Sheet→Supabase (new job, brief review, QA decision, brand config, caption preset, music track)
+  - P1-P4: Supabase→Sheet (job status push via webhook, periodic sync, dashboard refresh, monthly archive)
+  - HTTP API added to index.ts: `POST /enqueue` (for n8n to trigger BullMQ jobs), `GET /health`
+  - API_PORT configurable via env (default 3000)
+- Phase 5D (End-to-end test): PENDING — needs Sheets created + n8n workflows imported + real UGC clips
+- Quality Phase 0 (Video Type Matrix): COMPLETE
+  - `src/types/video-types.ts` — VideoType enum, VideoTypeConfig interface, VIDEO_TYPE_CONFIGS map for 4 types (workout-demo, recipe-walkthrough, tips-listicle, transformation)
+  - `src/lib/video-type-selector.ts` — keyword-based video type selection from brand_id + idea_seed
+  - `src/types/database.ts` — added `allowed_video_types` to BrandConfig, `video_type` to Job/CreativeBrief, `energy_level`/`pacing`/`label` to BriefSegment
+  - `src/agents/prompts/creative-director.md` — rewritten: video type profiles replace generic 8-template catalog, agent follows pacing/energy profiles
+  - `src/agents/creative-director.ts` — passes video type config to Claude, normalizes video_type/energy_level/pacing, validates against brand's allowed types
+  - `src/agents/context-packet.ts` — stores video_type in job record
+  - BRAND_VIDEO_TYPES map: nordpilates (workout/tips/transformation), ketoway/carnimeat (recipe/tips), nodiet (tips/transformation), highdiet (workout/tips/transformation)
+  - `npm run build` compiles cleanly
+- Quality Phase 1 (Ingestion Enrichment): COMPLETE
+  - `src/lib/clip-analysis.ts` — FFmpeg-based clip analysis: dominant color (YUV→RGB from signalstats), motion intensity (scene change detection), average brightness (YAVG)
+  - `src/workers/ingestion.ts` — calls `analyzeClipMetadata()` after Gemini, stores 4 new fields in assets table
+  - `src/types/database.ts` — Asset: `dominant_color_hex`, `motion_intensity`, `avg_brightness`, `scene_cuts`
+  - `src/agents/prompts/asset-curator.md` — updated: color continuity, motion matching, brightness consistency in selection criteria
+- Quality Phase 2 (Beat-Synced Transitions): COMPLETE
+  - `src/lib/beat-detector.ts` — BeatMap type, `buildBeatMap()` from tempo_bpm + silence detection, `snapToNearestBeat()`, `snapFrameToNearestBeat()`
+  - `src/templates/components/TransitionEffect.tsx` — added `beat-flash` and `beat-zoom` transition types, `beatAlignedFrame` prop
+  - `src/templates/types.ts` — added `beatMap` to TemplateProps
+  - `src/workers/renderer.ts` — passes beat_map from context packet to Remotion
+  - `src/types/database.ts` — added `beat_map` to music_selection in ContextPacket
+- Quality Phase 3 (Audio Ducking): COMPLETE
+  - `src/lib/ffmpeg.ts` — `buildAudioMixCommand` rewritten: sidechain compressor (attack 50ms, release 300ms, ratio 6:1), base volume 0.30
+  - `src/workers/audio-mixer.ts` — ducking enabled by default
+- Quality Phase 4 (Encoding Upgrade): COMPLETE
+  - `src/lib/ffmpeg.ts` — `buildNormalizeCommand`: CRF 23→18, preset medium→slow, audio 128k→192k
+  - `src/lib/ffmpeg.ts` — `buildExportCommand`: CRF 18 + slow, removed `-t 60` hard truncation
+- Quality Phase 5 (Color Grading): COMPLETE
+  - `src/lib/color-grading.ts` — 3-step pipeline: auto-level (brightness-adaptive), brand LUT (.cube), preset fallback (warm-vibrant, cool-clean, neutral, high-contrast)
+  - `src/workers/clip-prep.ts` — color grading step after normalize, configurable via ClipPrepOptions
+  - `src/types/database.ts` — BrandConfig: `color_grade_preset`, `color_lut_r2_key`
+- Quality Phase 6 (Music Selection): COMPLETE
+  - `src/lib/music-selector.ts` — mood + energy range query, weighted random (1/(used_count+1)), fallback to any-mood tracks
+  - `src/agents/context-packet.ts` — calls music selector using video type's energy range, populates music_selection
+- Quality Phase 7 (Dynamic Pacing): COMPLETE
+  - `src/lib/template-config-builder.ts` — per-segment transition timing, animation speeds, clip hold durations from energy curve + beat map
+  - `src/agents/context-packet.ts` — builds template_config after agents run (replaces empty `{}`)
+- Redis Optimization: drainDelay 30s added to BullMQ workers (idle polling 777K→26K cmds/day)
+- DB Migration: `src/scripts/migrate-quality-upgrade.sql` — applied to Supabase (2026-04-07)
+- Quality Upgrade Tests: `npm run test:quality` — **41/41 passed**
+- Mock Agent Tests: `npm run test:agents` — **30/30 passed** (video types, energy, pacing)
+- Live API Tests: `npm run test:agents:live` — **27/27 passed** (Claude Sonnet generating real briefs with video type system)
+- **Total tests: 98/98** (30 mock + 41 quality + 27 live)

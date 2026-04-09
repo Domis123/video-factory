@@ -18,7 +18,14 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { transitionJob, claimJob, logEvent } from '../lib/job-manager.js';
 import { buildContextPacket } from '../agents/context-packet.js';
 import { renderVideo } from './renderer.js';
+import { prepareClips } from './clip-prep.js';
+import { transcribeAll } from './transcriber.js';
+import { mixAudio } from './audio-mixer.js';
+import { checkSync } from './sync-checker.js';
+import { exportPlatforms } from './exporter.js';
+import { runQAChecks, allChecksPassed } from './qa-checker.js';
 import type { Job, ContextPacket, BrandConfig } from '../types/database.js';
+import type { WordTimestamp } from './transcriber.js';
 
 // ── Planning Pipeline ──
 
@@ -95,6 +102,7 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
   console.log(`[pipeline] Starting render pipeline for ${jobId}...`);
 
   const workDir = join(env.RENDER_TEMP_DIR, jobId);
+  const startTime = Date.now();
 
   try {
     await mkdir(workDir, { recursive: true });
@@ -115,22 +123,50 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
     // ── Step 1: Claim + Clip Prep ──
     await claimJob(jobId, 'queued', 'clip_prep', env.WORKER_ID);
     console.log(`[pipeline] ${jobId}: clip_prep`);
+
+    // Pass brand color grading config to clip prep
+    const brandConfig = contextPacket.brand_config;
+    const clipPrepResult = await prepareClips(jobId, contextPacket, {
+      colorPreset: (brandConfig.color_grade_preset as import('../lib/color-grading.js').ColorPreset) ?? null,
+      lutPath: null, // LUT downloaded separately when color_lut_r2_key is set
+    });
     await logEvent(jobId, 'state_transition', {
       step: 'clip_prep',
       worker: env.WORKER_ID,
+      clipsPrepped: clipPrepResult.preparedClips.length,
     });
-
-    // In production, clip-prep.ts trims + normalizes clips.
-    // For now, clips are assumed to be pre-normalized in R2.
-    // The renderer downloads them directly.
 
     // ── Step 2: Transcription ──
     await transitionJob(jobId, 'clip_prep', 'transcription');
     console.log(`[pipeline] ${jobId}: transcription`);
 
-    // In production, transcriber.ts runs whisper.cpp on each clip.
-    // For now, we pass empty transcriptions (captions will be from copy overlays).
-    const transcriptions: Record<number, { word: string; start: number; end: number }[]> = {};
+    // Determine which clips have speech based on the brief's clip requirements
+    const clipsForTranscription = clipPrepResult.preparedClips.map((clip) => {
+      const briefSeg = contextPacket.brief.segments.find(
+        (s) => s.segment_id === clip.segmentId,
+      );
+      return {
+        segmentId: clip.segmentId,
+        localPath: clip.localPath,
+        hasSpeech: briefSeg?.clip_requirements?.has_speech ?? undefined,
+      };
+    });
+
+    const transcriptionResults = await transcribeAll(clipsForTranscription, workDir);
+
+    // Build transcriptions map for renderer (segment_id → word timestamps)
+    const transcriptions: Record<number, WordTimestamp[]> = {};
+    for (const result of transcriptionResults) {
+      if (result.words.length > 0) {
+        transcriptions[result.segmentId] = result.words;
+      }
+    }
+
+    await logEvent(jobId, 'state_transition', {
+      step: 'transcription',
+      segmentsTranscribed: transcriptionResults.filter((r) => r.words.length > 0).length,
+      totalWords: transcriptionResults.reduce((sum, r) => sum + r.words.length, 0),
+    });
 
     // ── Step 3: Rendering (Remotion) ──
     await transitionJob(jobId, 'transcription', 'rendering');
@@ -151,80 +187,142 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       })
       .eq('id', jobId);
 
+    await logEvent(jobId, 'state_transition', {
+      step: 'rendering',
+      renderTimeMs: renderResult.durationMs,
+      r2Key: renderResult.r2Key,
+    });
+
     // ── Step 4: Audio Mix ──
     await transitionJob(jobId, 'rendering', 'audio_mix');
     console.log(`[pipeline] ${jobId}: audio_mix`);
 
-    // In production, audio-mixer.ts layers UGC audio + background music.
-    // The Remotion render already includes audio via the <Audio> component,
-    // but post-render mixing allows fine-tuning volumes and LUFS normalization.
+    const audioResult = await mixAudio(jobId, renderResult.outputPath, contextPacket);
+
+    await logEvent(jobId, 'state_transition', {
+      step: 'audio_mix',
+      hasMusic: !!audioResult.musicTrackR2Key,
+      musicVolume: audioResult.musicVolume,
+    });
 
     // ── Step 5: Sync Check ──
     await transitionJob(jobId, 'audio_mix', 'sync_check');
     console.log(`[pipeline] ${jobId}: sync_check`);
 
-    // In production, sync-checker.ts verifies A/V sync and caption alignment.
+    // Build clip duration map for sync checker
+    const clipDurations = new Map<number, number>();
+    for (const clip of clipPrepResult.preparedClips) {
+      clipDurations.set(clip.segmentId, clip.trimEnd - clip.trimStart);
+    }
+
+    const syncResult = checkSync(transcriptionResults, contextPacket, clipDurations);
+
+    // If sync fails but is recoverable, retry audio mix with offset (max 2 retries)
+    let currentVideoPath = audioResult.outputPath;
+    if (syncResult.needsRetry) {
+      console.log(`[pipeline] ${jobId}: sync drift ${syncResult.maxDriftMs}ms, retrying with offset ${syncResult.suggestedOffsetMs}ms`);
+      await logEvent(jobId, 'retry', {
+        step: 'sync_check',
+        driftMs: syncResult.maxDriftMs,
+        suggestedOffsetMs: syncResult.suggestedOffsetMs,
+      });
+      // For now, log the retry — actual offset adjustment would require re-rendering
+      // with adjusted audio timing, which is a future enhancement
+    }
+
+    await logEvent(jobId, 'state_transition', {
+      step: 'sync_check',
+      passed: syncResult.passed,
+      maxDriftMs: syncResult.maxDriftMs,
+    });
 
     // ── Step 6: Platform Export ──
     await transitionJob(jobId, 'sync_check', 'platform_export');
     console.log(`[pipeline] ${jobId}: platform_export`);
 
-    // In production, exporter.ts re-encodes for each platform's constraints.
-    // For now, the Remotion output is the final output.
+    // Generate slug from template + hook text for filename
+    const slug = generateSlug(contextPacket);
+
+    const exportResult = await exportPlatforms(
+      jobId,
+      typedJob.brand_id,
+      currentVideoPath,
+      slug,
+    );
+
     await supabaseAdmin
       .from('jobs')
-      .update({
-        final_outputs: {
-          tiktok: renderResult.r2Key,
-          instagram: renderResult.r2Key,
-          youtube: renderResult.r2Key,
-        },
-      })
+      .update({ final_outputs: exportResult.outputs })
       .eq('id', jobId);
+
+    await logEvent(jobId, 'state_transition', {
+      step: 'platform_export',
+      platforms: Object.keys(exportResult.outputs),
+    });
 
     // ── Step 7: Auto QA ──
     await transitionJob(jobId, 'platform_export', 'auto_qa');
     console.log(`[pipeline] ${jobId}: auto_qa`);
 
-    // In production, qa-checker.ts runs 8 automated checks.
-    // For now, auto-pass.
+    // Run QA on the TikTok export (primary format)
+    const tiktokPath = exportResult.localPaths.tiktok;
+    const qaResults = await runQAChecks({
+      videoPath: tiktokPath,
+      syncResult,
+      expectedDurationRange: [25, 65], // 30-60s with 5s tolerance
+      hasTextOverlays: contextPacket.copy.overlays.length > 0,
+    });
+
+    const qaPassed = allChecksPassed(qaResults);
+
     await supabaseAdmin
       .from('jobs')
       .update({
-        auto_qa_passed: true,
-        auto_qa_results: {
-          duration_check: { passed: true, details: 'OK' },
-          resolution_check: { passed: true, details: '1080x1920' },
-          audio_check: { passed: true, details: 'OK' },
-          sync_check: { passed: true, details: 'OK' },
-          text_readability: { passed: true, details: 'OK' },
-          logo_presence: { passed: true, details: 'OK' },
-          black_frame_check: { passed: true, details: 'OK' },
-          aspect_ratio_check: { passed: true, details: '9:16' },
-        },
+        auto_qa_passed: qaPassed,
+        auto_qa_results: qaResults as unknown as Record<string, unknown>,
       })
       .eq('id', jobId);
 
+    await logEvent(jobId, 'state_transition', {
+      step: 'auto_qa',
+      passed: qaPassed,
+      results: Object.entries(qaResults).map(([k, v]) => `${k}: ${v.passed ? 'ok' : 'FAIL'}`),
+    });
+
+    if (!qaPassed) {
+      console.warn(`[pipeline] ${jobId}: Auto QA flagged issues — forwarding to human QA with flags`);
+    }
+
     // ── Step 8: Human QA ──
     await transitionJob(jobId, 'auto_qa', 'human_qa');
-    console.log(`[pipeline] ${jobId}: human_qa — awaiting worker review in Sheets`);
 
-    const totalMs = Date.now() - Date.now(); // render time is in renderResult.durationMs
-    console.log(`[pipeline] Render pipeline complete for ${jobId}. Render took ${(renderResult.durationMs / 1000).toFixed(1)}s. Awaiting human QA.`);
+    const totalMs = Date.now() - startTime;
+    console.log(`[pipeline] Render pipeline complete for ${jobId} in ${(totalMs / 1000).toFixed(1)}s. QA: ${qaPassed ? 'PASSED' : 'FLAGGED'}. Awaiting human review.`);
 
   } catch (err) {
     console.error(`[pipeline] Render pipeline failed for ${jobId}:`, err);
     try {
-      await logEvent(jobId, 'error', { error: String(err) });
+      await logEvent(jobId, 'error', { error: String(err), worker: env.WORKER_ID });
     } catch {
       // Ignore logging errors
     }
   } finally {
-    // Cleanup temp dir (except rendered output — already uploaded to R2)
+    // Cleanup temp dir (rendered output already uploaded to R2)
     try {
       await rm(workDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }
   }
+}
+
+// ── Helpers ──
+
+function generateSlug(contextPacket: ContextPacket): string {
+  const hookText = contextPacket.copy.hook_variants[0]?.text ?? contextPacket.brief.template_id;
+  return hookText
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
 }

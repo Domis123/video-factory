@@ -1,0 +1,149 @@
+{
+  "name": "S6: Music Track Update (Sheet → Supabase)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "s6-trigger",
+      "name": "Every 5min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Music Library",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "s6-read",
+      "name": "Read Music Library",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-656, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-r2-key",
+              "leftValue": "={{ $json['R2 Key'] }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            },
+            {
+              "id": "no-track-id",
+              "leftValue": "={{ $json['Track ID'] }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "empty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "s6-filter",
+      "name": "Filter New Tracks",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/music_tracks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"title\": \"{{ $json['Title'] }}\",\n  \"artist\": \"{{ $json['Artist'] }}\",\n  \"r2_key\": \"{{ $json['R2 Key'] }}\",\n  \"duration_seconds\": {{ $json['Duration (s)'] || 0 }},\n  \"mood\": \"{{ $json['Mood'] }}\",\n  \"genre\": \"{{ $json['Genre'] }}\",\n  \"tempo_bpm\": {{ $json['Tempo BPM'] || 0 }},\n  \"energy_level\": {{ $json['Energy Level'] || 5 }},\n  \"license_source\": \"{{ $json['License Source'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s6-insert",
+      "name": "Insert to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-224, 112],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Music Library",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Row Status": "OK",
+            "Track ID": "={{ $json.id ?? $json[0].id }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s6-write-ok",
+      "name": "Write Track ID",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [0, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5min": { "main": [[{ "node": "Read Music Library", "type": "main", "index": 0 }]] },
+    "Read Music Library": { "main": [[{ "node": "Filter New Tracks", "type": "main", "index": 0 }]] },
+    "Filter New Tracks": { "main": [[{ "node": "Insert to Supabase", "type": "main", "index": 0 }]] },
+    "Insert to Supabase": { "main": [[{ "node": "Write Track ID", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

@@ -1,0 +1,225 @@
+{
+  "name": "S2: Brief Review Decision",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "seconds" }]
+        }
+      },
+      "id": "s2-trigger",
+      "name": "Every 30s",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "options": {}
+      },
+      "id": "s2-read",
+      "name": "Read Jobs Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-656, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "status-brief-review",
+              "leftValue": "={{ $json['Status'] }}",
+              "rightValue": "brief_review",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "has-decision",
+              "leftValue": "={{ $json['Review Decision'] }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "s2-filter",
+      "name": "Filter Pending Reviews",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json['Review Decision'] }}",
+              "rightValue": "approve",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s2-decision",
+      "name": "Approve or Reject?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-224, 112]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?id=eq.{{ $json['Job ID'] }}&status=eq.brief_review",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"status\": \"queued\", \"review_decision\": \"approve\" }",
+        "options": {}
+      },
+      "id": "s2-approve",
+      "name": "Approve → queued",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://95.216.137.35:3000/enqueue",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue\": \"rendering\",\n  \"jobId\": \"{{ $('Filter Pending Reviews').item.json['Job ID'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s2-enqueue",
+      "name": "Enqueue to BullMQ",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [224, 0]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs?id=eq.{{ $json['Job ID'] }}&status=eq.brief_review",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=representation" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"status\": \"planning\",\n  \"review_decision\": \"reject\",\n  \"rejection_notes\": \"{{ $json['Rejection Notes'] }}\"\n}",
+        "options": {}
+      },
+      "id": "s2-reject",
+      "name": "Reject → planning",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 240],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Row Status": "OK",
+            "Status": "={{ $json['Review Decision'] === 'approve' ? 'queued' : 'planning' }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s2-update-sheet",
+      "name": "Update Sheet Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [448, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 30s": { "main": [[{ "node": "Read Jobs Sheet", "type": "main", "index": 0 }]] },
+    "Read Jobs Sheet": { "main": [[{ "node": "Filter Pending Reviews", "type": "main", "index": 0 }]] },
+    "Filter Pending Reviews": { "main": [[{ "node": "Approve or Reject?", "type": "main", "index": 0 }]] },
+    "Approve or Reject?": {
+      "main": [
+        [{ "node": "Approve → queued", "type": "main", "index": 0 }],
+        [{ "node": "Reject → planning", "type": "main", "index": 0 }]
+      ]
+    },
+    "Approve → queued": { "main": [[{ "node": "Enqueue to BullMQ", "type": "main", "index": 0 }]] },
+    "Enqueue to BullMQ": { "main": [[{ "node": "Update Sheet Status", "type": "main", "index": 0 }]] },
+    "Reject → planning": { "main": [[{ "node": "Update Sheet Status", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

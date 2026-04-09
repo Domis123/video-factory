@@ -1,0 +1,216 @@
+{
+  "name": "S4: Brand Config Update (Sheet → Supabase)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "s4-trigger",
+      "name": "Every 5min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-880, 112]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 219264500,
+          "mode": "list",
+          "cachedResultName": "Brands",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=219264500"
+        },
+        "options": {}
+      },
+      "id": "s4-read",
+      "name": "Read Brands Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-656, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "has-brand-id",
+              "leftValue": "={{ $json['Brand ID'] }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "s4-filter",
+      "name": "Filter Valid Rows",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [-448, 112]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate hex colors and build Supabase payload\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const d = item.json;\n  const hexRegex = /^#[0-9A-Fa-f]{6}$/;\n  const errors = [];\n  \n  if (!hexRegex.test(d['Primary Color'])) errors.push('Invalid primary color');\n  if (!hexRegex.test(d['Secondary Color'])) errors.push('Invalid secondary color');\n  if (d['Accent Color'] && !hexRegex.test(d['Accent Color'])) errors.push('Invalid accent color');\n  if (d['CTA BG Color'] && !hexRegex.test(d['CTA BG Color'])) errors.push('Invalid CTA BG color');\n  if (d['CTA Text Color'] && !hexRegex.test(d['CTA Text Color'])) errors.push('Invalid CTA text color');\n  \n  const opacity = parseFloat(d['Watermark Opacity'] || '0.6');\n  if (opacity < 0 || opacity > 1) errors.push('Opacity must be 0-1');\n  \n  const hookStyles = (d['Hook Styles'] || '').split(',').map(s => s.trim()).filter(Boolean);\n  const pillars = (d['Content Pillars'] || '').split(',').map(s => s.trim()).filter(Boolean);\n  const allowedVideoTypes = (d['Allowed Video Types'] || '').split(',').map(s => s.trim()).filter(Boolean);\n  \n  results.push({\n    json: {\n      brand_id: d['Brand ID'],\n      valid: errors.length === 0,\n      errors,\n      payload: {\n        brand_name: d['Brand Name'],\n        primary_color: d['Primary Color'],\n        secondary_color: d['Secondary Color'],\n        accent_color: d['Accent Color'] || null,\n        font_family: d['Font Family'],\n        font_weight_title: parseInt(d['Font Weight Title'] || '700'),\n        font_weight_body: parseInt(d['Font Weight Body'] || '400'),\n        watermark_position: d['Watermark Position'] || 'top_right',\n        watermark_opacity: opacity,\n        cta_style: d['CTA Style'] || 'link-in-bio',\n        cta_bg_color: d['CTA BG Color'] || null,\n        cta_text_color: d['CTA Text Color'] || null,\n        transition_style: d['Transition Style'] || 'fade',\n        voice_guidelines: d['Voice Guidelines'] || null,\n        hook_style_preference: hookStyles,\n        content_pillars: pillars,\n        allowed_video_types: allowedVideoTypes,\n        color_grade_preset: d['Color Grade Preset'] || null,\n        drive_input_folder_id: d['Drive Input Folder ID'] || null,\n        active: d['Active'] === 'TRUE' || d['Active'] === true\n      }\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "s4-validate",
+      "name": "Validate & Build Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-224, 112]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s4-check",
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [0, 112]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/brand_configs?brand_id=eq.{{ $json.brand_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_ANON_KEY }}" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "s4-update-supa",
+      "name": "Update Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [224, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "l66cV4Gj1L3T6MjJ",
+          "name": "Strapi API Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 219264500,
+          "mode": "list",
+          "cachedResultName": "Brands",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=219264500"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "Row Status": "OK" }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s4-write-ok",
+      "name": "Write OK",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [448, 0],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 219264500,
+          "mode": "list",
+          "cachedResultName": "Brands",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=219264500"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": { "Row Status": "=ERROR: {{ $json.errors.join(', ') }}" }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s4-write-error",
+      "name": "Write Error",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [224, 240],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 5min": { "main": [[{ "node": "Read Brands Sheet", "type": "main", "index": 0 }]] },
+    "Read Brands Sheet": { "main": [[{ "node": "Filter Valid Rows", "type": "main", "index": 0 }]] },
+    "Filter Valid Rows": { "main": [[{ "node": "Validate & Build Payload", "type": "main", "index": 0 }]] },
+    "Validate & Build Payload": { "main": [[{ "node": "Valid?", "type": "main", "index": 0 }]] },
+    "Valid?": {
+      "main": [
+        [{ "node": "Update Supabase", "type": "main", "index": 0 }],
+        [{ "node": "Write Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Update Supabase": { "main": [[{ "node": "Write OK", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}

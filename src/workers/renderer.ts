@@ -93,6 +93,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
       transcriptions,
       logoPath,
       musicPath,
+      beatMap: contextPacket.music_selection?.beat_map ?? null,
     };
 
     // 7. Select composition (sets duration from Context Packet)

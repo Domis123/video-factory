@@ -29,6 +29,7 @@ const envSchema = z.object({
   WORKER_ID: z.string().default('worker-local'),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).default(2),
   RENDER_TEMP_DIR: z.string().default('/tmp/video-factory'),
+  API_PORT: z.coerce.number().int().default(3000),
 });
 
 const parsed = envSchema.safeParse(process.env);

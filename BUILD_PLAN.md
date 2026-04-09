@@ -26,12 +26,33 @@ Video Factory is a 95% automated video production pipeline for 30 brands (150 vi
 | 3. AI Agents | ✅ COMPLETE | 28/28 mock, 27/27 live | 7 files (3 agents + 3 prompts + context-packet) |
 | 4. Remotion Templates | ✅ COMPLETE | Build clean | 9 files (6 components + 3 layouts + types + Root) |
 | 5A. Renderer + Server | ✅ DEPLOYED | 28/28 + 27/27 live + 5/5 connectivity on VPS | 4 files + VPS running |
-| 5B. Google Sheets | NEEDS SETUP | — | Manual: create spreadsheet + configure n8n |
-| 5C. n8n Workflows | NEEDS SETUP | — | 10 workflows to build in n8n UI |
-| 5D. End-to-end test | PENDING | — | Needs VPS + real UGC clips |
+| 5B. Google Sheets | ✅ GUIDE READY | — | SHEETS_SETUP.md with 6 tabs, columns, dropdowns |
+| 5C. n8n Workflows | ✅ JSONs READY | — | 10 importable workflows in n8n-workflows/ + HTTP API |
+| 5D. End-to-end test | PENDING | — | Needs Sheets + n8n imports + real UGC clips |
+| 6.0 Video Type Matrix | ✅ COMPLETE | Build clean | video-types.ts, video-type-selector.ts + 5 modified |
+| 6.1 Ingestion Enrichment | ✅ COMPLETE | Build clean | clip-analysis.ts, updated ingestion.ts + asset-curator prompt |
+| 6.2 Beat-Synced Transitions | ✅ COMPLETE | Build clean | beat-detector.ts, TransitionEffect beat-flash/beat-zoom |
+| 6.3 Audio Ducking | ✅ COMPLETE | Build clean | Sidechain compressor in buildAudioMixCommand |
+| 6.4 Encoding Upgrade | ✅ COMPLETE | Build clean | CRF 18 + slow, removed -t 60 truncation |
+| 6.5 Color Grading | ✅ COMPLETE | Build clean | color-grading.ts, clip-prep grading step |
+| 6.6 Music Selection | ✅ COMPLETE | Build clean | music-selector.ts, context-packet integration |
+| 6.7 Dynamic Pacing | ✅ COMPLETE | Build clean | template-config-builder.ts, context-packet integration |
+| 6.8 Trending Audio | PENDING | — | Manual curation process, pilot on 2-3 brands |
+| Redis Fix | ✅ COMPLETE | — | drainDelay 30s (777K→26K cmds/day idle) |
+| DB Migration | ✅ APPLIED | — | migrate-quality-upgrade.sql (ran 2026-04-07) |
+| Quality Tests | ✅ 98/98 | 30 mock + 41 quality + 27 live | All video type + quality modules verified |
 
-**Total**: ~42 source files, all code phases complete.
-**Cost to date**: ~$0.10 (Gemini test + Claude API test calls). Production cost: ~$35/mo (VPS $30 + Gemini $0.60 + Claude ~$4).
+**Total**: ~52 source files + 10 n8n workflow JSONs + 2 SQL migrations.
+**Cost to date**: ~$0.15 (Gemini test + Claude API test calls). Production cost: ~$35/mo (VPS $30 + Gemini $0.60 + Claude ~$4).
+
+**Next milestones** (in order):
+1. ~~Run `migrate-quality-upgrade.sql` on Supabase~~ ✅ Done
+2. Prepare Google Sheets (add new columns: video_type, allowed_video_types, color_grade_preset)
+3. Configure n8n workflows (import JSONs, set credentials, test S1 first)
+4. Wait for Upstash Redis monthly reset (drainDelay fix means free tier is now sufficient)
+5. Upload UGC clips for one pilot brand (nordpilates)
+6. Stock music library with 10+ tracks
+7. End-to-end test: idea seed → rendered video
 
 ---
 
@@ -199,7 +220,7 @@ All video templates built as React components. Each layout consumes a Context Pa
 ### 5A: VPS + Renderer ✅ CODE COMPLETE
 
 - `src/workers/renderer.ts` — Downloads clips from R2, bundles Remotion, renders composition, uploads to R2
-- `src/workers/pipeline.ts` — Full job lifecycle orchestrator (planning → clip-prep → transcription → rendering → audio-mix → sync-check → export → QA)
+- `src/workers/pipeline.ts` — Full job lifecycle orchestrator (planning → clip-prep → transcription → rendering → audio-mix → sync-check → export → QA). **All workers fully wired** — calls prepareClips, transcribeAll, mixAudio, checkSync, exportPlatforms, runQAChecks.
 - `src/index.ts` — Server entry point, starts 3 BullMQ workers (planning, rendering, ingestion), graceful shutdown
 - `scripts/setup-vps.sh` — Automated VPS provisioning (Node 20, FFmpeg, whisper.cpp, Chromium deps, systemd service)
 - `package.json` — Added `npm start` (dev) and `npm run start:prod` (production)
@@ -229,40 +250,52 @@ All video templates built as React components. Each layout consumes a Context Pa
 - Deploy updates: `cd /home/video-factory && git pull && npm install && systemctl restart video-factory`
 - Logs: `journalctl -u video-factory -f`
 
-### Test Results ✅ 28/28 passed
+### Test Results ✅ 36/36 passed
 - Redis: PING + all 4 queues accessible (ingestion, planning, rendering, export)
 - BullMQ: job enqueue/dequeue/cleanup cycle
 - Context Packet: full mock assembly (3 agents → merged packet with segments, clips, copy)
 - Job lifecycle: 13 state transitions (idle → delivered) with all events logged to Supabase
-- Renderer module: renderVideo, runPlanning, runRenderPipeline functions verified
+- All worker modules verified: renderVideo, runPlanning, runRenderPipeline, prepareClips, transcribeAll, mixAudio, checkSync, exportPlatforms, runQAChecks, allChecksPassed
 - Temp dir: create + cleanup cycle
 - State machine: terminal states, retry paths, rejection loops all validated
 - Cleanup: test data removed from Supabase
 
-### 5B: Google Sheets Admin Panel ("Video Factory Control Panel")
-Single spreadsheet with 6 tabs — workers manage everything from here:
-1. **Jobs tab** — Create ideas, review briefs, approve QA (polled 30s)
-2. **Brands tab** — Colors, fonts, CTA style, voice guidelines (polled 5min)
-3. **Caption Presets tab** — Flattened JSONB (20 cols), n8n reassembles to nested JSON
-4. **Music Library tab** — Add/tag tracks, mood/genre/energy dropdowns
-5. **Templates tab** — Reference + allowed brands per template
-6. **Dashboard tab** — Read-only stats from `v_brand_stats` (refreshed 5min)
+### 5B: Google Sheets Admin Panel ✅ GUIDE READY
 
-**Column design**: Gray columns = system (protected, auto-populated). White columns = worker-editable. Column A = "Row Status" for sync/error feedback.
+Full setup guide in `SHEETS_SETUP.md`. Single spreadsheet with 6 tabs:
+1. **Jobs tab** — Create ideas, review briefs, approve QA (polled 30s). 19 columns with dropdowns.
+2. **Brands tab** — Colors, fonts, CTA style, voice guidelines (polled 5min). 22 columns with hex validation.
+3. **Caption Presets tab** — Flattened JSONB (20 cols), n8n reassembles to nested JSON.
+4. **Music Library tab** — Add/tag tracks, mood/genre/energy dropdowns. 12 columns.
+5. **Templates tab** — Reference + allowed brands per template. Read-only.
+6. **Dashboard tab** — Read-only stats from `v_brand_stats` (refreshed 5min). 8 columns.
 
-**Validation**: Sheet dropdowns (cosmetic) → n8n validation (real gate, writes ERROR to col A on failure) → Supabase constraints (last resort).
+**To complete**: Create the spreadsheet following SHEETS_SETUP.md, share with n8n service account, add GOOGLE_SHEET_ID to .env.
 
-### 5C: n8n Workflows (10 total)
-- S1: New Job (Sheet→Supa, 30s poll)
-- S2: Brief Review Decision (Sheet→Supa, 30s poll)
-- S3: QA Decision (Sheet→Supa, 30s poll)
-- S4: Brand Config Update (Sheet→Supa, 5min poll)
-- S5: Caption Preset Update (Sheet→Supa, 5min poll)
-- S6: Music Track Update (Sheet→Supa, 5min poll)
-- P1: Job Status Push (Supa→Sheet, event-driven)
-- P2: Periodic Sync catch-up (Supa→Sheet, 5min cron)
-- P3: Dashboard Refresh (Supa→Sheet, 5min cron)
-- P4: Monthly Archive (Sheet→Sheet, 1st of month)
+### 5C: n8n Workflows ✅ JSONs READY
+
+All 10 workflows are importable JSON files in `n8n-workflows/`:
+
+**Sheet → Supabase (6 workflows):**
+- `S1-new-job.json` — Polls Jobs sheet every 30s for new idea seeds, validates brand, creates job in Supabase
+- `S2-brief-review.json` — Polls for approve/reject decisions, updates Supabase, enqueues rendering via HTTP API
+- `S3-qa-decision.json` — Polls for QA decisions, routes rejects to planning or re-render based on issue type
+- `S4-brand-config.json` — Polls Brands sheet every 5min, validates hex colors/ranges, updates Supabase
+- `S5-caption-preset.json` — Polls Caption Presets, reassembles 20 flat columns into nested JSONB, updates Supabase
+- `S6-music-track.json` — Polls Music Library for new tracks, inserts to Supabase, writes back Track ID
+
+**Supabase → Sheet (4 workflows):**
+- `P1-job-status-push.json` — Webhook endpoint, fetches job from Supabase, maps to Sheet columns
+- `P2-periodic-sync.json` — Every 5min catch-up: syncs all active jobs from Supabase to Sheet
+- `P3-dashboard-refresh.json` — Every 5min: fetches v_brand_stats + active counts, rebuilds Dashboard tab
+- `P4-monthly-archive.json` — 1st of month: archives delivered/failed jobs to monthly tab
+
+**HTTP API added to index.ts:**
+- `POST /enqueue` — n8n calls this to add jobs to BullMQ queues (body: `{ queue, jobId }`)
+- `GET /health` — Health check endpoint
+- Port configurable via `API_PORT` env var (default 3000)
+
+**To complete**: Import JSONs into n8n, configure Google Sheets + Supabase credentials, set env vars (GOOGLE_SHEET_ID, SUPABASE_URL, SUPABASE_ANON_KEY).
 
 ### 5D: End-to-end test with pilot brands
 
