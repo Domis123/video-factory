@@ -142,6 +142,110 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // ── UGC Ingest: n8n S8 sends video binary, VPS does ffprobe → Gemini → R2 → Supabase ──
+  if (req.method === 'POST' && req.url === '/ugc-ingest') {
+    const tmpDir = '/tmp/ugc-ingest';
+    let tmpPath = '';
+    try {
+      const { ingestAsset } = await import('./workers/ingestion.js');
+      const { supabaseAdmin } = await import('./config/supabase.js');
+      const { mkdir, writeFile, unlink } = await import('node:fs/promises');
+      const { randomUUID } = await import('node:crypto');
+      const { extname } = await import('node:path');
+
+      const body = await readRawBody(req);
+      const rawMeta = req.headers['x-asset-meta'] as string || '{}';
+      let meta: Record<string, unknown>;
+      try {
+        meta = JSON.parse(rawMeta);
+      } catch {
+        meta = JSON.parse(Buffer.from(rawMeta, 'base64').toString('utf-8'));
+      }
+
+      // Parse filename and brand_id from header or filename convention
+      const filename = String(meta.filename || `clip-${Date.now()}.mp4`).replace(/[^a-zA-Z0-9._-]/g, '_');
+      let brandId = String(meta.brand_id || '');
+      let description = String(meta.description || '');
+
+      // Fallback: parse brand_id from filename ({brand_id}_{description}.ext)
+      if (!brandId) {
+        const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
+        const underscoreIdx = nameWithoutExt.indexOf('_');
+        if (underscoreIdx > 0) {
+          brandId = nameWithoutExt.slice(0, underscoreIdx).toLowerCase();
+          description = description || nameWithoutExt.slice(underscoreIdx + 1);
+        }
+      }
+
+      if (!brandId) {
+        res.writeHead(400);
+        res.end(JSON.stringify({ error: 'Missing brand_id in header and filename' }));
+        return;
+      }
+
+      // Idempotency: check if asset with same filename + brand_id already exists
+      const { data: existing } = await supabaseAdmin
+        .from('assets')
+        .select('id, r2_key, brand_id, content_type, quality_score, duration_seconds')
+        .eq('filename', filename)
+        .eq('brand_id', brandId)
+        .limit(1)
+        .single();
+
+      if (existing) {
+        console.log(`[ugc-ingest] Duplicate detected: ${filename} for ${brandId}, returning existing asset ${existing.id}`);
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ok: true,
+          duplicate: true,
+          asset_id: existing.id,
+          r2_key: existing.r2_key,
+          brand_id: existing.brand_id,
+          content_type: existing.content_type,
+          quality_score: existing.quality_score,
+          duration_seconds: existing.duration_seconds,
+        }));
+        return;
+      }
+
+      // Save binary to temp file
+      await mkdir(tmpDir, { recursive: true });
+      const ext = extname(filename) || '.mp4';
+      tmpPath = `${tmpDir}/${randomUUID()}${ext}`;
+      await writeFile(tmpPath, body);
+      console.log(`[ugc-ingest] Saved ${filename} (${(body.length / 1024 / 1024).toFixed(1)} MB) for ${brandId}`);
+
+      // Call existing ingestion pipeline
+      const asset = await ingestAsset({
+        filePath: tmpPath,
+        brandId,
+        filename,
+        driveFileId: String(meta.drive_file_id || ''),
+      });
+
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ok: true,
+        asset_id: asset.id,
+        r2_key: asset.r2_key,
+        brand_id: asset.brand_id,
+        content_type: asset.content_type,
+        quality_score: asset.quality_score,
+        duration_seconds: asset.duration_seconds,
+      }));
+    } catch (err) {
+      console.error('[ugc-ingest] Error:', err);
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: String(err) }));
+    } finally {
+      if (tmpPath) {
+        const { unlink } = await import('node:fs/promises');
+        await unlink(tmpPath).catch(() => {});
+      }
+    }
+    return;
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200);
     res.end(JSON.stringify({ status: 'ok', worker: env.WORKER_ID }));
