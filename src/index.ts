@@ -122,8 +122,15 @@ const server = createServer(async (req, res) => {
     try {
       const { ingestMusicTrack } = await import('./workers/music-ingest.js');
       const body = await readRawBody(req);
-      const meta = JSON.parse(req.headers['x-track-meta'] as string || '{}');
-      const filename = (meta.filename || `track-${Date.now()}.mp3`).replace(/[^a-zA-Z0-9._-]/g, '_');
+      const rawMeta = req.headers['x-track-meta'] as string || '{}';
+      // Support both plain JSON and base64-encoded JSON (base64 avoids invalid header chars)
+      let meta: Record<string, unknown>;
+      try {
+        meta = JSON.parse(rawMeta);
+      } catch {
+        meta = JSON.parse(Buffer.from(rawMeta, 'base64').toString('utf-8'));
+      }
+      const filename = String(meta.filename || `track-${Date.now()}.mp3`).replace(/[^a-zA-Z0-9._-]/g, '_');
       const result = await ingestMusicTrack(body, filename, meta);
       res.writeHead(200);
       res.end(JSON.stringify(result));
