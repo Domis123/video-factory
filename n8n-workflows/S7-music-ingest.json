@@ -11,115 +11,39 @@
       "name": "Every 5min",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [-1100, 112]
-    },
-    {
-      "parameters": {
-        "authentication": "serviceAccount",
-        "documentId": {
-          "__rl": true,
-          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
-          "mode": "list",
-          "cachedResultName": "Video Pipeline",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
-        },
-        "sheetName": {
-          "__rl": true,
-          "value": "Music Library",
-          "mode": "name"
-        },
-        "options": {}
-      },
-      "id": "s7-read-sheet",
-      "name": "Read Music Library",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
-      "position": [-880, 0],
-      "credentials": {
-        "googleApi": {
-          "id": "AIqzMYUXoQjud7IW",
-          "name": "Flemingo service acc"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://www.googleapis.com/drive/v3/files",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleApi",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            { "name": "q", "value": "='{{ $env.MUSIC_UPLOADS_FOLDER_ID }}' in parents and trashed=false and (mimeType contains 'audio/')" },
-            { "name": "fields", "value": "files(id,name,mimeType,size)" },
-            { "name": "pageSize", "value": "100" }
-          ]
-        },
-        "options": {}
-      },
-      "id": "s7-list-drive",
-      "name": "List Drive Music Folder",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [-880, 224],
-      "credentials": {
-        "googleApi": {
-          "id": "AIqzMYUXoQjud7IW",
-          "name": "Flemingo service acc"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "// Match Drive files to Sheet rows, find files not yet processed\nconst sheetRows = $('Read Music Library').all();\nconst driveResponse = $('List Drive Music Folder').first().json;\nconst driveFiles = driveResponse.files || [];\n\n// R2 keys already in the sheet = already processed\nconst processedR2Keys = new Set();\nfor (const row of sheetRows) {\n  if (row.json['Track ID']) {\n    processedR2Keys.add(row.json['R2 Key'] || '');\n  }\n}\n\nconst newFiles = [];\nfor (const file of driveFiles) {\n  const sanitized = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');\n  const r2Key = `music/${sanitized}`;\n\n  if (processedR2Keys.has(r2Key)) continue;\n\n  // Find matching sheet row by title (worker may have pre-filled metadata)\n  const matchRow = sheetRows.find(r => {\n    const t = (r.json['Title'] || '').toLowerCase().trim();\n    const fname = file.name.toLowerCase();\n    return t && (fname.includes(t) || t.includes(fname.replace(/\\.[^.]+$/, '').substring(0, 15)));\n  });\n\n  newFiles.push({\n    json: {\n      driveFileId: file.id,\n      driveName: file.name,\n      sanitizedName: sanitized,\n      title: matchRow?.json['Title'] || '',\n      artist: matchRow?.json['Artist'] || '',\n      mood: matchRow?.json['Mood'] || '',\n      genre: matchRow?.json['Genre'] || '',\n      energy_level: matchRow?.json['Energy Level'] || '',\n      license_source: matchRow?.json['License Source'] || 'custom'\n    }\n  });\n}\n\nif (newFiles.length === 0) {\n  return [{ json: { _skip: true } }];\n}\n\nreturn newFiles;"
-      },
-      "id": "s7-match",
-      "name": "Match New Files",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [-656, 112]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "conditions": [
-            {
-              "leftValue": "={{ $json._skip }}",
-              "rightValue": true,
-              "operator": { "type": "boolean", "operation": "notEquals" }
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "s7-has-new",
-      "name": "Has New Files?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [-448, 112]
+      "position": [-880, 112]
     },
     {
       "parameters": {
         "operation": "download",
         "fileId": {
           "__rl": true,
-          "value": "={{ $json.driveFileId }}",
+          "value": "1s2vUnIoJUt7rltSRlJeY9uqQyQ5_Lzso",
           "mode": "id"
         },
         "options": {}
       },
       "id": "s7-download",
-      "name": "Download from Drive",
+      "name": "Download Folder Files",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [-224, 0],
+      "position": [-656, 112],
       "credentials": {
         "googleApi": {
           "id": "AIqzMYUXoQjud7IW",
           "name": "Flemingo service acc"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build metadata from filename\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const name = item.json.name || Object.keys(item.binary || {})[0] || 'unknown.mp3';\n  const sanitized = name.replace(/[^a-zA-Z0-9._-]/g, '_');\n  const title = name.replace(/\\.[^.]+$/, '').replace(/[-_]/g, ' ').replace(/\\s*\\(.*?\\)\\s*/g, '').replace(/\\s*\\[.*?\\]\\s*/g, '').trim();\n\n  results.push({\n    json: {\n      driveFileId: item.json.id || '',\n      driveName: name,\n      sanitizedName: sanitized,\n      title: title\n    },\n    binary: item.binary\n  });\n}\n\nreturn results;"
+      },
+      "id": "s7-prep",
+      "name": "Prep Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-432, 112]
     },
     {
       "parameters": {
@@ -130,7 +54,7 @@
           "parameters": [
             {
               "name": "x-track-meta",
-              "value": "={{ JSON.stringify({ filename: $('Match New Files').item.json.sanitizedName, title: $('Match New Files').item.json.title, artist: $('Match New Files').item.json.artist, mood: $('Match New Files').item.json.mood, genre: $('Match New Files').item.json.genre, energy_level: Number($('Match New Files').item.json.energy_level) || 5, license_source: $('Match New Files').item.json.license_source }) }}"
+              "value": "={{ JSON.stringify({ filename: $json.sanitizedName, title: $json.title }) }}"
             },
             {
               "name": "Content-Type",
@@ -147,7 +71,7 @@
       "name": "Send to VPS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [0, 0]
+      "position": [-208, 112]
     },
     {
       "parameters": {
@@ -184,7 +108,7 @@
       "name": "Write to Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [224, 0],
+      "position": [16, 112],
       "credentials": {
         "googleApi": {
           "id": "AIqzMYUXoQjud7IW",
@@ -197,12 +121,12 @@
         "operation": "move",
         "fileId": {
           "__rl": true,
-          "value": "={{ $('Match New Files').item.json.driveFileId }}",
+          "value": "={{ $('Prep Metadata').item.json.driveFileId }}",
           "mode": "id"
         },
         "driveId": {
           "__rl": true,
-          "value": "={{ $env.MUSIC_PROCESSED_FOLDER_ID }}",
+          "value": "1RtBDaSxM45TT2B7ATvQGXvnY5HB1nWGw",
           "mode": "id"
         }
       },
@@ -210,7 +134,7 @@
       "name": "Move to Processed",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [448, 0],
+      "position": [240, 112],
       "credentials": {
         "googleApi": {
           "id": "AIqzMYUXoQjud7IW",
@@ -220,24 +144,9 @@
     }
   ],
   "connections": {
-    "Every 5min": {
-      "main": [
-        [
-          { "node": "Read Music Library", "type": "main", "index": 0 },
-          { "node": "List Drive Music Folder", "type": "main", "index": 0 }
-        ]
-      ]
-    },
-    "Read Music Library": { "main": [[{ "node": "Match New Files", "type": "main", "index": 0 }]] },
-    "List Drive Music Folder": { "main": [[{ "node": "Match New Files", "type": "main", "index": 0 }]] },
-    "Match New Files": { "main": [[{ "node": "Has New Files?", "type": "main", "index": 0 }]] },
-    "Has New Files?": {
-      "main": [
-        [{ "node": "Download from Drive", "type": "main", "index": 0 }],
-        []
-      ]
-    },
-    "Download from Drive": { "main": [[{ "node": "Send to VPS", "type": "main", "index": 0 }]] },
+    "Every 5min": { "main": [[{ "node": "Download Folder Files", "type": "main", "index": 0 }]] },
+    "Download Folder Files": { "main": [[{ "node": "Prep Metadata", "type": "main", "index": 0 }]] },
+    "Prep Metadata": { "main": [[{ "node": "Send to VPS", "type": "main", "index": 0 }]] },
     "Send to VPS": { "main": [[{ "node": "Write to Sheet", "type": "main", "index": 0 }]] },
     "Write to Sheet": { "main": [[{ "node": "Move to Processed", "type": "main", "index": 0 }]] }
   },

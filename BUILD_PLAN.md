@@ -1,316 +1,131 @@
 # Video Factory — Step-by-Step Build Plan
 
 ## Context
-Video Factory is a 95% automated video production pipeline for 30 brands (150 videos/week). All infrastructure (Supabase, Redis, R2, n8n) is live but **zero code exists**. The goal is to build as much as possible while minimizing cost — develop and test locally, defer VPS/API expenses until code is ready.
-
-## Cost-Efficient Build Strategy
-
-| Phase | What | Cost | Can test locally? |
-|-------|------|------|-------------------|
-| **1. Foundation** | Config, types, lib, connectivity scripts | $0 | Yes |
-| **2. Workers** | Ingestion, clip-prep, transcriber, audio, QA, exporter | ~$0 (free tier) | Partially (FFmpeg needed) |
-| **2B. Gemini Analyzer** | AI clip analysis during ingestion | ~$0.60/mo | Yes |
-| **3. AI Agents** | Creative Director, Asset Curator, Copywriter + prompts | ~$2-5 testing | Yes (mock-first) |
-| **4. Remotion Templates** | React video components + layouts | $0 | Yes (Remotion dev server) |
-| **5. Renderer + Integration** | Render worker, n8n workflows, Sheets | $30/mo VPS | Needs VPS |
-
-**Architecture adjustment**: Build agent prompts and stubs first, only call Claude API for final integration testing. This saves ~$100/mo during development.
+Video Factory is a 95% automated video production pipeline for 30 brands (150 videos/week). All infrastructure (Supabase, Redis, R2, n8n) is live. Code is deployed and running on VPS.
 
 ## Overall Progress
 
-| Phase | Status | Tests | Files Built |
-|-------|--------|-------|-------------|
-| 1. Foundation | ✅ COMPLETE | 5/5 connectivity | 11 files (config, types, lib, scripts) |
-| 2. Workers | ✅ COMPLETE | 16/16 pipeline | 9 files (8 workers + exec helper) |
-| 2B. Gemini Analyzer | ✅ COMPLETE | Tested on real video | 2 files (gemini.ts + test script) |
-| 3. AI Agents | ✅ COMPLETE | 28/28 mock, 27/27 live | 7 files (3 agents + 3 prompts + context-packet) |
-| 4. Remotion Templates | ✅ COMPLETE | Build clean | 9 files (6 components + 3 layouts + types + Root) |
-| 5A. Renderer + Server | ✅ DEPLOYED | 28/28 + 27/27 live + 5/5 connectivity on VPS | 4 files + VPS running |
-| 5B. Google Sheets | ✅ GUIDE READY | — | SHEETS_SETUP.md with 6 tabs, columns, dropdowns |
-| 5C. n8n Workflows | ✅ JSONs READY | — | 10 importable workflows in n8n-workflows/ + HTTP API |
-| 5D. End-to-end test | PENDING | — | Needs Sheets + n8n imports + real UGC clips |
-| 6.0 Video Type Matrix | ✅ COMPLETE | Build clean | video-types.ts, video-type-selector.ts + 5 modified |
-| 6.1 Ingestion Enrichment | ✅ COMPLETE | Build clean | clip-analysis.ts, updated ingestion.ts + asset-curator prompt |
-| 6.2 Beat-Synced Transitions | ✅ COMPLETE | Build clean | beat-detector.ts, TransitionEffect beat-flash/beat-zoom |
-| 6.3 Audio Ducking | ✅ COMPLETE | Build clean | Sidechain compressor in buildAudioMixCommand |
-| 6.4 Encoding Upgrade | ✅ COMPLETE | Build clean | CRF 18 + slow, removed -t 60 truncation |
-| 6.5 Color Grading | ✅ COMPLETE | Build clean | color-grading.ts, clip-prep grading step |
-| 6.6 Music Selection | ✅ COMPLETE | Build clean | music-selector.ts, context-packet integration |
-| 6.7 Dynamic Pacing | ✅ COMPLETE | Build clean | template-config-builder.ts, context-packet integration |
-| 6.8 Trending Audio | PENDING | — | Manual curation process, pilot on 2-3 brands |
-| Redis Fix | ✅ COMPLETE | — | drainDelay 30s (777K→26K cmds/day idle) |
-| DB Migration | ✅ APPLIED | — | migrate-quality-upgrade.sql (ran 2026-04-07) |
-| Quality Tests | ✅ 98/98 | 30 mock + 41 quality + 27 live | All video type + quality modules verified |
+| Phase | Status | Tests | Key Files |
+|-------|--------|-------|-----------|
+| 1. Foundation | ✅ COMPLETE | 5/5 connectivity | config/, types/, lib/ (11 files) |
+| 2. Workers | ✅ COMPLETE | 16/16 pipeline | 9 workers + exec helper |
+| 2B. Gemini Analyzer | ✅ COMPLETE | Tested on real video | gemini.ts |
+| 3. AI Agents | ✅ COMPLETE | 28/28 mock, 27/27 live | 3 agents + 3 prompts + context-packet |
+| 4. Remotion Templates | ✅ COMPLETE | Build clean | 6 components + 3 layouts |
+| 5A. Renderer + Server | ✅ DEPLOYED | 36/36 + 27/27 live | renderer, pipeline, index.ts |
+| 5B. Google Sheets | ✅ CREATED | — | "Video Pipeline" spreadsheet, 6 tabs |
+| 5C. n8n Workflows | ✅ IMPORTED | — | 11 workflows (S1-S7, P1-P4) |
+| 5D. End-to-end test | 🔄 IN PROGRESS | — | Music ingest testing via S7 |
+| 6.0 Video Type Matrix | ✅ COMPLETE | 41/41 quality | video-types.ts, video-type-selector.ts |
+| 6.1 Ingestion Enrichment | ✅ COMPLETE | Build clean | clip-analysis.ts |
+| 6.2 Beat-Synced Transitions | ✅ COMPLETE | Build clean | beat-detector.ts |
+| 6.3 Audio Ducking | ✅ COMPLETE | Build clean | Sidechain compressor in ffmpeg.ts |
+| 6.4 Encoding Upgrade | ✅ COMPLETE | Build clean | CRF 18 + slow in ffmpeg.ts |
+| 6.5 Color Grading | ✅ COMPLETE | Build clean | color-grading.ts |
+| 6.6 Music Selection | ✅ COMPLETE | Build clean | music-selector.ts |
+| 6.7 Dynamic Pacing | ✅ COMPLETE | Build clean | template-config-builder.ts |
+| 6.8 Trending Audio | DEFERRED | — | Manual curation, pilot later |
+| Music Ingest | ✅ BUILT | — | music-ingest.ts + S7 workflow |
+| Redis Fix | ✅ COMPLETE | — | drainDelay 30s |
+| DB Migration | ✅ APPLIED | — | Both migrations ran on Supabase |
 
-**Total**: ~52 source files + 10 n8n workflow JSONs + 2 SQL migrations.
-**Cost to date**: ~$0.15 (Gemini test + Claude API test calls). Production cost: ~$35/mo (VPS $30 + Gemini $0.60 + Claude ~$4).
+**Total**: ~55 source files + 11 n8n workflow JSONs + 2 SQL migrations
+**Tests**: 98/98 passing (30 mock + 41 quality + 27 live)
+**Cost**: ~$35/mo production (VPS $4.50 + Gemini $0.60 + Claude ~$4 + Upstash free)
 
-**Next milestones** (in order):
-1. ~~Run `migrate-quality-upgrade.sql` on Supabase~~ ✅ Done
-2. Prepare Google Sheets (add new columns: video_type, allowed_video_types, color_grade_preset)
-3. Configure n8n workflows (import JSONs, set credentials, test S1 first)
-4. Wait for Upstash Redis monthly reset (drainDelay fix means free tier is now sufficient)
-5. Upload UGC clips for one pilot brand (nordpilates)
-6. Stock music library with 10+ tracks
-7. End-to-end test: idea seed → rendered video
+## Current Status (2026-04-09)
 
----
+### What's Running
+- **VPS** at 95.216.137.35 — all BullMQ workers (planning, rendering, ingestion) + HTTP API
+- **n8n** at 46.224.56.174 — workflows being imported and activated
+- **Google Sheets** — "Video Pipeline" spreadsheet created with all 6 tabs
+- **Supabase** — 5 pilot brands seeded, quality upgrade columns applied
 
-## Phase 1: Foundation (Build First — Zero Cost) ✅ COMPLETE
+### What's Being Tested
+- **S7 Music Ingest** — 15 MP3 tracks in Google Drive `Music Uploads/` folder, workflow downloads → VPS ffprobes → R2 upload → Supabase insert → Sheet update → Move to Processed
 
-### Files created (in dependency order):
+### What's Next (in order)
+1. ✅ ~~Music library stocking~~ — 15 tracks in Drive, S7 processing
+2. Verify S7 completes — all 15 tracks in Supabase + R2 + Sheet
+3. Import remaining n8n workflows (S1-S6, P1-P4) and activate
+4. Upload UGC clips for nordpilates (5-10 clips in brand Drive folder)
+5. Test S1: create job via Sheet → Supabase → BullMQ planning queue
+6. Test full pipeline: idea seed → AI agents → brief review → render → QA → delivered
+7. Fix any issues found in end-to-end test
 
-**1. Project setup**
-- `package.json` — deps: zod, dotenv, @supabase/supabase-js, bullmq, ioredis, @aws-sdk/client-s3, @aws-sdk/lib-storage, @aws-sdk/s3-request-presigner. Dev: typescript, @types/node, tsx
-- `tsconfig.json` — target ES2022, module NodeNext, strict, outDir dist
-- `.gitignore` — node_modules, dist, .env, /tmp
-- `.env` — copy from env.video-factory (gitignored)
-
-**2. `src/config/env.ts`** — Zod-validated env loader. Fail-fast on missing vars. Exports typed `env` object.
-
-**3. `src/types/database.ts`** — TypeScript interfaces for all 5 tables + JobStatus union type + ContextPacket/CreativeBrief/ClipSelectionList/CopyPackage interfaces matching the JSON shapes in the architecture doc.
-
-**4. `src/config/supabase.ts`** — Exports `supabaseAdmin` (service_role key, bypasses RLS). Uses @supabase/supabase-js (not raw REST — typed query builder, auto-headers, atomic update pattern).
-
-**5. `src/config/redis.ts`** — Exports `createQueue()` and `createWorker()` factories. Critical: Upstash needs `tls: {}` and `maxRetriesPerRequest: null`. Each Queue/Worker gets its own ioredis connection (BullMQ requirement). Exports `QUEUE_NAMES = { ingestion, planning, rendering, export }`.
-
-**6. `src/config/r2.ts`** — S3Client pointed at R2 with `forcePathStyle: true`, region `"auto"`.
-
-**7. `src/lib/r2-storage.ts`** — uploadFile, downloadFile, downloadToFile, fileExists, getPresignedUrl, deleteFile, listFiles. Uses multipart upload for files >5MB.
-
-**8. `src/lib/job-manager.ts`** — The core state machine. Exports:
-- `VALID_TRANSITIONS` map encoding the full state machine
-- `transitionJob(jobId, from, to, details)` — atomic via `.eq('status', fromStatus)`, inserts job_event
-- `logEvent(jobId, eventType, details)` — non-transition events
-- `claimJob(jobId, from, to, workerId)` — sets render_worker_id
-
-**9. `src/lib/ffmpeg.ts`** — Pure command-string builders (no execution yet). buildTrimCommand, buildNormalizeCommand, buildAudioExtractCommand, buildAudioMixCommand, buildExportCommand, buildProbeCommand. Each returns `{ command, args }`.
-
-**10. `src/scripts/test-connectivity.ts`** — Tests: Supabase (query brand_configs, expect 5 rows), Redis (PING + BullMQ queue test), R2 (PUT/GET/DELETE test file).
-
-**11. `src/scripts/create-r2-structure.ts`** — Creates `.keep` files at assets/, rendered/, brands/, music/, temp/, plus brands/{brand_id}/ for each pilot brand.
-
-### Verification ✅
-- `npm run build` — compiles cleanly
-- `npm run test:connectivity` — 5/5 passed (Supabase 5 brands, Redis PONG, R2 PUT/GET/DELETE)
-- `npm run setup:r2` — 20 folders created across all 5 pilot brands
-- DB schema deployed via `src/scripts/migrate.sql` in Supabase SQL Editor
+### Deferred
+- Phase 6.8 (Trending Audio) — add after 50+ outputs reviewed
+- A/B Performance Tracking — add `performance_metrics` table later
+- Quality Director Agent — deferred until failure taxonomy built from real outputs
 
 ---
 
-## Phase 2: Workers (Minimal Cost) ✅ COMPLETE
+## Architecture Summary
 
-All processing workers built and compiling. AI tagger in ingestion is stubbed (replaced in Phase 3).
+### Data Flow
+```
+Worker (Sheets/Drive) → n8n → Supabase → BullMQ → VPS Workers → R2 → n8n → Sheets
+```
 
-- `src/lib/exec.ts` — Shared child_process.spawn wrapper for FFmpeg commands
-- `src/workers/ingestion.ts` — Drive file → FFprobe metadata → AI tagger (stubbed) → R2 upload → Supabase insert
-- `src/workers/clip-prep.ts` — Download from R2, trim, normalize to 1080x1920 30fps h264, audio normalize -14 LUFS
-- `src/workers/transcriber.ts` — whisper.cpp integration, word-level timestamps, SRT + JSON parsing
-- `src/workers/audio-mixer.ts` — Layer UGC audio + background music, volume ducking per Context Packet
-- `src/workers/sync-checker.ts` — Compare whisper timestamps vs video timeline, flag drift >200ms, auto-retry
-- `src/workers/exporter.ts` — Platform exports (TikTok <=287MB, IG <=100MB, YT) with R2 upload
-- `src/workers/qa-checker.ts` — 8 automated checks (duration, resolution, audio, sync, text readability, logo, black frames, aspect ratio)
-- `src/scripts/test-pipeline.ts` — Full integration test (`npm run test:pipeline`)
+### Music Ingest Flow (S7)
+```
+Worker drops MP3 in Drive → n8n downloads → POST /music-ingest on VPS
+→ VPS: ffprobe duration → upload to R2 → insert Supabase → return metadata
+→ n8n: write to Music Library sheet → move file to Processed folder
+```
 
-### Integration Test Results ✅ 16/16 passed
-- FFprobe: detected 4K 23s h264 source video
-- FFmpeg trim: 3s clip extracted
-- FFmpeg normalize: 1080x1920 30fps h264 output verified
-- Ingestion: 70MB → R2 upload + Supabase insert
-- Presigned URL generation
-- Job state machine: 3 transitions + event logging + invalid transition blocked
-- QA checker: all 8 checks passed on normalized video
-- Cleanup: test data removed from R2 + Supabase
+### Video Production Flow
+```
+1. Worker fills Idea Seed + Brand in Jobs sheet
+2. S1: Sheet → Supabase (create job) → BullMQ planning queue
+3. VPS: 3 AI agents (Creative Director, Asset Curator, Copywriter) → Context Packet
+4. n8n: push status to Sheet (brief_review)
+5. Worker approves/rejects brief in Sheet
+6. S2: Sheet → Supabase → BullMQ rendering queue
+7. VPS: clip-prep → transcription → rendering → audio-mix → sync-check → export → QA
+8. n8n: push preview URL + auto QA results to Sheet (human_qa)
+9. Worker reviews video, approves/rejects
+10. S3: Sheet → Supabase (delivered or re-plan/re-render)
+```
 
----
-
-## Phase 2B: Gemini Clip Analyzer (replaces stub AI tagger)
-
-Gemini vision model analyzes every UGC clip during ingestion. Extracts:
-- content_type, mood, quality_score (1-10)
-- has_speech + transcript summary
-- visual_elements (person, product, gym, kitchen, etc.)
-- usable_segments with timestamps and descriptions
-- detailed_description (2-3 sentences for AI agents)
-
-Cost: ~$0.001/clip, ~$0.60/mo at 150 videos/week scale. Paid Google Cloud API key (not free tier).
-
-- `src/lib/gemini.ts` — Gemini 2.0 Flash client + video analysis + validation + fallback
-- `src/workers/ingestion.ts` — `stubAiTagger()` replaced with `analyzeClip()` from Gemini
-- `src/scripts/test-gemini.ts` — Standalone test script
-
-### Test Results ✅
-Tested on 23s 4K babies.mov:
-- content_type: lifestyle, mood: casual, quality: 7/10
-- Speech detected with summary
-- 8 visual elements tagged (person, bed, baby, children, bottle, phone, etc.)
-- 1 usable segment identified (0-13s) with description
-- Detailed description generated for AI agent reference
+### Key Credentials
+- Google Sheets/Drive: Service account `AIqzMYUXoQjud7IW` ("Flemingo service acc")
+- Supabase HTTP: `l66cV4Gj1L3T6MjJ` ("Strapi API Token")
+- Sheet ID: `1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78`
+- Jobs tab gid: `645720058`, Brands tab gid: `219264500`
+- Drive Music Uploads: `1s2vUnIoJUt7rltSRlJeY9uqQyQ5_Lzso`
+- Drive Music Processed: `1RtBDaSxM45TT2B7ATvQGXvnY5HB1nWGw`
 
 ---
 
-## Phase 3: AI Agents (Low Cost — Mock First) ✅ COMPLETE
+## Phase Details (completed phases collapsed)
 
-All 3 agents built with dual mode: mock (no API key) and live (Claude Sonnet API). Context Packet merger assembles all outputs into a single immutable artifact.
+### Phase 1: Foundation ✅ COMPLETE
+Config modules, type definitions, job state machine, R2 storage, FFmpeg builders, connectivity test. DB schema deployed.
 
-- `src/agents/prompts/creative-director.md` — System prompt with brand voice, template catalog, trending hooks
-- `src/agents/prompts/asset-curator.md` — System prompt for clip selection from asset DB
-- `src/agents/prompts/copywriter.md` — System prompt for copy generation per platform
-- `src/agents/creative-director.ts` — Takes idea_seed + brand_config → Creative Brief JSON
-- `src/agents/asset-curator.ts` — Takes brief + asset query results → Clip Selection List (R2 keys only)
-- `src/agents/copywriter.ts` — Takes brief + voice guidelines → Copy Package (overlays, captions, hashtags, hooks)
-- `src/agents/context-packet.ts` — Runs all 3 agents, merges into immutable Context Packet, stores in job record
-- `src/scripts/test-agents.ts` — Mock mode test (`npm run test:agents`)
-- `src/config/env.ts` — Added optional `ANTHROPIC_API_KEY`
+### Phase 2: Workers ✅ COMPLETE
+8 processing workers (ingestion, clip-prep, transcriber, audio-mixer, sync-checker, exporter, qa-checker, renderer). Integration test 16/16.
 
-### How it works
-1. `buildContextPacket(ideaSeed, brandConfig)` runs all 3 agents sequentially
-2. Each agent checks for `ANTHROPIC_API_KEY` — if missing, returns realistic mock data
-3. If key exists, calls Claude Sonnet API with the system prompt + structured user message
-4. All 3 outputs share the same `brief_id` and merge into a `ContextPacket`
-5. `planJob(jobId, input)` stores the packet in the `jobs` table
+### Phase 2B: Gemini Analyzer ✅ COMPLETE
+Gemini 2.0 Flash video analysis during ingestion. Cost ~$0.001/clip.
 
-### Mock Test Results ✅ 28/28 passed
-- Creative Director: brief_id, brand match, template, 3 segments (hook/body/CTA), duration 30-60s, sub_segments
-- Asset Curator: correct brief reference, all segments covered, single + multi-clip, R2 key format
-- Copywriter: overlays, 3 platform captions, 5+ hashtags per platform, 3 hook variants with style labels
-- Context Packet: ID, all 3 outputs present, brand_config, timestamp, brief_ids match across outputs
+### Phase 3: AI Agents ✅ COMPLETE
+3 agents (Creative Director, Asset Curator, Copywriter) with mock + live Claude Sonnet modes. Context Packet merger. Mock 28/28, live 27/27.
 
-### Live API Test Results ✅ 27/27 passed (Claude Sonnet)
-- Creative Director: generated `hook-listicle-cta` template, 45s duration, 3 segments, real hook text
-- Asset Curator: falls back to mock (no assets in DB yet — expected, will work once clips are ingested)
-- Copywriter: platform-specific captions, hashtags, 3 hook variants matching brand's style preferences (pov/question/challenge)
-- Context Packet: full assembly with real Claude outputs, all brief_ids match
-- Normalizer functions handle Claude's varying JSON field names → mapped to exact TypeScript interfaces
-- Sample hook: "POV: Your desk job is ruining your posture"
-- Sample CTA: "More desk-friendly stretches in bio ↗️"
+### Phase 4: Remotion Templates ✅ COMPLETE
+6 components + 3 layouts. 1080x1920 30fps vertical video. Data-driven from Context Packet.
 
----
+### Phase 5A: Renderer + Server ✅ DEPLOYED
+Full pipeline wired. VPS running at 95.216.137.35 as systemd service. HTTP API on port 3000.
 
-## Phase 4: Remotion Templates (Free) ✅ COMPLETE
+### Phase 5B: Google Sheets ✅ CREATED
+"Video Pipeline" spreadsheet with Jobs, Brands, Caption Presets, Music Library, Templates, Dashboard tabs.
 
-All video templates built as React components. Each layout consumes a Context Packet and renders a full branded video at 1080x1920 30fps. Components are data-driven — all styling, timing, and copy comes from the brand config and Context Packet.
+### Phase 5C: n8n Workflows ✅ READY
+11 workflow JSONs with real credentials. S1-S7 (Sheet→Supabase), P1-P4 (Supabase→Sheet).
 
-### Shared
-- `src/templates/types.ts` — TemplateProps, ResolvedSegment, resolveSegments(), totalFrames()
-- `src/templates/Root.tsx` — Remotion composition registry (maps template_id → layout component)
+### Quality Phases 0-7 ✅ ALL COMPLETE
+Video type system, ingestion enrichment, beat-synced transitions, audio ducking, CRF 18 encoding, color grading, music selection, dynamic pacing. All deployed to VPS. 41/41 quality tests passing.
 
-### Components (reusable across layouts)
-- `src/templates/components/CaptionTrack.tsx` — Word-by-word animated captions with highlight/pop/karaoke styles, grouped into readable lines, driven by brand caption preset
-- `src/templates/components/HookText.tsx` — Hook overlay with 5 animations: pop-in, slide-up, typewriter, scale-rotate, glitch. Tight letter-spacing, text-stroke for readability
-- `src/templates/components/CTAScreen.tsx` — End screen with pulsing action badge (link-in-bio/swipe-up/follow/shop-now), brand name, accent color
-- `src/templates/components/LogoWatermark.tsx` — Persistent brand logo, configurable position/opacity/size, gentle fade-in
-- `src/templates/components/TransitionEffect.tsx` — 6 transition types: cut, fade, slide-left, slide-up, zoom, wipe
-- `src/templates/components/SegmentVideo.tsx` — Renders single or multi-clip segments with even duration distribution
-
-### Layouts (one per template_id)
-- `src/templates/layouts/HookDemoCTA.tsx` — Hook → Product demo → CTA (showcases, tutorials)
-- `src/templates/layouts/HookListicleCTA.tsx` — Hook → Numbered tips with progress bar → CTA (educational, tips)
-- `src/templates/layouts/HookTransformation.tsx` — Hook → Before/After split-wipe reveal → CTA (fitness, skincare)
-
-### Verification ✅
-- `npm run build` compiles cleanly
-- All components are type-safe with TemplateProps
-- 3 compositions registered in Root.tsx at 1080x1920 30fps
-
----
-
-## Phase 5: Renderer + Integration (Needs VPS — $30/mo)
-
-### 5A: VPS + Renderer ✅ CODE COMPLETE
-
-- `src/workers/renderer.ts` — Downloads clips from R2, bundles Remotion, renders composition, uploads to R2
-- `src/workers/pipeline.ts` — Full job lifecycle orchestrator (planning → clip-prep → transcription → rendering → audio-mix → sync-check → export → QA). **All workers fully wired** — calls prepareClips, transcribeAll, mixAudio, checkSync, exportPlatforms, runQAChecks.
-- `src/index.ts` — Server entry point, starts 3 BullMQ workers (planning, rendering, ingestion), graceful shutdown
-- `scripts/setup-vps.sh` — Automated VPS provisioning (Node 20, FFmpeg, whisper.cpp, Chromium deps, systemd service)
-- `package.json` — Added `npm start` (dev) and `npm run start:prod` (production)
-
-**Renderer flow:**
-1. Downloads all selected clips from R2 to temp dir
-2. Downloads logo + music if configured
-3. Bundles Remotion project (`@remotion/bundler`)
-4. Selects composition by `template_id` from Root.tsx
-5. Renders via `renderMedia()` (h264, 1080x1920, 30fps)
-6. Uploads rendered MP4 to `rendered/{brand}/{YYYY-MM}/{jobId}.mp4`
-7. Cleans up temp files
-
-**Pipeline flow:**
-- Planning: idea_seed → 3 AI agents → Context Packet → brief_review
-- Rendering: queued → clip-prep → transcription → rendering → audio-mix → sync-check → export → auto-qa → human_qa
-
-**Server startup verified:** `npm start` connects to all 4 BullMQ queues, starts 3 workers, graceful shutdown on SIGINT/SIGTERM.
-
-**VPS deployed:** Hetzner CX22 (2 vCPU, 4GB RAM, Ubuntu 24.04) — ~$4.50/mo
-- IP: 95.216.137.35
-- Node 20, FFmpeg, whisper.cpp (base.en model), Chromium deps installed
-- Code cloned from GitHub, .env configured, npm installed
-- Running as systemd service: `video-factory.service` (auto-restart, auto-start on boot)
-- All tests passing on VPS: 5/5 connectivity, 28/28 phase5, 27/27 live agents
-- GitHub: https://github.com/Domis123/video-factory
-- Deploy updates: `cd /home/video-factory && git pull && npm install && systemctl restart video-factory`
-- Logs: `journalctl -u video-factory -f`
-
-### Test Results ✅ 36/36 passed
-- Redis: PING + all 4 queues accessible (ingestion, planning, rendering, export)
-- BullMQ: job enqueue/dequeue/cleanup cycle
-- Context Packet: full mock assembly (3 agents → merged packet with segments, clips, copy)
-- Job lifecycle: 13 state transitions (idle → delivered) with all events logged to Supabase
-- All worker modules verified: renderVideo, runPlanning, runRenderPipeline, prepareClips, transcribeAll, mixAudio, checkSync, exportPlatforms, runQAChecks, allChecksPassed
-- Temp dir: create + cleanup cycle
-- State machine: terminal states, retry paths, rejection loops all validated
-- Cleanup: test data removed from Supabase
-
-### 5B: Google Sheets Admin Panel ✅ GUIDE READY
-
-Full setup guide in `SHEETS_SETUP.md`. Single spreadsheet with 6 tabs:
-1. **Jobs tab** — Create ideas, review briefs, approve QA (polled 30s). 19 columns with dropdowns.
-2. **Brands tab** — Colors, fonts, CTA style, voice guidelines (polled 5min). 22 columns with hex validation.
-3. **Caption Presets tab** — Flattened JSONB (20 cols), n8n reassembles to nested JSON.
-4. **Music Library tab** — Add/tag tracks, mood/genre/energy dropdowns. 12 columns.
-5. **Templates tab** — Reference + allowed brands per template. Read-only.
-6. **Dashboard tab** — Read-only stats from `v_brand_stats` (refreshed 5min). 8 columns.
-
-**To complete**: Create the spreadsheet following SHEETS_SETUP.md, share with n8n service account, add GOOGLE_SHEET_ID to .env.
-
-### 5C: n8n Workflows ✅ JSONs READY
-
-All 10 workflows are importable JSON files in `n8n-workflows/`:
-
-**Sheet → Supabase (6 workflows):**
-- `S1-new-job.json` — Polls Jobs sheet every 30s for new idea seeds, validates brand, creates job in Supabase
-- `S2-brief-review.json` — Polls for approve/reject decisions, updates Supabase, enqueues rendering via HTTP API
-- `S3-qa-decision.json` — Polls for QA decisions, routes rejects to planning or re-render based on issue type
-- `S4-brand-config.json` — Polls Brands sheet every 5min, validates hex colors/ranges, updates Supabase
-- `S5-caption-preset.json` — Polls Caption Presets, reassembles 20 flat columns into nested JSONB, updates Supabase
-- `S6-music-track.json` — Polls Music Library for new tracks, inserts to Supabase, writes back Track ID
-
-**Supabase → Sheet (4 workflows):**
-- `P1-job-status-push.json` — Webhook endpoint, fetches job from Supabase, maps to Sheet columns
-- `P2-periodic-sync.json` — Every 5min catch-up: syncs all active jobs from Supabase to Sheet
-- `P3-dashboard-refresh.json` — Every 5min: fetches v_brand_stats + active counts, rebuilds Dashboard tab
-- `P4-monthly-archive.json` — 1st of month: archives delivered/failed jobs to monthly tab
-
-**HTTP API added to index.ts:**
-- `POST /enqueue` — n8n calls this to add jobs to BullMQ queues (body: `{ queue, jobId }`)
-- `GET /health` — Health check endpoint
-- Port configurable via `API_PORT` env var (default 3000)
-
-**To complete**: Import JSONs into n8n, configure Google Sheets + Supabase credentials, set env vars (GOOGLE_SHEET_ID, SUPABASE_URL, SUPABASE_ANON_KEY).
-
-### 5D: End-to-end test with pilot brands
-
----
-
-## Key Design Decisions
-
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Supabase client | @supabase/supabase-js | Typed queries, auto-headers, atomic update maps to PostgREST |
-| Module system | ESM (type: module) | Modern standard, required by some deps |
-| State machine | App-level TypeScript | Easier to debug than Postgres triggers; atomic DB update prevents races |
-| FFmpeg in Phase 1 | Command builders only (pure functions) | Testable without FFmpeg installed |
-| BullMQ connections | Fresh ioredis per Queue/Worker | BullMQ requires separate connections |
-| Agent development | Mock-first | Saves ~$100/mo during dev; prompts are free to iterate |
-| Worker interface | Google Sheets (not web dashboard) | Zero learning curve, workers already know Sheets, n8n has native Sheets integration |
-| Sheets sync | n8n polling (not Apps Script) | Simpler, no external script to maintain, sufficient for 150 videos/week throughput |
-| JSONB flattening | Separate Caption Presets tab | 20 nested fields too many for Brands tab; comma-separated for simple arrays |
+### Music Ingest Pipeline ✅ BUILT
+`POST /music-ingest` endpoint on VPS. S7 n8n workflow: Drive download → VPS ffprobe → R2 → Supabase → Sheet → Move to Processed. Worker-friendly: just drop MP3 in Drive folder.
