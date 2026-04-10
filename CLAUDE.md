@@ -4,8 +4,9 @@
 A 95% automated video production pipeline for 30 social media brands. Takes raw UGC footage from Google Drive, uses AI agents to plan creative briefs, and renders branded short-form videos (30-60s) for TikTok, Instagram Reels, and YouTube Shorts. Target: 150 videos/week across 30 brands.
 
 ## Key Documentation
-- `VIDEO_PIPELINE_ARCHITECTURE_v2.md` — Full architecture, database schemas, workflow definitions, state machine
-- `QUALITY_UPGRADE_PLAN.md` — 9-phase video quality upgrade plan (video types, beat sync, color grading, audio ducking, encoding, music selection)
+- **`VIDEO_PIPELINE_ARCHITECTURE_v3.md`** — Current source of truth. MVP scope: 3 brands, 1 video type, 7-day timeline. Replaces v2.
+- `VIDEO_PIPELINE_ARCHITECTURE_v2.md` — Historical reference, full multi-brand vision
+- `QUALITY_UPGRADE_PLAN.md` — 9-phase quality upgrade plan (most phases feature-flagged OFF for MVP)
 - `VPS-SERVERS.md` — Infrastructure docs: both VPS servers, deployment, costs, how they work together
 - `env.video-factory` — All credentials (Supabase, Redis, R2). Copy to `.env` for local dev.
 
@@ -22,7 +23,7 @@ A 95% automated video production pipeline for 30 social media brands. Takes raw 
 ## Tech Stack
 - **Orchestrator**: n8n (self-hosted, Hetzner) — 46.224.56.174
 - **Database**: Supabase Postgres (free tier) — `https://kfdfcoretoaukcoasfmu.supabase.co`
-- **Job Queue**: BullMQ + Upstash Redis (serverless, TLS required, drainDelay 30s)
+- **Job Queue**: BullMQ + Upstash Redis (serverless, TLS required, drainDelay 120s)
 - **Storage**: Cloudflare R2 (S3-compatible, zero egress)
 - **AI Agents**: Claude Sonnet API (Creative Director, Asset Curator, Copywriter)
 - **Clip Analyzer**: Gemini API — analyzes raw UGC during ingestion (content type, mood, quality, visual elements, usable segments, speech detection)
@@ -131,7 +132,8 @@ Workers manage everything from a single Google Spreadsheet with 6 tabs:
 
 ## HTTP API (VPS port 3000)
 - `POST /enqueue` — n8n calls this to add jobs to BullMQ queues. Body: `{ queue, jobId }`
-- `POST /music-ingest` — n8n S7 sends audio binary. Header: `x-track-meta` JSON. Returns track record with ID, duration, BPM.
+- `POST /music-ingest` — n8n S7 sends audio binary. Header: `x-track-meta` (plain JSON or base64-encoded JSON). Returns track record with ID, duration, BPM.
+- `POST /ugc-ingest` — n8n S8 sends video binary. Header: `x-asset-meta` (plain JSON or base64-encoded JSON) with `filename`, `brand_id`, optional `description`, `drive_file_id`. Falls back to `{brand_id}_{description}.ext` parsing if header missing. Idempotent on `(filename, brand_id)` — returns `{ok:true, duplicate:true, ...}` for repeats. Module-scope concurrency guard rejects overlapping requests with 503 (4K UGC + parallel ingestion OOMs the 4GB VPS).
 - `GET /health` — Health check. Returns `{ status: "ok", worker: "worker-1" }`
 
 ## Build Commands
@@ -175,15 +177,16 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
 - `TransitionEffect` — 8 types (cut, fade, slide-left, slide-up, zoom, wipe, beat-flash, beat-zoom)
 - `SegmentVideo` — Handles single or multi-clip segments automatically
 
-## Quality Upgrade Features (all deployed)
-- **Video Type System** — 4 types with pacing profiles, energy curves, brand mapping
-- **Ingestion Enrichment** — FFmpeg clip analysis: dominant color, motion intensity, brightness
-- **Beat-Synced Transitions** — BeatMap from tempo_bpm, snap transitions to nearest beat
-- **Audio Ducking** — Sidechain compressor (attack 50ms, release 300ms, ratio 6:1, base vol 0.30)
-- **Encoding Upgrade** — CRF 18 + slow preset, audio 192k (was CRF 23 + medium + 128k)
-- **Color Grading** — 3-step: auto-level (brightness-adaptive) → brand LUT (.cube) → preset fallback
-- **Music Selection** — Weighted random by mood + energy range, prefers fresh tracks
-- **Dynamic Pacing** — Per-segment transition timing, animation speeds from energy curve + beat map
+## Quality Upgrade Features (code present, most feature-flagged OFF for MVP per v3)
+For MVP, only ingestion enrichment + encoding upgrade are active. Other phases stay in the code but are gated off until after first delivered video. Re-enable per v3 plan.
+- **Video Type System** — 4 types defined; MVP uses only `tips-listicle`
+- **Ingestion Enrichment** — FFmpeg clip analysis: dominant color, motion intensity, brightness *(active)*
+- **Beat-Synced Transitions** — BeatMap from tempo_bpm, snap transitions to nearest beat *(flagged off)*
+- **Audio Ducking** — Sidechain compressor (attack 50ms, release 300ms, ratio 6:1, base vol 0.30) *(flagged off)*
+- **Encoding Upgrade** — CRF 18 + slow preset, audio 192k (was CRF 23 + medium + 128k) *(active)*
+- **Color Grading** — 3-step: auto-level → brand LUT → preset fallback *(flagged off)*
+- **Music Selection** — Weighted random by mood + energy range *(flagged off; MVP uses single FALLBACK_MUSIC_TRACK_ID)*
+- **Dynamic Pacing** — Per-segment transition timing from energy curve + beat map *(flagged off)*
 
 ## Infrastructure
 - **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX22 (2 vCPU, 4GB RAM), Ubuntu
@@ -196,19 +199,26 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
 
 ## Important Technical Notes
 - Upstash Redis requires `tls: {}` and `maxRetriesPerRequest: null` in ioredis config
-- BullMQ drainDelay: 30s between empty-queue polls (prevents free tier exhaustion, ~26K cmds/day idle)
+- BullMQ drainDelay: 120s between empty-queue polls (~6.5K cmds/day idle, ~195K/mo, well under Upstash 500K free tier limit). 30s burned through the limit in days.
 - R2 client needs `forcePathStyle: true` and `region: "auto"`
 - Job status uses Postgres ENUM — TypeScript `JobStatus` type must exactly match
 - Atomic job claiming: `.update({status}).eq('id', jobId).eq('status', fromStatus)` prevents race conditions
 - 5 pilot brands seeded: nordpilates, ketoway, carnimeat, nodiet, highdiet
 - Quality upgrade migration applied to Supabase (2026-04-07): new columns on jobs, assets, brand_configs
+- **Gemini 4K downscale**: `src/lib/gemini.ts` downscales clips >50MB to 720p (libx264 ultrafast, no audio) before base64-encoding for analysis. Raw 4K UGC (100MB+) balloons to 130MB+ as base64 in JS heap and OOMs the 4GB VPS. Downscale temp files cleaned up in `finally`.
+- **UGC ingestion concurrency guard**: `/ugc-ingest` uses a module-scope `ugcIngesting` flag to reject overlapping requests with 503. n8n S8 must serialize uploads. Triggered after 54-clip parallel-upload OOM incident.
+- VPS system deps: `ffmpeg`, `chromium-browser`, and whisper.cpp built from source must be installed manually — `apt install ffmpeg chromium-browser` then build whisper.cpp via `cmake -B build && cmake --build build -j2`.
 
-## Current Build Status
-- **All code phases COMPLETE** (Phases 1-5 + Quality Phases 0-7)
-- **VPS deployed and running** at 95.216.137.35 with all endpoints live
-- **Google Sheets created** — "Video Pipeline" spreadsheet with 6 tabs
-- **n8n workflows**: 11 JSONs ready (S1-S7, P1-P4), S7 being tested
-- **Music library**: 15 tracks dropped in Google Drive, S7 workflow processing them (Drive → VPS ffprobe → R2 → Supabase → Sheet)
+## Current Build Status (MVP per v3, 7-day plan)
+- **MVP scope**: 3 brands (nordpilates, ketoway, carnimeat), 1 video type (`tips-listicle`), most quality phases feature-flagged OFF
+- **Day 1 — DONE**: S7 music ingest end-to-end green. 15 tracks in R2 + Supabase + Sheet. drainDelay fixed 30→120, fresh Upstash DB.
+- **Day 2 — IN PROGRESS**:
+  - VPS `/ugc-ingest` endpoint live (idempotency, concurrency guard, 4K→720p downscale before Gemini)
+  - Awaiting S8 n8n workflow to push real UGC clips end-to-end
+  - Day 2 not declared done until S8 lands real assets in Supabase
+- **Day 3-7 — pending**: brand seed scripts, feature flags in env.ts, FALLBACK_MUSIC_TRACK_ID, end-to-end idea seed → delivered video
+- **VPS**: 95.216.137.35, all endpoints live, ffmpeg + chromium + whisper.cpp installed
+- **Google Sheets**: "Video Pipeline" spreadsheet, 6 tabs created
+- **n8n workflows**: S1-S3 + S7 + P1/P2 active. S4/S5/S6/P3 deactivated for MVP (per v3). S8 (UGC ingest) being built on n8n side.
 - **DB migrations applied** — base schema + quality upgrade columns
 - **Tests**: 98/98 passing (30 mock + 41 quality + 27 live)
-- **Pending**: End-to-end test (idea seed → rendered video), UGC clips for pilot brand, Phase 8 (Trending Audio)

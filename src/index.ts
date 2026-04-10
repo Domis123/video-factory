@@ -152,19 +152,36 @@ const server = createServer(async (req, res) => {
       console.warn('[ugc-ingest] Rejected: ingestion already in progress');
       res.writeHead(503);
       res.end(JSON.stringify({ error: 'ingestion busy, retry later' }));
+      req.destroy();
       return;
     }
+
+    // Safety net: reject oversized uploads before touching disk or the single-flight lock.
+    // 500MB allows 4K UGC (NP_concept_17.MOV was 986MB — that's too big, downscale upstream).
+    const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+    const contentLength = Number(req.headers['content-length'] ?? 0);
+    if (contentLength > MAX_UPLOAD_BYTES) {
+      console.warn(`[ugc-ingest] Rejected: content-length ${contentLength} exceeds ${MAX_UPLOAD_BYTES}`);
+      res.writeHead(413);
+      res.end(JSON.stringify({ error: `file too large: ${contentLength} bytes (max ${MAX_UPLOAD_BYTES})` }));
+      req.destroy();
+      return;
+    }
+
     ugcIngesting = true;
     const tmpDir = '/tmp/ugc-ingest';
     let tmpPath = '';
     try {
       const { ingestAsset } = await import('./workers/ingestion.js');
       const { supabaseAdmin } = await import('./config/supabase.js');
-      const { mkdir, writeFile, unlink } = await import('node:fs/promises');
+      const { mkdir, stat } = await import('node:fs/promises');
+      const { createWriteStream } = await import('node:fs');
+      const { pipeline } = await import('node:stream/promises');
       const { randomUUID } = await import('node:crypto');
       const { extname } = await import('node:path');
 
-      const body = await readRawBody(req);
+      // Parse meta from headers FIRST — no body read yet, so duplicates and bad-brand
+      // requests abort the upload without buffering or spooling to disk.
       const rawMeta = req.headers['x-asset-meta'] as string || '{}';
       let meta: Record<string, unknown>;
       try {
@@ -191,10 +208,11 @@ const server = createServer(async (req, res) => {
       if (!brandId) {
         res.writeHead(400);
         res.end(JSON.stringify({ error: 'Missing brand_id in header and filename' }));
+        req.destroy();
         return;
       }
 
-      // Idempotency: check if asset with same filename + brand_id already exists
+      // Idempotency check BEFORE reading body — duplicates never touch disk
       const { data: existing } = await supabaseAdmin
         .from('assets')
         .select('id, r2_key, brand_id, content_type, quality_score, duration_seconds')
@@ -216,15 +234,20 @@ const server = createServer(async (req, res) => {
           quality_score: existing.quality_score,
           duration_seconds: existing.duration_seconds,
         }));
+        req.destroy();
         return;
       }
 
-      // Save binary to temp file
+      // Stream request body directly to a temp file. Node never holds more than
+      // its default highWaterMark (~64KB) in RAM regardless of upload size.
+      // This is the fix for the 1GB OOM — the previous readRawBody helper did
+      // Buffer.concat(chunks) which buffered the entire upload in JS heap.
       await mkdir(tmpDir, { recursive: true });
       const ext = extname(filename) || '.mp4';
       tmpPath = `${tmpDir}/${randomUUID()}${ext}`;
-      await writeFile(tmpPath, body);
-      console.log(`[ugc-ingest] Saved ${filename} (${(body.length / 1024 / 1024).toFixed(1)} MB) for ${brandId}`);
+      await pipeline(req, createWriteStream(tmpPath));
+      const fileStat = await stat(tmpPath);
+      console.log(`[ugc-ingest] Streamed ${filename} (${(fileStat.size / 1024 / 1024).toFixed(1)} MB) for ${brandId}`);
 
       // Call existing ingestion pipeline
       const asset = await ingestAsset({
