@@ -1,5 +1,5 @@
 import React from 'react';
-import { Composition } from 'remotion';
+import { Composition, registerRoot } from 'remotion';
 import { HookDemoCTA } from './layouts/HookDemoCTA.js';
 import { HookListicleCTA } from './layouts/HookListicleCTA.js';
 import { HookTransformation } from './layouts/HookTransformation.js';
@@ -54,3 +54,8 @@ export const RemotionRoot: React.FC = () => {
     </>
   );
 };
+
+// Remotion entry-point side effect: the bundler looks for this call in the
+// file passed to `bundle({ entryPoint })`. Without it the bundler throws
+// `this file does not contain "registerRoot"`.
+registerRoot(RemotionRoot);
