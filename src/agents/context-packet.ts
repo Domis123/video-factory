@@ -29,6 +29,15 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
   // Agent 2: Asset Curator → Clip Selections
   console.log('[context-packet] Agent 2: Asset Curator...');
   const clips = await selectClips({ brief });
+  // Defensive check: Claude sometimes returns a malformed envelope (e.g.,
+  // {selections: [...]} instead of {clip_selections: [...]}) and asset-curator
+  // casts the parsed JSON without shape validation. Surface the actual payload
+  // so we can fix the prompt instead of debugging a generic TypeError.
+  if (!clips?.clip_selections?.length) {
+    throw new Error(
+      'Asset Curator returned no clip selections: ' + JSON.stringify(clips),
+    );
+  }
   console.log(`[context-packet] Clips selected: ${clips.clip_selections.length} segments covered`);
 
   // Agent 3: Copywriter → Copy Package
