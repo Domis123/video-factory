@@ -78,9 +78,28 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
     }
 
     // 5. Bundle Remotion project
+    // The project ships as TypeScript sources with NodeNext module resolution,
+    // which requires `.js` extensions on relative imports (e.g.
+    // `./HookDemoCTA.js`) even though the files on disk are `.tsx`. Remotion's
+    // default webpack config resolves `.tsx` but doesn't know to try `.tsx`
+    // when asked for `.js`, so the bundle fails with `Can't resolve
+    // './layouts/HookDemoCTA.js'`. The webpack 5 `resolve.extensionAlias`
+    // field is the standard fix: when webpack sees a `.js` relative import,
+    // it also tries the matching `.ts`/`.tsx` file first.
     console.log(`[renderer] Bundling Remotion project...`);
     const bundleLocation = await bundle({
       entryPoint: REMOTION_ENTRY,
+      webpackOverride: (config) => ({
+        ...config,
+        resolve: {
+          ...(config.resolve ?? {}),
+          extensionAlias: {
+            ...((config.resolve as { extensionAlias?: Record<string, string[]> })?.extensionAlias ?? {}),
+            '.js': ['.tsx', '.ts', '.js'],
+            '.mjs': ['.mts', '.mjs'],
+          },
+        },
+      }),
       onProgress: (progress) => {
         if (progress % 25 === 0) console.log(`[renderer] Bundle: ${progress}%`);
       },
