@@ -1,7 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
+import { exec } from './exec.js';
 
 const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
 
@@ -43,38 +45,73 @@ Be specific and accurate with timestamps. Identify the most usable sub-sections 
 
 export async function analyzeClip(filePath: string): Promise<ClipAnalysis> {
   const ext = extname(filePath).toLowerCase();
-  const mimeType = MIME_MAP[ext] ?? 'video/mp4';
-
-  const videoData = await readFile(filePath);
-  const base64 = videoData.toString('base64');
-
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-  const result = await model.generateContent([
-    { text: ANALYSIS_PROMPT },
-    {
-      inlineData: {
-        mimeType,
-        data: base64,
-      },
-    },
-  ]);
-
-  const text = result.response.text();
-
-  // Extract JSON from response (handle potential markdown wrapping)
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    console.warn('[gemini] Could not parse response, using defaults');
-    return fallbackAnalysis();
-  }
+  let mimeType = MIME_MAP[ext] ?? 'video/mp4';
+  let analysisPath = filePath;
+  let downscalePath: string | null = null;
 
   try {
-    const parsed = JSON.parse(jsonMatch[0]) as ClipAnalysis;
-    return validateAnalysis(parsed);
-  } catch {
-    console.warn('[gemini] JSON parse error, using defaults');
-    return fallbackAnalysis();
+    // Downscale large clips to 720p before sending to Gemini.
+    // 4K clips can be 100MB+ which would balloon to 130MB+ as base64 in JS heap
+    // and OOM the worker. Gemini's vision model doesn't need full 4K resolution.
+    const fileStat = await stat(filePath);
+    const fileSizeMb = fileStat.size / (1024 * 1024);
+    if (fileSizeMb > 50) {
+      downscalePath = `/tmp/gemini-${randomUUID()}.mp4`;
+      console.log(`[gemini] Clip is ${fileSizeMb.toFixed(0)}MB, downscaling to 720p for analysis`);
+      const dsResult = await exec({
+        command: 'ffmpeg',
+        args: [
+          '-i', filePath,
+          '-vf', 'scale=720:-2',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-crf', '28',
+          '-an',
+          '-y', downscalePath,
+        ],
+      });
+      if (dsResult.exitCode !== 0) {
+        throw new Error(`ffmpeg downscale failed (exit ${dsResult.exitCode}): ${dsResult.stderr}`);
+      }
+      analysisPath = downscalePath;
+      mimeType = 'video/mp4';
+    }
+
+    const videoData = await readFile(analysisPath);
+    const base64 = videoData.toString('base64');
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    const result = await model.generateContent([
+      { text: ANALYSIS_PROMPT },
+      {
+        inlineData: {
+          mimeType,
+          data: base64,
+        },
+      },
+    ]);
+
+    const text = result.response.text();
+
+    // Extract JSON from response (handle potential markdown wrapping)
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.warn('[gemini] Could not parse response, using defaults');
+      return fallbackAnalysis();
+    }
+
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as ClipAnalysis;
+      return validateAnalysis(parsed);
+    } catch {
+      console.warn('[gemini] JSON parse error, using defaults');
+      return fallbackAnalysis();
+    }
+  } finally {
+    if (downscalePath) {
+      await unlink(downscalePath).catch(() => {});
+    }
   }
 }
 
