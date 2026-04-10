@@ -2,6 +2,7 @@ import { join, dirname } from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { buildAudioExtractCommand } from '../lib/ffmpeg.js';
 import { execOrThrow, exec } from '../lib/exec.js';
+import { env } from '../config/env.js';
 
 export interface WordTimestamp {
   word: string;
@@ -18,9 +19,9 @@ export interface TranscriptionResult {
   fullText: string;
 }
 
-// whisper.cpp binary path — override via WHISPER_CPP_PATH env var
-const WHISPER_BIN = process.env.WHISPER_CPP_PATH ?? 'whisper-cpp';
-const WHISPER_MODEL = process.env.WHISPER_MODEL_PATH ?? 'models/ggml-base.en.bin';
+// whisper.cpp binary + model paths — configured via WHISPER_BIN / WHISPER_MODEL in env
+const WHISPER_BIN = env.WHISPER_BIN;
+const WHISPER_MODEL = env.WHISPER_MODEL;
 
 export async function transcribeClip(
   clipPath: string,

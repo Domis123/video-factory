@@ -31,6 +31,10 @@ const envSchema = z.object({
   RENDER_TEMP_DIR: z.string().default('/tmp/video-factory'),
   API_PORT: z.coerce.number().int().default(3000),
 
+  // whisper.cpp paths — defaults match the VPS install (/opt/whisper.cpp/...)
+  WHISPER_BIN: z.string().default('/opt/whisper.cpp/build/bin/whisper-cli'),
+  WHISPER_MODEL: z.string().default('/opt/whisper.cpp/models/ggml-base.en.bin'),
+
   // ── MVP Feature Flags ──
   // Most quality upgrade phases are gated OFF by default for MVP per
   // VIDEO_PIPELINE_ARCHITECTURE_v3.md. Flip to 'true' to re-enable once

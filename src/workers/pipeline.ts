@@ -16,6 +16,10 @@ import { mkdir, rm } from 'node:fs/promises';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import { transitionJob, claimJob, logEvent } from '../lib/job-manager.js';
+// logEvent is used for non-transition events (errors, retries). Per-step metrics
+// are attached to the NEXT transitionJob() call's `details` param instead of
+// going through logEvent('state_transition', ...), because job_events.to_status
+// is NOT NULL and a bare logEvent has no target status to report.
 import { buildContextPacket } from '../agents/context-packet.js';
 import { renderVideo } from './renderer.js';
 import { prepareClips } from './clip-prep.js';
@@ -137,14 +141,12 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
     if (!env.ENABLE_COLOR_GRADING) {
       console.log(`[pipeline] ${jobId}: color grading flagged off`);
     }
-    await logEvent(jobId, 'state_transition', {
-      step: 'clip_prep',
-      worker: env.WORKER_ID,
-      clipsPrepped: clipPrepResult.preparedClips.length,
-    });
 
     // ── Step 2: Transcription ──
-    await transitionJob(jobId, 'clip_prep', 'transcription');
+    await transitionJob(jobId, 'clip_prep', 'transcription', {
+      clipsPrepped: clipPrepResult.preparedClips.length,
+      worker: env.WORKER_ID,
+    });
     console.log(`[pipeline] ${jobId}: transcription`);
 
     // Determine which clips have speech based on the brief's clip requirements
@@ -169,14 +171,11 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       }
     }
 
-    await logEvent(jobId, 'state_transition', {
-      step: 'transcription',
+    // ── Step 3: Rendering (Remotion) ──
+    await transitionJob(jobId, 'transcription', 'rendering', {
       segmentsTranscribed: transcriptionResults.filter((r) => r.words.length > 0).length,
       totalWords: transcriptionResults.reduce((sum, r) => sum + r.words.length, 0),
     });
-
-    // ── Step 3: Rendering (Remotion) ──
-    await transitionJob(jobId, 'transcription', 'rendering');
     console.log(`[pipeline] ${jobId}: rendering`);
 
     const renderResult = await renderVideo({
@@ -194,26 +193,20 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       })
       .eq('id', jobId);
 
-    await logEvent(jobId, 'state_transition', {
-      step: 'rendering',
+    // ── Step 4: Audio Mix ──
+    await transitionJob(jobId, 'rendering', 'audio_mix', {
       renderTimeMs: renderResult.durationMs,
       r2Key: renderResult.r2Key,
     });
-
-    // ── Step 4: Audio Mix ──
-    await transitionJob(jobId, 'rendering', 'audio_mix');
     console.log(`[pipeline] ${jobId}: audio_mix`);
 
     const audioResult = await mixAudio(jobId, renderResult.outputPath, contextPacket);
 
-    await logEvent(jobId, 'state_transition', {
-      step: 'audio_mix',
+    // ── Step 5: Sync Check ──
+    await transitionJob(jobId, 'audio_mix', 'sync_check', {
       hasMusic: !!audioResult.musicTrackR2Key,
       musicVolume: audioResult.musicVolume,
     });
-
-    // ── Step 5: Sync Check ──
-    await transitionJob(jobId, 'audio_mix', 'sync_check');
     console.log(`[pipeline] ${jobId}: sync_check`);
 
     // Build clip duration map for sync checker
@@ -237,14 +230,11 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       // with adjusted audio timing, which is a future enhancement
     }
 
-    await logEvent(jobId, 'state_transition', {
-      step: 'sync_check',
-      passed: syncResult.passed,
+    // ── Step 6: Platform Export ──
+    await transitionJob(jobId, 'sync_check', 'platform_export', {
+      syncPassed: syncResult.passed,
       maxDriftMs: syncResult.maxDriftMs,
     });
-
-    // ── Step 6: Platform Export ──
-    await transitionJob(jobId, 'sync_check', 'platform_export');
     console.log(`[pipeline] ${jobId}: platform_export`);
 
     // Generate slug from template + hook text for filename
@@ -262,13 +252,10 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       .update({ final_outputs: exportResult.outputs })
       .eq('id', jobId);
 
-    await logEvent(jobId, 'state_transition', {
-      step: 'platform_export',
+    // ── Step 7: Auto QA ──
+    await transitionJob(jobId, 'platform_export', 'auto_qa', {
       platforms: Object.keys(exportResult.outputs),
     });
-
-    // ── Step 7: Auto QA ──
-    await transitionJob(jobId, 'platform_export', 'auto_qa');
     console.log(`[pipeline] ${jobId}: auto_qa`);
 
     // Run QA on the TikTok export (primary format)
@@ -290,18 +277,15 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       })
       .eq('id', jobId);
 
-    await logEvent(jobId, 'state_transition', {
-      step: 'auto_qa',
-      passed: qaPassed,
-      results: Object.entries(qaResults).map(([k, v]) => `${k}: ${v.passed ? 'ok' : 'FAIL'}`),
-    });
-
     if (!qaPassed) {
       console.warn(`[pipeline] ${jobId}: Auto QA flagged issues — forwarding to human QA with flags`);
     }
 
     // ── Step 8: Human QA ──
-    await transitionJob(jobId, 'auto_qa', 'human_qa');
+    await transitionJob(jobId, 'auto_qa', 'human_qa', {
+      autoQaPassed: qaPassed,
+      results: Object.entries(qaResults).map(([k, v]) => `${k}: ${v.passed ? 'ok' : 'FAIL'}`),
+    });
 
     const totalMs = Date.now() - startTime;
     console.log(`[pipeline] Render pipeline complete for ${jobId} in ${(totalMs / 1000).toFixed(1)}s. QA: ${qaPassed ? 'PASSED' : 'FLAGGED'}. Awaiting human review.`);

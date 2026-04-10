@@ -1,4 +1,5 @@
 import { mkdir, rm } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { env } from '../config/env.js';
 import { downloadToFile } from '../lib/r2-storage.js';
@@ -56,6 +57,22 @@ export async function prepareClips(
       const rawPath = join(rawDir, `seg${sel.segment_id}${suffix}_raw.mp4`);
       const trimmedPath = join(clipsDir, `seg${sel.segment_id}${suffix}_trimmed.mp4`);
       const normalizedPath = join(clipsDir, `seg${sel.segment_id}${suffix}.mp4`);
+
+      // Idempotency: if the finished normalized clip already exists on disk
+      // (from a prior run of this same jobId), skip download/trim/normalize.
+      // Lets the pipeline resume after a later-step crash without redoing the
+      // 15+ minute clip prep work.
+      if (existsSync(normalizedPath) && statSync(normalizedPath).size > 0) {
+        console.log(`[clip-prep] Reusing existing normalized clip seg${sel.segment_id}${suffix}`);
+        preparedClips.push({
+          segmentId: sel.segment_id,
+          localPath: normalizedPath,
+          r2Key: clip.r2_key,
+          trimStart: clip.trim?.start_s ?? 0,
+          trimEnd: clip.trim?.end_s ?? 0,
+        });
+        continue;
+      }
 
       // 1. Download from R2
       console.log(`[clip-prep] Downloading ${clip.r2_key}`);
