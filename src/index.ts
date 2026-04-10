@@ -80,6 +80,10 @@ console.log('✅ All workers started. Waiting for jobs...\n');
 // ── HTTP API (for n8n to enqueue jobs) ──
 const API_PORT = env.API_PORT;
 
+// Concurrency guard: 4K UGC clips can be 160MB+ and OOM the 4GB VPS if processed
+// in parallel. Reject overlapping ingestion requests with 503.
+let ugcIngesting = false;
+
 const server = createServer(async (req, res) => {
   // CORS + JSON headers
   res.setHeader('Content-Type', 'application/json');
@@ -144,6 +148,13 @@ const server = createServer(async (req, res) => {
 
   // ── UGC Ingest: n8n S8 sends video binary, VPS does ffprobe → Gemini → R2 → Supabase ──
   if (req.method === 'POST' && req.url === '/ugc-ingest') {
+    if (ugcIngesting) {
+      console.warn('[ugc-ingest] Rejected: ingestion already in progress');
+      res.writeHead(503);
+      res.end(JSON.stringify({ error: 'ingestion busy, retry later' }));
+      return;
+    }
+    ugcIngesting = true;
     const tmpDir = '/tmp/ugc-ingest';
     let tmpPath = '';
     try {
@@ -242,6 +253,7 @@ const server = createServer(async (req, res) => {
         const { unlink } = await import('node:fs/promises');
         await unlink(tmpPath).catch(() => {});
       }
+      ugcIngesting = false;
     }
     return;
   }
