@@ -29,16 +29,20 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
   // Agent 2: Asset Curator → Clip Selections
   console.log('[context-packet] Agent 2: Asset Curator...');
   const clips = await selectClips({ brief });
-  // Defensive check: Claude sometimes returns a malformed envelope (e.g.,
-  // {selections: [...]} instead of {clip_selections: [...]}) and asset-curator
-  // casts the parsed JSON without shape validation. Surface the actual payload
-  // so we can fix the prompt instead of debugging a generic TypeError.
-  if (!clips?.clip_selections?.length) {
+  // Claude occasionally returns {selections: [...]} instead of the canonical
+  // {clip_selections: [...]}. Response is structurally fine — just normalize
+  // the key name so downstream code (clip-prep, renderer) sees one shape.
+  const curatorRaw = clips as Partial<ClipSelectionList> & {
+    selections?: ClipSelectionList['clip_selections'];
+  };
+  const clipSelections = curatorRaw.clip_selections ?? curatorRaw.selections ?? [];
+  if (!clipSelections.length) {
     throw new Error(
       'Asset Curator returned no clip selections: ' + JSON.stringify(clips),
     );
   }
-  console.log(`[context-packet] Clips selected: ${clips.clip_selections.length} segments covered`);
+  clips.clip_selections = clipSelections;
+  console.log(`[context-packet] Clips selected: ${clipSelections.length} segments covered`);
 
   // Agent 3: Copywriter → Copy Package
   console.log('[context-packet] Agent 3: Copywriter...');
