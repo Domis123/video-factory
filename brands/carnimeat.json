@@ -1,0 +1,54 @@
+{
+  "brand_id": "carnimeat",
+  "brand_name": "CarniMeat",
+  "primary_color": "#8B0000",
+  "secondary_color": "#2C1810",
+  "accent_color": "#FF6347",
+  "font_family": "Inter",
+  "font_weight_title": 700,
+  "font_weight_body": 400,
+  "caption_preset": {
+    "preset_name": "carnimeat_default",
+    "engine": "remotion_caption_component",
+    "style": {
+      "font_family": "Inter",
+      "font_size": 42,
+      "font_weight": 700,
+      "text_color": "#FFFFFF",
+      "stroke_color": "#000000",
+      "stroke_width": 3,
+      "background": "none",
+      "position": "bottom_center",
+      "margin_bottom_px": 160,
+      "max_width_percent": 85,
+      "text_align": "center",
+      "animation": {
+        "type": "word_by_word",
+        "highlight_color": "#8B0000",
+        "highlight_style": "background_pill",
+        "word_gap_ms": 50
+      },
+      "shadow": {
+        "color": "rgba(0,0,0,0.5)",
+        "blur": 4,
+        "offset_x": 0,
+        "offset_y": 2
+      }
+    }
+  },
+  "logo_r2_key": "brands/carnimeat/logo.png",
+  "watermark_r2_key": null,
+  "watermark_position": "top_right",
+  "watermark_opacity": 0.6,
+  "cta_style": "link-in-bio",
+  "cta_bg_color": "#8B0000",
+  "cta_text_color": "#FFFFFF",
+  "transition_style": "cut",
+  "voice_guidelines": "Bold, unapologetic, results-focused. Challenge mainstream nutrition dogma. Speak like someone who's seen real transformations and isn't afraid to call out bad advice. Lean into protein, satiety, and ancestral eating.",
+  "hook_style_preference": ["pop-in", "scale-rotate"],
+  "content_pillars": ["carnivore diet", "meat recipes", "protein", "animal-based"],
+  "allowed_video_types": ["tips-listicle"],
+  "color_grade_preset": "warm-vibrant",
+  "color_lut_r2_key": null,
+  "active": true
+}

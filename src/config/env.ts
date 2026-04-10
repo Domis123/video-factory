@@ -30,6 +30,21 @@ const envSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).default(2),
   RENDER_TEMP_DIR: z.string().default('/tmp/video-factory'),
   API_PORT: z.coerce.number().int().default(3000),
+
+  // ── MVP Feature Flags ──
+  // Most quality upgrade phases are gated OFF by default for MVP per
+  // VIDEO_PIPELINE_ARCHITECTURE_v3.md. Flip to 'true' to re-enable once
+  // the music library is stocked and the end-to-end happy path works.
+  ENABLE_BEAT_SYNC: z.string().default('false').transform((v) => v === 'true'),
+  ENABLE_COLOR_GRADING: z.string().default('false').transform((v) => v === 'true'),
+  ENABLE_MUSIC_SELECTION: z.string().default('false').transform((v) => v === 'true'),
+  ENABLE_DYNAMIC_PACING: z.string().default('false').transform((v) => v === 'true'),
+  // Audio ducking + CRF18 are ON by default — they don't depend on data we don't have yet.
+  ENABLE_AUDIO_DUCKING: z.string().default('true').transform((v) => v !== 'false'),
+  ENABLE_CRF18_ENCODING: z.string().default('true').transform((v) => v !== 'false'),
+  // Single fallback track UUID used when ENABLE_MUSIC_SELECTION=false.
+  // Must be a row ID in music_tracks. Empty string = render without background music.
+  FALLBACK_MUSIC_TRACK_ID: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);

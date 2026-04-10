@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
-import type { BrandConfig, CreativeBrief, ClipSelectionList, CopyPackage, ContextPacket } from '../types/database.js';
+import type { BrandConfig, CreativeBrief, ClipSelectionList, CopyPackage, ContextPacket, MusicTrack } from '../types/database.js';
 import { generateBrief } from './creative-director.js';
 import { selectClips } from './asset-curator.js';
 import { generateCopy } from './copywriter.js';
@@ -35,33 +36,66 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
   const copy = await generateCopy({ brief, brandConfig: input.brandConfig });
   console.log(`[context-packet] Copy generated: ${copy.overlays.length} overlays, ${copy.hook_variants.length} hook variants`);
 
-  // Music selection — uses video type's music energy range and brief's mood
+  // Music selection — gated on ENABLE_MUSIC_SELECTION (off for MVP).
+  // MVP path: fetch a single track by FALLBACK_MUSIC_TRACK_ID and use it verbatim.
+  // Full path: weighted random by mood + video type's energy range.
   let musicSelection: ContextPacket['music_selection'] = null;
-  const vtConfig = VIDEO_TYPE_CONFIGS[brief.video_type as VideoType];
-  if (vtConfig) {
-    console.log('[context-packet] Selecting music track...');
-    const musicResult = await selectMusicTrack({
-      mood: brief.audio.background_music.mood,
-      energyRange: vtConfig.music_energy_range,
-      minDuration: brief.total_duration_target,
-      brandId: input.brandConfig.brand_id,
-    });
+  if (env.ENABLE_MUSIC_SELECTION) {
+    const vtConfig = VIDEO_TYPE_CONFIGS[brief.video_type as VideoType];
+    if (vtConfig) {
+      console.log('[context-packet] Selecting music track (weighted random)...');
+      const musicResult = await selectMusicTrack({
+        mood: brief.audio.background_music.mood,
+        energyRange: vtConfig.music_energy_range,
+        minDuration: brief.total_duration_target,
+        brandId: input.brandConfig.brand_id,
+      });
 
-    if (musicResult) {
-      console.log(`[context-packet] Music selected: ${musicResult.track.title ?? musicResult.track.id} (${musicResult.rationale})`);
+      if (musicResult) {
+        console.log(`[context-packet] Music selected: ${musicResult.track.title ?? musicResult.track.id} (${musicResult.rationale})`);
+        musicSelection = {
+          track_id: musicResult.track.id,
+          r2_key: musicResult.track.r2_key,
+          volume_level: brief.audio.background_music.volume_level,
+        };
+      } else {
+        console.log('[context-packet] No matching music track found — continuing without background music');
+      }
+    }
+  } else if (env.FALLBACK_MUSIC_TRACK_ID) {
+    console.log(`[context-packet] Music selection flagged off — using fallback track ${env.FALLBACK_MUSIC_TRACK_ID}`);
+    const { data: fallbackTrack, error: fallbackErr } = await supabaseAdmin
+      .from('music_tracks')
+      .select('*')
+      .eq('id', env.FALLBACK_MUSIC_TRACK_ID)
+      .single();
+    if (fallbackErr || !fallbackTrack) {
+      console.warn(`[context-packet] Fallback track ${env.FALLBACK_MUSIC_TRACK_ID} not found: ${fallbackErr?.message ?? 'no row'} — continuing without music`);
+    } else {
+      const track = fallbackTrack as MusicTrack;
       musicSelection = {
-        track_id: musicResult.track.id,
-        r2_key: musicResult.track.r2_key,
+        track_id: track.id,
+        r2_key: track.r2_key,
         volume_level: brief.audio.background_music.volume_level,
       };
-    } else {
-      console.log('[context-packet] No matching music track found — continuing without background music');
+      console.log(`[context-packet] Fallback track loaded: ${track.title ?? track.id}`);
     }
+  } else {
+    console.log('[context-packet] Music selection flagged off and no FALLBACK_MUSIC_TRACK_ID — continuing without music');
   }
 
-  // Build template config (dynamic pacing from energy curve + beat map)
-  const templateConfig = buildTemplateConfig(brief.segments, null); // beat map added at render time when music is downloaded
-  console.log(`[context-packet] Template config: speed=${templateConfig.global_animation_speed}, ${templateConfig.segments.length} segment configs`);
+  // Template config — gated on ENABLE_DYNAMIC_PACING. When off, every segment
+  // uses its layout's hard-coded default timings, matching current MVP behavior.
+  // Beat-sync is also gated (ENABLE_BEAT_SYNC) but is dormant today: beat map is
+  // never built in the render pipeline, so the flag is defined for symmetry with v3.
+  let templateConfig: Record<string, unknown> = {};
+  if (env.ENABLE_DYNAMIC_PACING) {
+    const built = buildTemplateConfig(brief.segments, null); // beat map wired in later when ENABLE_BEAT_SYNC=true
+    console.log(`[context-packet] Template config: speed=${built.global_animation_speed}, ${built.segments.length} segment configs`);
+    templateConfig = built as unknown as Record<string, unknown>;
+  } else {
+    console.log('[context-packet] Dynamic pacing flagged off — template_config = {}');
+  }
 
   // Merge into Context Packet
   const contextPacket: ContextPacket = {
@@ -70,7 +104,7 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
     clips,
     copy,
     brand_config: input.brandConfig,
-    template_config: templateConfig as unknown as Record<string, unknown>,
+    template_config: templateConfig,
     music_selection: musicSelection,
     created_at: new Date().toISOString(),
   };

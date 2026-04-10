@@ -124,12 +124,19 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
     await claimJob(jobId, 'queued', 'clip_prep', env.WORKER_ID);
     console.log(`[pipeline] ${jobId}: clip_prep`);
 
-    // Pass brand color grading config to clip prep
+    // Pass brand color grading config to clip prep — gated on ENABLE_COLOR_GRADING.
+    // When off, colorPreset + lutPath are both null and clip-prep's conditional
+    // (`if (options.colorPreset || options.lutPath)`) short-circuits the grade step.
     const brandConfig = contextPacket.brand_config;
     const clipPrepResult = await prepareClips(jobId, contextPacket, {
-      colorPreset: (brandConfig.color_grade_preset as import('../lib/color-grading.js').ColorPreset) ?? null,
-      lutPath: null, // LUT downloaded separately when color_lut_r2_key is set
+      colorPreset: env.ENABLE_COLOR_GRADING
+        ? ((brandConfig.color_grade_preset as import('../lib/color-grading.js').ColorPreset) ?? null)
+        : null,
+      lutPath: null, // LUT downloaded separately when color_lut_r2_key is set (also gated on ENABLE_COLOR_GRADING)
     });
+    if (!env.ENABLE_COLOR_GRADING) {
+      console.log(`[pipeline] ${jobId}: color grading flagged off`);
+    }
     await logEvent(jobId, 'state_transition', {
       step: 'clip_prep',
       worker: env.WORKER_ID,
