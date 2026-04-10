@@ -77,7 +77,7 @@ ssh root@46.224.56.174
 
 **IP**: 95.216.137.35
 **OS**: Ubuntu 24.04
-**Spec**: Hetzner CX22 — 2 vCPU, 4GB RAM, 40GB SSD
+**Spec**: Hetzner CX32 — 4 vCPU, 8GB RAM, 80GB SSD (upgraded from CX22 on 2026-04-10 for render concurrency headroom)
 **Role**: All heavy processing — AI agents, video rendering, audio processing, transcription
 
 ### What it does
@@ -201,10 +201,10 @@ ssh root@95.216.137.35 "cd /home/video-factory && git pull && npm install && npm
 
 ### Resource usage
 
-- **Memory**: ~142MB idle (4GB available — plenty of headroom)
-- **CPU**: Spikes during FFmpeg encoding and Remotion rendering, idle otherwise
-- **Disk**: 40GB SSD. Temp files cleaned after each job. R2 is the permanent store.
-- **Redis**: ~26K commands/day idle with drainDelay 30s (Upstash free tier: 500K/month)
+- **Memory**: ~142MB idle (8GB available on CX32 — plenty of headroom for concurrent renders + Gemini downscale)
+- **CPU**: 4 vCPU on CX32. Spikes during FFmpeg encoding and Remotion rendering, idle otherwise.
+- **Disk**: 80GB SSD. Temp files cleaned after each job. R2 is the permanent store.
+- **Redis**: ~6.5K commands/day idle with drainDelay 120s (Upstash free tier: 500K/month). Was 26K/day at drainDelay 30s.
 
 ### Environment variables (.env)
 
@@ -288,11 +288,11 @@ API_PORT=3000
 
 | Service | Cost/month | Notes |
 |---------|-----------|-------|
-| VPS (video-factory-01) | ~$4.50 | Hetzner CX22 |
+| VPS (video-factory-01) | ~$8.50 | Hetzner CX32 (upgraded from CX22 on 2026-04-10) |
 | n8n server | ~$4.50 | Hetzner (shared with other projects) |
 | Supabase | $0 | Free tier |
 | Upstash Redis | $0 | Free tier (500K cmds/month, using ~26K/day) |
 | Cloudflare R2 | ~$0-1 | Free 10GB storage, zero egress |
 | Claude API | ~$4 | ~150 videos/week × 3 agents |
 | Gemini API | ~$0.60 | ~150 clips/week × $0.001 |
-| **Total** | **~$14/month** | At full 150 videos/week scale |
+| **Total** | **~$18/month** | At full 150 videos/week scale (CX32) |

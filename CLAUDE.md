@@ -133,7 +133,7 @@ Workers manage everything from a single Google Spreadsheet with 6 tabs:
 ## HTTP API (VPS port 3000)
 - `POST /enqueue` — n8n calls this to add jobs to BullMQ queues. Body: `{ queue, jobId }`
 - `POST /music-ingest` — n8n S7 sends audio binary. Header: `x-track-meta` (plain JSON or base64-encoded JSON). Returns track record with ID, duration, BPM.
-- `POST /ugc-ingest` — n8n S8 sends video binary. Header: `x-asset-meta` (plain JSON or base64-encoded JSON) with `filename`, `brand_id`, optional `description`, `drive_file_id`. Falls back to `{brand_id}_{description}.ext` parsing if header missing. Idempotent on `(filename, brand_id)` — returns `{ok:true, duplicate:true, ...}` for repeats. Module-scope concurrency guard rejects overlapping requests with 503 (4K UGC + parallel ingestion OOMs the 4GB VPS).
+- `POST /ugc-ingest` — n8n S8 sends video binary. Header: `x-asset-meta` (plain JSON or base64-encoded JSON) with `filename`, `brand_id`, optional `description`, `drive_file_id`. Falls back to `{brand_id}_{description}.ext` parsing if header missing. Idempotent on `(filename, brand_id)` — returns `{ok:true, duplicate:true, ...}` for repeats. Streams the request body to a temp file via `req.pipe(createWriteStream(...))` (RAM stays ~64KB regardless of upload size) and rejects payloads >500MB via `Content-Length` check before any I/O. Module-scope concurrency guard still rejects overlapping requests with 503 — keeps Gemini analysis from running in parallel even with the 8GB headroom on the upgraded CX32.
 - `GET /health` — Health check. Returns `{ status: "ok", worker: "worker-1" }`
 
 ## Build Commands
@@ -189,7 +189,7 @@ For MVP, only ingestion enrichment + encoding upgrade are active. Other phases s
 - **Dynamic Pacing** — Per-segment transition timing from energy curve + beat map *(flagged off)*
 
 ## Infrastructure
-- **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX22 (2 vCPU, 4GB RAM), Ubuntu
+- **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX32 (4 vCPU, 8GB RAM, 80GB SSD), Ubuntu — upgraded from CX22 on 2026-04-10 for render concurrency headroom
 - **n8n server**: 46.224.56.174 — Hetzner, Ubuntu 24.04
 - **GitHub**: https://github.com/Domis123/video-factory (private)
 - **Deploy**: `ssh root@95.216.137.35` → `cd /home/video-factory && git pull && npm install && npm run build && systemctl restart video-factory`
@@ -205,20 +205,30 @@ For MVP, only ingestion enrichment + encoding upgrade are active. Other phases s
 - Atomic job claiming: `.update({status}).eq('id', jobId).eq('status', fromStatus)` prevents race conditions
 - 5 pilot brands seeded: nordpilates, ketoway, carnimeat, nodiet, highdiet
 - Quality upgrade migration applied to Supabase (2026-04-07): new columns on jobs, assets, brand_configs
-- **Gemini 4K downscale**: `src/lib/gemini.ts` downscales clips >50MB to 720p (libx264 ultrafast, no audio) before base64-encoding for analysis. Raw 4K UGC (100MB+) balloons to 130MB+ as base64 in JS heap and OOMs the 4GB VPS. Downscale temp files cleaned up in `finally`.
-- **UGC ingestion concurrency guard**: `/ugc-ingest` uses a module-scope `ugcIngesting` flag to reject overlapping requests with 503. n8n S8 must serialize uploads. Triggered after 54-clip parallel-upload OOM incident.
+- **Gemini 4K downscale**: `src/lib/gemini.ts` downscales clips >50MB to 720p (libx264 ultrafast, no audio) before base64-encoding for analysis. Raw 4K UGC (100MB+) balloons to 130MB+ as base64 in the JS heap. Originally added to keep the 4GB CX22 alive; still in place on the CX32 because base64 in V8 is wasteful regardless. Downscale temp files cleaned up in `finally`.
+- **UGC ingestion streaming + concurrency guard**: `/ugc-ingest` streams the request body straight to a temp file (`req.pipe(createWriteStream)`) instead of buffering into RAM, rejects payloads >500MB via `Content-Length`, and a module-scope `ugcIngesting` flag still serializes overlapping requests with 503. The streaming fix replaced the original `Buffer.concat` body parser after a 1GB OOM during the 54-clip parallel upload.
 - VPS system deps: `ffmpeg`, `chromium-browser`, and whisper.cpp built from source must be installed manually — `apt install ffmpeg chromium-browser` then build whisper.cpp via `cmake -B build && cmake --build build -j2`.
 
 ## Current Build Status (MVP per v3, 7-day plan)
 - **MVP scope**: 3 brands (nordpilates, ketoway, carnimeat), 1 video type (`tips-listicle`), most quality phases feature-flagged OFF
 - **Day 1 — DONE**: S7 music ingest end-to-end green. 15 tracks in R2 + Supabase + Sheet. drainDelay fixed 30→120, fresh Upstash DB.
-- **Day 2 — IN PROGRESS**:
-  - VPS `/ugc-ingest` endpoint live (idempotency, concurrency guard, 4K→720p downscale before Gemini)
-  - Awaiting S8 n8n workflow to push real UGC clips end-to-end
-  - Day 2 not declared done until S8 lands real assets in Supabase
-- **Day 3-7 — pending**: brand seed scripts, feature flags in env.ts, FALLBACK_MUSIC_TRACK_ID, end-to-end idea seed → delivered video
-- **VPS**: 95.216.137.35, all endpoints live, ffmpeg + chromium + whisper.cpp installed
+- **Day 2 — DONE (ingest path)**:
+  - VPS `/ugc-ingest` endpoint live with streaming body parser, 500MB cap, idempotency, concurrency guard, 4K→720p downscale before Gemini
+  - 1GB OOM root-caused to `Buffer.concat` body parser → fixed via `req.pipe(createWriteStream)` (commit `c4871c4`)
+  - S8 n8n workflow shipping real UGC end-to-end
+- **Day 3 — DONE (2026-04-10)**:
+  - Feature flags wired in `src/config/env.ts` (`ENABLE_BEAT_SYNC`, `ENABLE_COLOR_GRADING`, `ENABLE_MUSIC_SELECTION`, `ENABLE_DYNAMIC_PACING` default false; `ENABLE_AUDIO_DUCKING`, `ENABLE_CRF18_ENCODING` default true; `FALLBACK_MUSIC_TRACK_ID`) — commit `0d0d77f`
+  - `context-packet.ts` gates music selection on `ENABLE_MUSIC_SELECTION`, falls back to `FALLBACK_MUSIC_TRACK_ID` row when off; gates dynamic pacing on `ENABLE_DYNAMIC_PACING`
+  - `pipeline.ts` gates `colorPreset` passthrough on `ENABLE_COLOR_GRADING`
+  - `src/scripts/seed-brand.ts` + `brands/{nordpilates,ketoway,carnimeat}.json` — version-controlled brand_configs upsert (`allowed_video_types: ["tips-listicle"]`)
+  - `src/scripts/upload-brand-logos.ts` — generates 512×512 placeholder PNGs via ffmpeg lavfi+drawtext, uploads to `brands/{id}/logo.png`
+  - `src/scripts/vps-preflight-live.ts` — read-only health checks (Redis PING, Anthropic, Gemini, R2, Supabase row counts, MVP brand seed verification, FALLBACK_MUSIC_TRACK_ID resolution) — commit `af3f764`
+  - **Verified on VPS**: 3 brand_configs upserted (all `tips-listicle`, `warm-vibrant`); 3 placeholder logos uploaded to `brands/{id}/logo.png` (NP/KW/CM, 7-12 KB each); `FALLBACK_MUSIC_TRACK_ID=f6a6f64f-...` resolves to `Lady Gaga, Bruno Mars - Die With A Smile (7clouds)` 249s; preflight green across systemd/ffmpeg/whisper/chromium/Redis/Anthropic/Gemini/R2/Supabase
+  - **Live row counts**: 54 `assets` for nordpilates (Day 2 S8 ingest), 15 `music_tracks`, 3 MVP `brand_configs`
+- **Day 4 — NEXT**: first end-to-end idea seed → delivered video (no structural blockers)
+- **Day 5-7 — pending**: second brand video, fix what breaks on Day 4, decide which quality phase (if any) to enable based on real output
+- **VPS**: 95.216.137.35, **upgraded CX22 → CX32 on 2026-04-10** (4 vCPU, 8GB RAM, 80GB SSD). All endpoints live, ffmpeg 6.1.1 + chromium + whisper.cpp installed. Env flags already set on VPS `.env`.
 - **Google Sheets**: "Video Pipeline" spreadsheet, 6 tabs created
-- **n8n workflows**: S1-S3 + S7 + P1/P2 active. S4/S5/S6/P3 deactivated for MVP (per v3). S8 (UGC ingest) being built on n8n side.
+- **n8n workflows**: S1-S3 + S7 + P1/P2 active. S4/S5/S6/P3 deactivated for MVP (per v3). S8 (UGC ingest) shipping real assets.
 - **DB migrations applied** — base schema + quality upgrade columns
 - **Tests**: 98/98 passing (30 mock + 41 quality + 27 live)

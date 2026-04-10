@@ -205,7 +205,9 @@ Add a `performance_metrics` table later: `job_id`, `platform`, `views`, `watch_t
 
 ---
 
-## Time Budget (45s video, 5 clips, CX22)
+## Time Budget (45s video, 5 clips, CX32 — 4 vCPU, 8GB RAM)
+
+> Numbers below were originally estimated against CX22 (2 vCPU, 4GB). Re-measure on CX32 after the first end-to-end render — clip prep and Remotion render should drop notably with 2× the cores.
 
 | Step | Current | After All Phases |
 |------|---------|-----------------|

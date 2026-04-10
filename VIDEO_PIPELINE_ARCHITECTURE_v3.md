@@ -453,8 +453,8 @@ Each day is ~4 hours of focused work. Adjust to your actual calendar.
 Reserved entirely for unknown bugs. Every first run of a complex pipeline surfaces something.
 
 Most likely failure modes to watch for:
-- Remotion render timeout (CX22 has 2 vCPU — slow preset might be too slow; fall back to `medium` for MVP if needed)
-- whisper.cpp OOM on longer clips (4GB RAM is tight)
+- Remotion render timeout (CX32 has 4 vCPU — slow preset should fit; fall back to `medium` if a single render exceeds the 60-min budget)
+- whisper.cpp OOM on longer clips — much less likely after the CX22→CX32 upgrade (8GB RAM), but still worth watching on >2-min source clips
 - R2 upload failures due to missing `forcePathStyle`
 - Supabase row-level update races between P1 webhook and P2 poll
 - Context packet JSON too large for a single Supabase update (rare but possible)
@@ -490,7 +490,7 @@ Once the MVP is stable (first ~10 real videos delivered):
 - Add `max_rejection_count` enforcement to S2
 - Build a real operator dashboard (Supabase Realtime + tiny React page, or keep Sheets if it works)
 - Migrate Redis to self-hosted on n8n VPS
-- Scale VPS to CX32 (4 vCPU, 8GB RAM) — CX22 will bottleneck on concurrent renders
+- ~~Scale VPS to CX32 (4 vCPU, 8GB RAM) — CX22 will bottleneck on concurrent renders~~ **DONE 2026-04-10** — VPS upgraded CX22 → CX32 ahead of first delivered video to give Day 4 the headroom it needs
 
 ### Phase B — Re-enable quality phases one at a time
 
@@ -563,13 +563,13 @@ Add `performance_metrics` table, integrate with TikTok/Instagram analytics APIs,
 | Service | Host | Purpose | MVP cost |
 |---|---|---|---|
 | n8n | Hetzner (existing, 46.224.56.174) | Orchestration | $0 (existing) |
-| VPS | Hetzner CX22 (95.216.137.35) | Workers + API | $4.50 |
+| VPS | Hetzner CX32 (95.216.137.35) | Workers + API | $8.50 |
 | Supabase | Managed (free tier) | State + assets catalog | $0 |
 | Upstash Redis | Managed (free tier, drainDelay 120s) | BullMQ queue | $0 |
 | Cloudflare R2 | Managed | Media storage | ~$1 |
 | Claude API | Managed | 3 agents per video | ~$1 at MVP volume |
 | Gemini API | Managed | Clip analysis | ~$0.10 at MVP volume |
-| **Total MVP** | | | **~$7/mo** |
+| **Total MVP** | | | **~$11/mo** |
 
 **Note:** MVP volume is ~10 videos/week, so Claude and Gemini costs scale down proportionally from the full-target estimates. Scaling to 150/week puts Claude at ~$4–15/mo depending on token counts.
 
