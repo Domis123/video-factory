@@ -29,13 +29,22 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
   // Agent 2: Asset Curator → Clip Selections
   console.log('[context-packet] Agent 2: Asset Curator...');
   const clips = await selectClips({ brief });
-  // Claude occasionally returns {selections: [...]} instead of the canonical
-  // {clip_selections: [...]}. Response is structurally fine — just normalize
-  // the key name so downstream code (clip-prep, renderer) sees one shape.
-  const curatorRaw = clips as Partial<ClipSelectionList> & {
-    selections?: ClipSelectionList['clip_selections'];
-  };
-  const clipSelections = curatorRaw.clip_selections ?? curatorRaw.selections ?? [];
+  // Claude varies the wrapper key name across runs — observed so far:
+  // `clip_selections`, `selections`, `segments`. The array contents are
+  // always structurally valid (each item has a `segment_id`). Instead of
+  // chasing key names, scan the top-level object for ANY array-valued
+  // property whose first item has a `segment_id` and treat that as the
+  // canonical clip-selection list.
+  const curatorBag = clips as unknown as Record<string, unknown>;
+  const foundArray = Object.values(curatorBag).find(
+    (v): v is unknown[] =>
+      Array.isArray(v) &&
+      v.length > 0 &&
+      typeof v[0] === 'object' &&
+      v[0] !== null &&
+      'segment_id' in (v[0] as object),
+  );
+  const clipSelections = (foundArray ?? []) as ClipSelectionList['clip_selections'];
   if (!clipSelections.length) {
     throw new Error(
       'Asset Curator returned no clip selections: ' + JSON.stringify(clips),
