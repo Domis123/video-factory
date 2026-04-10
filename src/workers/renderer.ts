@@ -1,6 +1,7 @@
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { mkdir, rm, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { env } from '../config/env.js';
@@ -106,12 +107,22 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
     });
 
     // 6. Build input props
+    // Remotion renders inside a Chromium instance served from a webpack bundle
+    // directory, so bare absolute filesystem paths like
+    // `/tmp/video-factory/.../clips/seg1-clip0.mp4` get resolved against the
+    // bundle's document root and 404. Convert every local file path we pass
+    // into the template to a `file://` URL so Chromium loads it straight from
+    // disk.
+    const clipPathsAsUrls = toFileUrlClipPaths(clipPaths);
+    const logoPathUrl = logoPath ? pathToFileURL(logoPath).href : null;
+    const musicPathUrl = musicPath ? pathToFileURL(musicPath).href : null;
+
     const inputProps: TemplateProps = {
       contextPacket,
-      clipPaths,
+      clipPaths: clipPathsAsUrls,
       transcriptions,
-      logoPath,
-      musicPath,
+      logoPath: logoPathUrl,
+      musicPath: musicPathUrl,
       beatMap: contextPacket.music_selection?.beat_map ?? null,
     };
 
@@ -160,6 +171,27 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
       await rm(clipsDir, { recursive: true, force: true });
     }
   }
+}
+
+/**
+ * Convert every clip path in a `clipPaths` map to a `file://` URL. Accepts
+ * both the single-clip (`string`) and multi-clip (`string[]`) shapes.
+ * Called once on the whole map before props reach Remotion so template
+ * components receive something Chromium can load directly.
+ */
+function toFileUrlClipPaths(
+  paths: Record<number, string | string[]>,
+): Record<number, string | string[]> {
+  const out: Record<number, string | string[]> = {};
+  for (const [segmentId, value] of Object.entries(paths)) {
+    const id = Number(segmentId);
+    if (Array.isArray(value)) {
+      out[id] = value.map((p) => pathToFileURL(p).href);
+    } else {
+      out[id] = pathToFileURL(value).href;
+    }
+  }
+  return out;
 }
 
 /**
