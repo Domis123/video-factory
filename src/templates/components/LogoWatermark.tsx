@@ -40,7 +40,7 @@ export const LogoWatermark: React.FC<LogoWatermarkProps> = ({
       }}
     >
       <Img
-        src={logoSrc}
+        src={staticFile(logoSrc)}
         style={{
           width: size,
           height: size,

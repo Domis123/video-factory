@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, Sequence, Audio, useVideoConfig, useCurrentFrame, spring, interpolate } from 'remotion';
+import { AbsoluteFill, Sequence, Audio, staticFile, useVideoConfig, useCurrentFrame, spring, interpolate } from 'remotion';
 import type { TemplateProps } from '../types.js';
 import { resolveSegments } from '../types.js';
 import { SegmentVideo } from '../components/SegmentVideo.js';
@@ -126,7 +126,7 @@ export const HookTransformation: React.FC<TemplateProps> = ({
       {/* === Music === */}
       {musicPath && (
         <Audio
-          src={musicPath}
+          src={staticFile(musicPath)}
           volume={brief.audio.background_music.volume_level}
           startFrom={0}
         />

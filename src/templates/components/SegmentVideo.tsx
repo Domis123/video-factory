@@ -1,5 +1,5 @@
 import React from 'react';
-import { OffthreadVideo, Sequence, useVideoConfig } from 'remotion';
+import { OffthreadVideo, Sequence, staticFile, useVideoConfig } from 'remotion';
 import type { ResolvedSegment } from '../types.js';
 
 interface SegmentVideoProps {
@@ -16,11 +16,16 @@ export const SegmentVideo: React.FC<SegmentVideoProps> = ({ segment }) => {
 
   if (clips.length === 0 || !clips[0]) return null;
 
+  // The renderer hands us bare filenames (e.g. "seg1-clip0.mp4") that live
+  // inside the bundle's publicDir. staticFile() turns them into the
+  // http://localhost:port/{filename} URL Remotion's bundle server actually
+  // serves — passing raw paths or file:// URLs would 404 in Chromium.
+
   // Single clip: just render it
   if (clips.length === 1) {
     return (
       <OffthreadVideo
-        src={clips[0]}
+        src={staticFile(clips[0])}
         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
     );
@@ -40,7 +45,7 @@ export const SegmentVideo: React.FC<SegmentVideoProps> = ({ segment }) => {
             : framesPerClip}
         >
           <OffthreadVideo
-            src={clip}
+            src={staticFile(clip)}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         </Sequence>

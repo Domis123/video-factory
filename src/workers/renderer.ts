@@ -1,7 +1,6 @@
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { mkdir, rm, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { env } from '../config/env.js';
@@ -40,38 +39,46 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
   const templateId = brief.template_id;
 
   const workDir = join(env.RENDER_TEMP_DIR, jobId);
-  const clipsDir = join(workDir, 'clips');
+  // Remotion's bundler serves a `publicDir` over HTTP at runtime, and the
+  // template uses `staticFile(name)` to fetch files from it. We collect every
+  // asset (clips, logo, music) into a single flat directory under the job's
+  // workDir and hand bare filenames to the template.
+  const publicDir = join(workDir, 'public');
   const outputPath = join(workDir, `output-${templateId}.mp4`);
 
   console.log(`[renderer] Job ${jobId}: starting render (${templateId})`);
   const startTime = Date.now();
 
   try {
-    // 1. Create working directories
-    await mkdir(clipsDir, { recursive: true });
+    // 1. Create publicDir
+    await mkdir(publicDir, { recursive: true });
 
-    // 2. Download clips from R2
+    // 2. Download clips from R2 directly into publicDir with flat filenames
     console.log(`[renderer] Downloading ${clips.clip_selections.length} segment clips...`);
-    const clipPaths = await downloadClips(clips.clip_selections, clipsDir);
+    const clipPaths = await downloadClips(clips.clip_selections, publicDir);
 
-    // 3. Download logo if configured
+    // 3. Download logo if configured (into publicDir as logo.png)
     let logoPath: string | null = null;
     if (brand.logo_r2_key) {
-      logoPath = join(workDir, 'logo.png');
+      const logoFilename = 'logo.png';
+      const logoAbs = join(publicDir, logoFilename);
       try {
-        await downloadToFile(brand.logo_r2_key, logoPath);
+        await downloadToFile(brand.logo_r2_key, logoAbs);
+        logoPath = logoFilename;
       } catch {
         console.warn(`[renderer] Logo not found at ${brand.logo_r2_key}, skipping`);
         logoPath = null;
       }
     }
 
-    // 4. Download background music if selected
+    // 4. Download background music if selected (into publicDir as music.mp3)
     let musicPath: string | null = null;
     if (contextPacket.music_selection?.r2_key) {
-      musicPath = join(workDir, 'music.mp3');
+      const musicFilename = 'music.mp3';
+      const musicAbs = join(publicDir, musicFilename);
       try {
-        await downloadToFile(contextPacket.music_selection.r2_key, musicPath);
+        await downloadToFile(contextPacket.music_selection.r2_key, musicAbs);
+        musicPath = musicFilename;
       } catch {
         console.warn(`[renderer] Music not found at ${contextPacket.music_selection.r2_key}, skipping`);
         musicPath = null;
@@ -87,9 +94,10 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
     // './layouts/HookDemoCTA.js'`. The webpack 5 `resolve.extensionAlias`
     // field is the standard fix: when webpack sees a `.js` relative import,
     // it also tries the matching `.ts`/`.tsx` file first.
-    console.log(`[renderer] Bundling Remotion project...`);
+    console.log(`[renderer] Bundling Remotion project (publicDir: ${publicDir})...`);
     const bundleLocation = await bundle({
       entryPoint: REMOTION_ENTRY,
+      publicDir,
       webpackOverride: (config) => ({
         ...config,
         resolve: {
@@ -107,22 +115,15 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
     });
 
     // 6. Build input props
-    // Remotion renders inside a Chromium instance served from a webpack bundle
-    // directory, so bare absolute filesystem paths like
-    // `/tmp/video-factory/.../clips/seg1-clip0.mp4` get resolved against the
-    // bundle's document root and 404. Convert every local file path we pass
-    // into the template to a `file://` URL so Chromium loads it straight from
-    // disk.
-    const clipPathsAsUrls = toFileUrlClipPaths(clipPaths);
-    const logoPathUrl = logoPath ? pathToFileURL(logoPath).href : null;
-    const musicPathUrl = musicPath ? pathToFileURL(musicPath).href : null;
-
+    // clipPaths/logoPath/musicPath are bare filenames relative to publicDir.
+    // Template components wrap them with `staticFile()`, which resolves to
+    // the URL Remotion's bundle server actually serves.
     const inputProps: TemplateProps = {
       contextPacket,
-      clipPaths: clipPathsAsUrls,
+      clipPaths,
       transcriptions,
-      logoPath: logoPathUrl,
-      musicPath: musicPathUrl,
+      logoPath,
+      musicPath,
       beatMap: contextPacket.music_selection?.beat_map ?? null,
     };
 
@@ -166,59 +167,41 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
 
     return { outputPath, r2Key, durationMs };
   } finally {
-    // Cleanup temp files (keep output for downstream workers)
-    if (existsSync(clipsDir)) {
-      await rm(clipsDir, { recursive: true, force: true });
+    // Cleanup publicDir (keep output mp4 alongside it for downstream workers)
+    if (existsSync(publicDir)) {
+      await rm(publicDir, { recursive: true, force: true });
     }
   }
 }
 
 /**
- * Convert every clip path in a `clipPaths` map to a `file://` URL. Accepts
- * both the single-clip (`string`) and multi-clip (`string[]`) shapes.
- * Called once on the whole map before props reach Remotion so template
- * components receive something Chromium can load directly.
- */
-function toFileUrlClipPaths(
-  paths: Record<number, string | string[]>,
-): Record<number, string | string[]> {
-  const out: Record<number, string | string[]> = {};
-  for (const [segmentId, value] of Object.entries(paths)) {
-    const id = Number(segmentId);
-    if (Array.isArray(value)) {
-      out[id] = value.map((p) => pathToFileURL(p).href);
-    } else {
-      out[id] = pathToFileURL(value).href;
-    }
-  }
-  return out;
-}
-
-/**
- * Download all clips from R2 and return a map of segment_id → local path(s).
+ * Download all clips from R2 directly into the bundle's publicDir using flat
+ * filenames, and return a map of segment_id → bare filename(s) (no directory
+ * component). The template wraps each filename with `staticFile()`, which
+ * resolves it through Remotion's bundle server.
  */
 async function downloadClips(
   selections: ClipSelection[],
-  clipsDir: string,
+  publicDir: string,
 ): Promise<Record<number, string | string[]>> {
   const result: Record<number, string | string[]> = {};
 
   for (const sel of selections) {
     if (sel.clips && sel.clips.length > 0) {
       // Multi-clip segment
-      const paths: string[] = [];
+      const filenames: string[] = [];
       for (let i = 0; i < sel.clips.length; i++) {
         const clip = sel.clips[i];
-        const localPath = join(clipsDir, `seg${sel.segment_id}-clip${i}.mp4`);
-        await downloadToFile(clip.r2_key, localPath);
-        paths.push(localPath);
+        const filename = `seg${sel.segment_id}-clip${i}.mp4`;
+        await downloadToFile(clip.r2_key, join(publicDir, filename));
+        filenames.push(filename);
       }
-      result[sel.segment_id] = paths;
+      result[sel.segment_id] = filenames;
     } else if (sel.r2_key) {
       // Single clip segment
-      const localPath = join(clipsDir, `seg${sel.segment_id}.mp4`);
-      await downloadToFile(sel.r2_key, localPath);
-      result[sel.segment_id] = localPath;
+      const filename = `seg${sel.segment_id}.mp4`;
+      await downloadToFile(sel.r2_key, join(publicDir, filename));
+      result[sel.segment_id] = filename;
     }
   }
 

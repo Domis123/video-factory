@@ -5,18 +5,18 @@ import type { WordTimestamp } from './components/CaptionTrack.js';
 export interface TemplateProps {
   contextPacket: ContextPacket;
   /**
-   * Pre-resolved `file://` URLs for each clip (keyed by segment_id). The
-   * renderer converts every local filesystem path to a `file://` URL before
-   * passing props in, because Remotion serves the template bundle from a
-   * temp webpack dir and Chromium otherwise resolves bare absolute paths
-   * against that bundle root (producing 404s for real filesystem files).
+   * Bare filenames (no directory) for each segment's clip(s), relative to
+   * the renderer's `publicDir`. Templates MUST wrap these in `staticFile()`
+   * before passing to `<OffthreadVideo>` etc. — Remotion serves the bundle
+   * over HTTP and bare absolute paths or `file://` URLs are rejected by
+   * Chromium.
    */
   clipPaths: Record<number, string | string[]>;
   /** Word-level transcription per segment (from whisper) */
   transcriptions: Record<number, WordTimestamp[]>;
-  /** Pre-resolved `file://` URL for logo (same reason as clipPaths) */
+  /** Bare filename for logo (relative to publicDir, wrap in staticFile) */
   logoPath: string | null;
-  /** Pre-resolved `file://` URL for background music */
+  /** Bare filename for background music (relative to publicDir, wrap in staticFile) */
   musicPath: string | null;
   /** Beat map from music track (for beat-synced transitions) */
   beatMap?: {

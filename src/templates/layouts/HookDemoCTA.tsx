@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, Sequence, Audio, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Sequence, Audio, staticFile, useVideoConfig } from 'remotion';
 import type { TemplateProps } from '../types.js';
 import { resolveSegments, totalFrames } from '../types.js';
 import { SegmentVideo } from '../components/SegmentVideo.js';
@@ -142,7 +142,7 @@ export const HookDemoCTA: React.FC<TemplateProps> = ({
       {/* === Background Music === */}
       {musicPath && (
         <Audio
-          src={musicPath}
+          src={staticFile(musicPath)}
           volume={brief.audio.background_music.volume_level}
           startFrom={0}
         />
