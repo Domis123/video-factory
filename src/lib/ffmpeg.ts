@@ -63,12 +63,29 @@ export function buildNormalizeCommand(
 export function buildAudioExtractCommand(
   inputPath: string,
   outputPath: string,
+  opts: { startSec?: number; durationSec?: number } = {},
 ): FfCommand {
+  // When startSec/durationSec are provided, extract only that window of the
+  // input. This matches the curator-selected segment timestamps so whisper
+  // transcribes the actual segment, not the full normalized clip.
+  // -ss BEFORE -i = fast input seek (re-decodes from nearest keyframe, accurate
+  // enough for audio at 16kHz). -t after -i caps the duration.
+  const { startSec, durationSec } = opts;
+  const seekArgs: string[] = [];
+  if (typeof startSec === 'number' && startSec > 0) {
+    seekArgs.push('-ss', String(startSec));
+  }
+  const durationArgs: string[] = [];
+  if (typeof durationSec === 'number' && durationSec > 0) {
+    durationArgs.push('-t', String(durationSec));
+  }
   return {
     command: 'ffmpeg',
     args: [
       '-y',
+      ...seekArgs,
       '-i', inputPath,
+      ...durationArgs,
       '-vn',
       '-acodec', 'pcm_s16le',
       '-ar', '16000',

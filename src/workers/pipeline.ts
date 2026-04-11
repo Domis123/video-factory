@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { mkdir, rm } from 'node:fs/promises';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
+import { getPresignedUrl } from '../lib/r2-storage.js';
 import { transitionJob, claimJob, logEvent } from '../lib/job-manager.js';
 // logEvent is used for non-transition events (errors, retries). Per-step metrics
 // are attached to the NEXT transitionJob() call's `details` param instead of
@@ -149,15 +150,23 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
     });
     console.log(`[pipeline] ${jobId}: transcription`);
 
-    // Determine which clips have speech based on the brief's clip requirements
+    // Determine which clips have speech based on the brief's clip requirements.
+    // Also pass the curator-selected segment window so the transcriber clamps
+    // audio extraction to the right slice (defends against the clip-prep trim
+    // bug seen on Day 4 where seg4's WAV came back 215s instead of 8s).
     const clipsForTranscription = clipPrepResult.preparedClips.map((clip) => {
       const briefSeg = contextPacket.brief.segments.find(
         (s) => s.segment_id === clip.segmentId,
       );
+      const window =
+        clip.trimEnd > clip.trimStart
+          ? { startSec: clip.trimStart, endSec: clip.trimEnd }
+          : undefined;
       return {
         segmentId: clip.segmentId,
         localPath: clip.localPath,
         hasSpeech: briefSeg?.clip_requirements?.has_speech ?? undefined,
+        segmentWindow: window,
       };
     });
 
@@ -251,6 +260,25 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
       .from('jobs')
       .update({ final_outputs: exportResult.outputs })
       .eq('id', jobId);
+
+    // Generate a 24h signed preview URL for the Sheet (P2 sync). TikTok is the
+    // shortest format so it's the default preview; fall back to whichever
+    // platform is available if tiktok somehow wasn't exported.
+    const previewKey =
+      exportResult.outputs.tiktok ??
+      exportResult.outputs.instagram ??
+      exportResult.outputs.youtube;
+    if (previewKey) {
+      try {
+        const previewUrl = await getPresignedUrl(previewKey, 24 * 3600);
+        await supabaseAdmin
+          .from('jobs')
+          .update({ preview_url: previewUrl })
+          .eq('id', jobId);
+      } catch (err) {
+        console.warn(`[pipeline] ${jobId}: failed to generate preview URL: ${String(err)}`);
+      }
+    }
 
     // ── Step 7: Auto QA ──
     await transitionJob(jobId, 'platform_export', 'auto_qa', {

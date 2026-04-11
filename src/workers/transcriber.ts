@@ -1,6 +1,6 @@
 import { join, dirname } from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { buildAudioExtractCommand } from '../lib/ffmpeg.js';
+import { buildAudioExtractCommand, buildProbeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow, exec } from '../lib/exec.js';
 import { env } from '../config/env.js';
 
@@ -27,15 +27,42 @@ export async function transcribeClip(
   clipPath: string,
   segmentId: number,
   outputDir: string,
+  segmentWindow?: { startSec: number; endSec: number },
 ): Promise<TranscriptionResult> {
   await mkdir(outputDir, { recursive: true });
 
   const wavPath = join(outputDir, `seg${segmentId}.wav`);
   const outputBase = join(outputDir, `seg${segmentId}`);
 
-  // 1. Extract audio as 16kHz mono WAV (whisper.cpp requirement)
+  // 1. Extract audio as 16kHz mono WAV (whisper.cpp requirement).
+  //
+  // The Day-4 bug: clip-prep is supposed to trim each clip to the curator's
+  // segment window, but in practice the normalized clip on disk sometimes
+  // ends up containing the FULL source (e.g. seg4 was 215s instead of 8s),
+  // which made whisper transcribe minutes of unrelated audio.
+  //
+  // Defense-in-depth fix: probe the clip and clamp audio extraction to the
+  // curator-selected window. If clip-prep already trimmed (file duration ~=
+  // window length), seek from 0; otherwise seek to start_s. Either way the
+  // WAV ends up being exactly the segment window long.
+  let extractOpts: { startSec?: number; durationSec?: number } = {};
+  if (segmentWindow) {
+    const expectedDuration = segmentWindow.endSec - segmentWindow.startSec;
+    if (expectedDuration > 0) {
+      const actualDuration = await probeClipDuration(clipPath);
+      // 2s tolerance covers the keyframe-snap drift from `-c copy` trims.
+      const alreadyTrimmed = actualDuration > 0 && actualDuration <= expectedDuration + 2;
+      extractOpts = alreadyTrimmed
+        ? { durationSec: expectedDuration }
+        : { startSec: segmentWindow.startSec, durationSec: expectedDuration };
+      console.log(
+        `[transcriber] Segment ${segmentId} window ${segmentWindow.startSec}-${segmentWindow.endSec}s ` +
+        `(file=${actualDuration.toFixed(1)}s, ${alreadyTrimmed ? 'trimmed' : 'full'})`,
+      );
+    }
+  }
   console.log(`[transcriber] Extracting audio from segment ${segmentId}`);
-  await execOrThrow(buildAudioExtractCommand(clipPath, wavPath));
+  await execOrThrow(buildAudioExtractCommand(clipPath, wavPath, extractOpts));
 
   // 2. Run whisper.cpp with word-level timestamps
   console.log(`[transcriber] Running whisper.cpp on segment ${segmentId}`);
@@ -107,7 +134,12 @@ export async function transcribeClip(
 }
 
 export async function transcribeAll(
-  clips: Array<{ segmentId: number; localPath: string; hasSpeech?: boolean }>,
+  clips: Array<{
+    segmentId: number;
+    localPath: string;
+    hasSpeech?: boolean;
+    segmentWindow?: { startSec: number; endSec: number };
+  }>,
   workDir: string,
 ): Promise<TranscriptionResult[]> {
   const outputDir = join(workDir, 'transcripts');
@@ -126,11 +158,29 @@ export async function transcribeAll(
       });
       continue;
     }
-    const result = await transcribeClip(clip.localPath, clip.segmentId, outputDir);
+    const result = await transcribeClip(
+      clip.localPath,
+      clip.segmentId,
+      outputDir,
+      clip.segmentWindow,
+    );
     results.push(result);
   }
 
   return results;
+}
+
+// Probe a clip's duration in seconds via ffprobe. Returns 0 on failure so the
+// caller can fall back to the "full clip" extraction path.
+async function probeClipDuration(clipPath: string): Promise<number> {
+  try {
+    const stdout = await execOrThrow(buildProbeCommand(clipPath));
+    const info = JSON.parse(stdout);
+    const dur = info?.format?.duration;
+    return dur ? parseFloat(dur) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 // ── Helpers ──

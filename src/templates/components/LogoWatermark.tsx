@@ -53,7 +53,10 @@ export const LogoWatermark: React.FC<LogoWatermarkProps> = ({
 };
 
 function getPositionStyle(position: string): React.CSSProperties {
-  switch (position) {
+  // Normalize underscore form (e.g. "top_right" from brand seed JSON) to the
+  // hyphenated form used by the switch — both should resolve identically.
+  const key = position.replace(/_/g, '-');
+  switch (key) {
     case 'top-left':
       return { top: 0, left: 0 };
     case 'top-right':

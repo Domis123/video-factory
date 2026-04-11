@@ -1,7 +1,7 @@
 import { bundle } from '@remotion/bundler';
 import { renderMedia, selectComposition } from '@remotion/renderer';
 import { join } from 'node:path';
-import { mkdir, rm, readFile } from 'node:fs/promises';
+import { mkdir, rm, readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { env } from '../config/env.js';
 import { downloadToFile, uploadFile } from '../lib/r2-storage.js';
@@ -64,11 +64,23 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
       const logoAbs = join(publicDir, logoFilename);
       try {
         await downloadToFile(brand.logo_r2_key, logoAbs);
-        logoPath = logoFilename;
-      } catch {
-        console.warn(`[renderer] Logo not found at ${brand.logo_r2_key}, skipping`);
+        // Verify the file actually landed on disk and isn't empty — Day 4
+        // shipped a video with no visible logo and we need to know whether
+        // the failure is at the download step or in the template.
+        const s = await stat(logoAbs);
+        if (s.size === 0) {
+          console.warn(`[renderer] Logo downloaded to ${logoAbs} but is 0 bytes — skipping`);
+          logoPath = null;
+        } else {
+          console.log(`[renderer] Logo ready at ${logoAbs} (${s.size} bytes)`);
+          logoPath = logoFilename;
+        }
+      } catch (err) {
+        console.warn(`[renderer] Logo not found at ${brand.logo_r2_key} (${String(err)}), skipping`);
         logoPath = null;
       }
+    } else {
+      console.log(`[renderer] Brand ${brand.brand_id} has no logo_r2_key, skipping watermark`);
     }
 
     // 4. Download background music if selected (into publicDir as music.mp3)
