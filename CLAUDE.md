@@ -1,24 +1,32 @@
 # Video Factory — CLAUDE.md
 
 ## Project Overview
-A 95% automated video production pipeline for 30 social media brands. Takes raw UGC footage from Google Drive, uses AI agents to plan creative briefs, and renders branded short-form videos (30-60s) for TikTok, Instagram Reels, and YouTube Shorts. Target: 150 videos/week across 30 brands.
+Automated video production pipeline for social media brands. UGC footage → AI creative planning → branded short-form videos (30-60s) for TikTok/IG/YT. First video delivered end-to-end 2026-04-11 (28 min, ~$0.55/video, peak 265MB RAM). MVP: 3 brands, 1 video type, 5-10 videos/week. Target scale: 30-50 brands, 4 video types, 150-300 videos/week.
 
 ## Key Documentation
-- **`VIDEO_PIPELINE_ARCHITECTURE_v3.md`** — Current source of truth. MVP scope: 3 brands, 1 video type, 7-day timeline. Replaces v2.
-- `VIDEO_PIPELINE_ARCHITECTURE_v2.md` — Historical reference, full multi-brand vision
-- `QUALITY_UPGRADE_PLAN.md` — 9-phase quality upgrade plan (most phases feature-flagged OFF for MVP)
-- `VPS-SERVERS.md` — Infrastructure docs: both VPS servers, deployment, costs, how they work together
+- **`docs/ARCHITECTURE.md`** — Architecture v3.5. Current source of truth. First video delivered, quality roadmap defined. Supersedes all prior architecture docs.
+- **`docs/MVP_PROGRESS.md`** — Day-by-day progress tracker with timing data, outputs, quality roadmap tiers, lessons learned.
+- **`docs/VPS-SERVERS.md`** — Infrastructure docs: both VPS servers, deployment, costs, how they work together.
 - `env.video-factory` — All credentials (Supabase, Redis, R2). Copy to `.env` for local dev.
 
-## Architecture Rules (MUST follow)
+## Architecture Rules (17 total, MUST follow)
 1. **Google Drive is a drop zone only.** Ingestion copies to R2. The render pipeline NEVER reads from Drive. All clip references use R2 keys.
 2. **No long-lived n8n executions.** Every workflow completes immediately. State is persisted to Supabase. New workflows triggered by webhooks.
 3. **Supabase is the source of truth.** Sheets is the primary input/view layer for workers. All Sheet edits are validated by n8n before writing to Supabase. Workers never access Supabase directly.
 4. **Context Packet is immutable.** 3 agent outputs merge into one JSON in `jobs.context_packet`. Never mutated — replaced entirely on rejection.
-5. **Every state transition is logged.** INSERT into `job_events` on every status change.
+5. **Every state transition is logged.** INSERT into `job_events` on every status change where possible.
 6. **All workers use TypeScript.** No JavaScript files.
 7. **whisper.cpp runs locally** on VPS workers — do NOT use OpenAI Whisper API.
 8. **Workers only use Google Drive + Google Sheets.** No terminal, no Supabase, no R2 directly. n8n + VPS handle everything behind the scenes.
+9. **Stream large files.** Never `readFile` on uploads. Use `req.pipe(createWriteStream)`.
+10. **One ingestion at a time.** Concurrency guard prevents parallel OOM.
+11. **Feature flags control quality phases.** Default OFF for untested features.
+12. **Hardcode Supabase URL/key in n8n workflows.** No `$env` variables (unreliable in n8n).
+13. **Remotion bundles from .tsx source.** Use `extensionAlias` webpack override for `.js` → `.tsx`.
+14. **Remotion assets via `publicDir` + `staticFile()`.** Never pass absolute paths or `file://` URLs.
+15. **Asset Curator JSON key names vary** — use `Object.values().find()` dynamic extraction.
+16. **Create jobs with the status the worker expects** (`planning`, not `idea_seed`).
+17. **n8n Sheet writes after HTTP nodes** reach back through `$('Upstream Node').item.json` to avoid losing data to response replacement.
 
 ## Tech Stack
 - **Orchestrator**: n8n (self-hosted, Hetzner) — 46.224.56.174
@@ -84,18 +92,19 @@ src/
                        test-gemini, test-phase5, test-quality-upgrade, create-r2-structure,
                        migrate.sql, migrate-quality-upgrade.sql, upload-music, clean-r2-music
 
-n8n-workflows/       — Importable n8n workflow JSONs (11 total)
-├── S1-new-job.json          — New job from Sheet → Supabase + BullMQ (30s poll)
-├── S2-brief-review.json     — Brief approve/reject → Supabase + BullMQ (30s poll)
-├── S3-qa-decision.json      — QA approve/reject → Supabase + BullMQ (30s poll)
-├── S4-brand-config.json     — Brand edits → validated → Supabase (5min poll)
-├── S5-caption-preset.json   — Caption preset → reassemble JSONB → Supabase (5min poll)
-├── S6-music-track.json      — New music tracks from Sheet → Supabase (5min poll)
-├── S7-music-ingest.json     — Drive folder → VPS ffprobe → R2 → Supabase → Sheet (5min poll)
+n8n-workflows/       — Importable n8n workflow JSONs
+├── S1-new-job.json          — v2 final ✅ — New job from Sheet → Supabase + BullMQ (30s poll)
+├── S2-brief-review.json     — v2 final ✅ — Brief approve/reject → Supabase + BullMQ (30s poll)
+├── S3-qa-decision.json      — v1 ⏸ — Needs v2 rebuild
+├── S7-music-ingest.json     — v2 ✅ — Drive → VPS ffprobe → R2 → Supabase → Sheet
+├── S8-ugc-ingest.json       — v1 manual ✅ — Drive UGC → VPS → R2 → Supabase
+├── P2-periodic-sync.json    — v2 ✅ — Active jobs Supabase → Sheet (5min)
+├── S4-brand-config.json     — ⏸ deactivated for MVP
+├── S5-caption-preset.json   — ⏸ deactivated for MVP
+├── S6-music-track.json      — ⏸ deactivated for MVP
 ├── P1-job-status-push.json  — Webhook: Supabase → Sheet (event-driven)
-├── P2-periodic-sync.json    — Active jobs Supabase → Sheet (5min catch-up)
-├── P3-dashboard-refresh.json — Brand stats → Dashboard tab (5min)
-└── P4-monthly-archive.json  — Archive delivered/failed jobs (1st of month)
+├── P3-dashboard-refresh.json — ⏸ deactivated for MVP
+└── P4-monthly-archive.json  — ⏸ deactivated for MVP
 ```
 
 ## Google Sheets Admin Panel ("Video Pipeline")
@@ -123,12 +132,15 @@ Workers manage everything from a single Google Spreadsheet with 6 tabs:
 ## Google Drive Folder Structure
 - **Music Uploads**: `1s2vUnIoJUt7rltSRlJeY9uqQyQ5_Lzso` — Workers drop MP3s here, S7 processes and moves to Processed
 - **Music Processed**: `1RtBDaSxM45TT2B7ATvQGXvnY5HB1nWGw` — Processed tracks moved here automatically
-- Brand UGC folders: one per brand, workers drop raw footage here
+- **nordpilates UGC**: `1n0-vMRq0ckgAugGxUlOtY9e942ARpCyZ` (Processed: `1IMQwMD902e2ps7UYZnz1RQhRs3ZEUIhN`)
 
 ## n8n Credentials
-- **Google Sheets/Drive**: Service account `googleApi` — ID: `AIqzMYUXoQjud7IW`, Name: "Flemingo service acc"
-- **Supabase HTTP**: Header auth `httpHeaderAuth` — ID: `l66cV4Gj1L3T6MjJ`, Name: "Strapi API Token"
-- **Env vars**: `SUPABASE_URL`, `SUPABASE_ANON_KEY` configured in n8n
+| ID | Type | Used by |
+|---|---|---|
+| `AIqzMYUXoQjud7IW` | Google Service Account | S1, S2, P2 (Sheets) |
+| `9mzs7zcG6Z9TIcku` | Google OAuth | S7, S8 (Drive) |
+| `jPzsu3UPPrZc0kge` | Google Service Account | S7 (Sheet write) |
+| `l66cV4Gj1L3T6MjJ` | HTTP Header Auth | Deprecated — workflows use hardcoded headers |
 
 ## HTTP API (VPS port 3000)
 - `POST /enqueue` — n8n calls this to add jobs to BullMQ queues. Body: `{ queue, jobId }`
@@ -177,16 +189,21 @@ All templates render at 1080x1920 30fps (vertical short-form). Each layout is a 
 - `TransitionEffect` — 8 types (cut, fade, slide-left, slide-up, zoom, wipe, beat-flash, beat-zoom)
 - `SegmentVideo` — Handles single or multi-clip segments automatically
 
-## Quality Upgrade Features (code present, most feature-flagged OFF for MVP per v3)
-For MVP, only ingestion enrichment + encoding upgrade are active. Other phases stay in the code but are gated off until after first delivered video. Re-enable per v3 plan.
-- **Video Type System** — 4 types defined; MVP uses only `tips-listicle`
-- **Ingestion Enrichment** — FFmpeg clip analysis: dominant color, motion intensity, brightness *(active)*
-- **Beat-Synced Transitions** — BeatMap from tempo_bpm, snap transitions to nearest beat *(flagged off)*
-- **Audio Ducking** — Sidechain compressor (attack 50ms, release 300ms, ratio 6:1, base vol 0.30) *(flagged off)*
-- **Encoding Upgrade** — CRF 18 + slow preset, audio 192k (was CRF 23 + medium + 128k) *(active)*
-- **Color Grading** — 3-step: auto-level → brand LUT → preset fallback *(flagged off)*
-- **Music Selection** — Weighted random by mood + energy range *(flagged off; MVP uses single FALLBACK_MUSIC_TRACK_ID)*
-- **Dynamic Pacing** — Per-segment transition timing from energy curve + beat map *(flagged off)*
+## Feature Flags (.env)
+See `docs/ARCHITECTURE.md` §9 for full table. MVP state:
+- `ENABLE_AUDIO_DUCKING=true` *(active)*
+- `ENABLE_CRF18_ENCODING=true` *(active)*
+- `ENABLE_BEAT_SYNC=false` — Day 6 target: enable
+- `ENABLE_COLOR_GRADING=false` — Day 6 target: enable
+- `ENABLE_MUSIC_SELECTION=false` — Day 6 target: enable after music tagging
+- `ENABLE_DYNAMIC_PACING=false` — post-MVP
+- `FALLBACK_MUSIC_TRACK_ID=f6a6f64f-...` — Die With A Smile 249s
+
+## Quality Roadmap
+See `docs/ARCHITECTURE.md` §14 and `docs/MVP_PROGRESS.md` for full tiers. Summary:
+- **Tier 1 (Day 6, free):** Tighten curator prompt, pass full Gemini descriptions, enable color grading + beat sync + music selection after tagging 15 tracks. Expected lift: 6/10 → 7.5-8/10.
+- **Tier 2 (Day 7-14, ~$15/mo):** Gemini Flash→Pro, pre-normalize at ingestion, CLIP embeddings + pgvector.
+- **Tier 3 (Month 2):** Quality Director Agent, multi-language, real logos, A/B variants.
 
 ## Infrastructure
 - **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX32 (4 vCPU, 8GB RAM, 80GB SSD), Ubuntu — upgraded from CX22 on 2026-04-10 for render concurrency headroom
