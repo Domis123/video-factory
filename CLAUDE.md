@@ -18,16 +18,16 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 5. **Every state transition is logged.** INSERT into `job_events` on every status change where possible.
 6. **All workers use TypeScript.** No JavaScript files.
 7. **whisper.cpp runs locally** on VPS workers — do NOT use OpenAI Whisper API.
-8. **Workers only use Google Drive + Google Sheets.** No terminal, no Supabase, no R2 directly. n8n + VPS handle everything behind the scenes.
-9. **Stream large files.** Never `readFile` on uploads. Use `req.pipe(createWriteStream)`.
-10. **One ingestion at a time.** Concurrency guard prevents parallel OOM.
-11. **Feature flags control quality phases.** Default OFF for untested features.
-12. **Hardcode Supabase URL/key in n8n workflows.** No `$env` variables (unreliable in n8n).
-13. **Remotion bundles from .tsx source.** Use `extensionAlias` webpack override for `.js` → `.tsx`.
-14. **Remotion assets via `publicDir` + `staticFile()`.** Never pass absolute paths or `file://` URLs.
-15. **Asset Curator JSON key names vary** — use `Object.values().find()` dynamic extraction.
-16. **Create jobs with the status the worker expects** (`planning`, not `idea_seed`).
-17. **n8n Sheet writes after HTTP nodes** reach back through `$('Upstream Node').item.json` to avoid losing data to response replacement.
+8. **Stream large files.** Never `readFile` on uploads. Use `req.pipe(createWriteStream)`.
+9. **One ingestion at a time.** Concurrency guard prevents parallel OOM.
+10. **Feature flags control quality phases.** Default OFF for untested features.
+11. **Hardcode Supabase URL/key in n8n workflows.** No `$env` variables (unreliable in n8n).
+12. **Remotion bundles from .tsx source.** Use `extensionAlias` webpack override for `.js` → `.tsx`.
+13. **Remotion assets via `publicDir` + `staticFile()`.** Never pass absolute paths or `file://` URLs.
+14. **Asset Curator JSON key names vary** — use `Object.values().find()` dynamic extraction.
+15. **Create jobs with the status the worker expects** (`planning`, not `idea_seed`).
+16. **n8n Sheet writes after HTTP nodes** reach back through `$('Upstream Node').item.json` to avoid losing data to response replacement.
+17. **Supabase needs permissive RLS policies** for anon writes OR service role key.
 18. **Embeddings are self-hosted only.** No external embedding APIs. CLIP runs in `@xenova/transformers` on the VPS, costs zero. Same rule applies to any future embedding work.
 
 ## Tech Stack

@@ -12,6 +12,7 @@
     "test:agents:live": "tsx src/scripts/test-agents-live.ts",
     "test:phase5": "tsx src/scripts/test-phase5.ts",
     "test:quality": "tsx src/scripts/test-quality-upgrade.ts",
+    "test:clip": "tsx src/scripts/test-clip.ts",
     "start": "tsx src/index.ts",
     "start:prod": "node dist/index.js"
   },
@@ -30,6 +31,8 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "remotion": "^4.0.443",
+    "@xenova/transformers": "^2",
+    "sharp": "^0.33",
     "zod": "^3"
   },
   "devDependencies": {
