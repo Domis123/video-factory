@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, unlink, stat } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { mkdir, unlink, stat, readFile } from 'node:fs/promises';
+import { extname, join, dirname } from 'node:path';
 import { createReadStream } from 'node:fs';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
@@ -9,6 +9,9 @@ import { buildProbeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow } from '../lib/exec.js';
 import { analyzeClip } from '../lib/gemini.js';
 import { analyzeClipMetadata } from '../lib/clip-analysis.js';
+import { analyzeClipSegments } from '../lib/gemini-segments.js';
+import { extractKeyframe } from '../lib/keyframe-extractor.js';
+import { embedImage } from '../lib/clip-embed.js';
 import type { Asset } from '../types/database.js';
 
 export interface IngestionInput {
@@ -152,6 +155,63 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
 
   if (error) throw new Error(`Supabase insert failed: ${error.message}`);
   console.log(`[ingestion] Asset saved: ${assetId}`);
+
+  // ── Phase 1: Sub-clip segmentation (additive, non-blocking) ──
+  // Produces asset_segments rows alongside the legacy assets row.
+  // On failure, log and continue — the legacy row is already written
+  // and the backfill script can re-process later.
+  try {
+    const durationSeconds = probe.duration_seconds ?? 0;
+    if (durationSeconds > 0) {
+      const brandContext = `Brand: ${brandId}. ${description || 'UGC content.'}`;
+      const segments = await analyzeClipSegments(input.filePath, durationSeconds, brandContext);
+      console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
+
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const midpoint = (seg.start_s + seg.end_s) / 2;
+        const segmentUuid = randomUUID();
+        const keyframePath = `/tmp/video-factory/keyframes/${segmentUuid}.jpg`;
+        await mkdir(dirname(keyframePath), { recursive: true });
+
+        await extractKeyframe(input.filePath, midpoint, keyframePath);
+        const keyframeBuffer = await readFile(keyframePath);
+        const embedding = await embedImage(keyframeBuffer);
+
+        const keyframeR2Key = `keyframes/${brandId}/${segmentUuid}.jpg`;
+        await uploadFile(keyframeR2Key, keyframeBuffer, 'image/jpeg');
+
+        await supabaseAdmin.from('asset_segments').insert({
+          id: segmentUuid,
+          parent_asset_id: assetId,
+          brand_id: brandId,
+          segment_index: i,
+          start_s: seg.start_s,
+          end_s: seg.end_s,
+          segment_type: seg.segment_type,
+          description: seg.description,
+          visual_tags: seg.visual_tags,
+          best_used_as: seg.best_used_as,
+          motion_intensity: seg.motion_intensity,
+          recommended_duration_s: seg.recommended_duration_s,
+          has_speech: seg.has_speech,
+          quality_score: seg.quality_score,
+          keyframe_r2_key: keyframeR2Key,
+          embedding: `[${embedding.join(',')}]`,
+          ingestion_model: process.env['GEMINI_INGESTION_MODEL'] || 'gemini-2.5-pro-preview-05-06',
+        });
+
+        await unlink(keyframePath).catch(() => {});
+      }
+
+      console.log(`[ingestion] ${segments.length} asset_segments rows written for asset ${assetId}`);
+    } else {
+      console.warn(`[ingestion] Skipping segmentation: no duration for asset ${assetId}`);
+    }
+  } catch (segErr) {
+    console.error(`[ingestion] Segmentation failed for asset ${assetId}:`, segErr);
+    // Do NOT rethrow. Legacy assets row is already written. Backfill can re-run later.
+  }
 
   return data as Asset;
 }
