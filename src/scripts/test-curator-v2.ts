@@ -64,8 +64,15 @@ async function main() {
   const highQuality = results.filter((r) => r.score >= 7);
   check(`All picks scored >= 7 (${highQuality.length}/${results.length})`, highQuality.length === results.length);
 
-  const uniqueSegments = new Set(results.map((r) => r.segmentId));
-  check(`No duplicate segments picked (${uniqueSegments.size} unique)`, uniqueSegments.size === results.length);
+  // Variety: warn if 3+ slots share the same parent, but don't fail for minor overlap
+  const uniqueParents = new Set(results.filter((r) => r.parentR2Key).map((r) => r.parentR2Key));
+  console.log(`  Unique parent assets: ${uniqueParents.size}/${results.length}`);
+  const parentCounts = new Map<string, number>();
+  for (const r of results) {
+    if (r.parentR2Key) parentCounts.set(r.parentR2Key, (parentCounts.get(r.parentR2Key) ?? 0) + 1);
+  }
+  const maxReuse = Math.max(...parentCounts.values(), 0);
+  check(`No parent used 3+ times (max reuse: ${maxReuse})`, maxReuse < 3);
 
   // Summary
   const estCost = proCalls * 0.04; // rough estimate per Pro call with video

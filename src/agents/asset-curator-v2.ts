@@ -9,6 +9,7 @@ import {
   trimSegmentFromR2,
   uploadSegmentsToGemini,
   cleanupGeminiSegments,
+  cleanupParentCache,
   type TrimmedSegment,
 } from '../lib/segment-trimmer.js';
 
@@ -53,11 +54,22 @@ const pickSchema = z.object({
   reasoning: z.string().min(1),
 });
 
+// ── Timing accumulator ──
+
+interface PhaseTotals {
+  retrieveMs: number;
+  trimMs: number;
+  uploadMs: number;
+  pickMs: number;
+  critiqueMs: number;
+}
+
 // ── Main entry point ──
 
 /**
  * Curate assets for all slots in a brief using Gemini Pro with native video input.
  * Processes slots serially (parallel trim would risk VPS memory).
+ * Parent files are cached across slots to avoid redundant R2 downloads.
  */
 export async function curateWithV2(
   brief: CuratorV2Brief,
@@ -66,14 +78,30 @@ export async function curateWithV2(
   console.log(`[curator-v2] Starting V2 curation for ${brief.brandId}, ${brief.slots.length} slots`);
 
   const results: CuratorV2Result[] = [...(previousPicks ?? [])];
+  const parentCache = new Map<string, string>();
+  const totals: PhaseTotals = { retrieveMs: 0, trimMs: 0, uploadMs: 0, pickMs: 0, critiqueMs: 0 };
+  const overallStart = Date.now();
 
-  for (const slot of brief.slots) {
-    console.log(`\n[curator-v2] ── Slot ${slot.index} ──`);
-    const result = await curateSlot(slot, brief, results);
-    results.push(result);
+  try {
+    for (const slot of brief.slots) {
+      console.log(`\n[curator-v2] ── Slot ${slot.index} ──`);
+      const result = await curateSlot(slot, brief, results, parentCache, totals);
+      results.push(result);
+    }
+  } finally {
+    await cleanupParentCache(parentCache);
   }
 
-  console.log(`\n[curator-v2] Curation complete: ${results.length} slots filled`);
+  const overallMs = Date.now() - overallStart;
+  console.log(
+    `\n[curator-v2] Total wall time: ${(overallMs / 1000).toFixed(1)}s. ` +
+    `Phase totals: retrieve=${(totals.retrieveMs / 1000).toFixed(1)}s, ` +
+    `trim=${(totals.trimMs / 1000).toFixed(1)}s, ` +
+    `upload=${(totals.uploadMs / 1000).toFixed(1)}s, ` +
+    `pick=${(totals.pickMs / 1000).toFixed(1)}s`,
+  );
+  console.log(`[curator-v2] Curation complete: ${results.length} slots filled`);
+
   return results;
 }
 
@@ -83,8 +111,14 @@ async function curateSlot(
   slot: BriefSlot,
   brief: CuratorV2Brief,
   previousResults: CuratorV2Result[],
+  parentCache: Map<string, string>,
+  totals: PhaseTotals,
 ): Promise<CuratorV2Result> {
+  const slotStart = Date.now();
+  let retrieveMs = 0, trimMs = 0, uploadMs = 0, pickMs = 0, critiqueMs = 0;
+
   // 1. Retrieve candidates
+  let t0 = Date.now();
   let candidates = await retrieveCandidatesForSlot(slot, brief.brandId, 15);
 
   // Retry with lower quality if empty
@@ -97,24 +131,17 @@ async function curateSlot(
       15,
     );
   }
+  retrieveMs = Date.now() - t0;
 
   // Still empty — return placeholder
   if (candidates.length === 0) {
     console.error(`[curator-v2] Slot ${slot.index}: no candidates even after quality fallback`);
-    return {
-      slotIndex: slot.index,
-      segmentId: '',
-      parentAssetId: '',
-      parentR2Key: '',
-      trimStartS: 0,
-      trimEndS: 0,
-      score: 0,
-      reasoning: 'No candidates found in asset_segments for this slot',
-      candidateCount: 0,
-    };
+    logSlotTiming(slot.index, retrieveMs, 0, 0, 0, 0, Date.now() - slotStart);
+    return placeholderResult(slot);
   }
 
   // 2. Trim candidates (serial to avoid memory pressure)
+  t0 = Date.now();
   const trimmedSegments: TrimmedSegment[] = [];
   const slotWorkDir = `${WORK_DIR}/slot-${slot.index}`;
 
@@ -127,20 +154,25 @@ async function curateSlot(
           candidate.endS,
           candidate.segmentId,
           slotWorkDir,
+          parentCache,
         );
         trimmedSegments.push(trimmed);
       } catch (err) {
         console.warn(`[curator-v2] Failed to trim candidate ${candidate.segmentId}: ${(err as Error).message}`);
       }
     }
+    trimMs = Date.now() - t0;
 
     if (trimmedSegments.length === 0) {
       console.error(`[curator-v2] Slot ${slot.index}: all trims failed`);
+      logSlotTiming(slot.index, retrieveMs, trimMs, 0, 0, 0, Date.now() - slotStart);
       return fallbackResult(slot, candidates);
     }
 
     // 3. Upload to Gemini (parallel — I/O bound, safe)
+    t0 = Date.now();
     await uploadSegmentsToGemini(trimmedSegments);
+    uploadMs = Date.now() - t0;
 
     // 4. Build prompt
     const candidateMap = new Map(candidates.map((c) => [c.segmentId, c]));
@@ -148,15 +180,18 @@ async function curateSlot(
 
     const metadataBlock = activeTrimmed.map((t, i) => {
       const c = candidateMap.get(t.segmentId)!;
-      return `Candidate ${i + 1} (ID: ${c.segmentId}): type=${c.segmentType}, quality=${c.qualityScore}/10, duration=${c.durationS.toFixed(1)}s, description="${c.description}"`;
+      return `Candidate ${i + 1} (ID: ${c.segmentId}): type=${c.segmentType}, quality=${c.qualityScore}/10, duration=${c.durationS.toFixed(1)}s, parent=${c.parentR2Key}, description="${c.description}"`;
     }).join('\n');
 
-    let previousPicksContext = '';
+    // Build previously-picked context for variety
+    let previousPicksStr: string;
     if (previousResults.length > 0) {
       const pickedParents = previousResults
-        .filter((r) => r.parentAssetId)
-        .map((r) => r.parentAssetId);
-      previousPicksContext = `\nPreviously picked parent assets: [${pickedParents.join(', ')}]. Prefer different parents for variety.`;
+        .filter((r) => r.parentR2Key)
+        .map((r) => r.parentR2Key);
+      previousPicksStr = pickedParents.join(', ');
+    } else {
+      previousPicksStr = '(none — this is the first slot)';
     }
 
     const prompt = PROMPT_TEMPLATE
@@ -165,13 +200,17 @@ async function curateSlot(
       .replace('{min_quality}', String(slot.min_quality))
       .replace('{slot_index}', String(slot.index + 1))
       .replace('{total_slots}', String(brief.slots.length))
-      .replace('{candidate_metadata_block}', metadataBlock + previousPicksContext);
+      .replace('{previously_picked_parents}', previousPicksStr)
+      .replace('{candidate_metadata_block}', metadataBlock);
 
     // 5. Call Gemini Pro with video parts
+    t0 = Date.now();
     const pick = await callProPicker(activeTrimmed, prompt, slot, candidateMap);
+    pickMs = Date.now() - t0;
 
     // 6. Self-critique: if score < 7, ask for a second pick
     if (pick.score < 7) {
+      t0 = Date.now();
       console.log(`[curator-v2] Slot ${slot.index}: score ${pick.score}/10, running self-critique...`);
       const critiquePrompt =
         `You scored your previous pick ${pick.score}/10 (${pick.reasoning}). ` +
@@ -179,22 +218,57 @@ async function curateSlot(
         prompt;
 
       const secondPick = await callProPicker(activeTrimmed, critiquePrompt, slot, candidateMap);
+      critiqueMs = Date.now() - t0;
 
       if (secondPick.score >= 7) {
         console.log(`[curator-v2] Slot ${slot.index}: self-critique improved to ${secondPick.score}/10`);
+        logSlotTiming(slot.index, retrieveMs, trimMs, uploadMs, pickMs, critiqueMs, Date.now() - slotStart);
+        addToTotals(totals, retrieveMs, trimMs, uploadMs, pickMs, critiqueMs);
         return secondPick;
       }
       console.warn(`[curator-v2] Slot ${slot.index}: self-critique scored ${secondPick.score}/10, keeping first pick`);
     }
 
+    logSlotTiming(slot.index, retrieveMs, trimMs, uploadMs, pickMs, critiqueMs, Date.now() - slotStart);
+    addToTotals(totals, retrieveMs, trimMs, uploadMs, pickMs, critiqueMs);
     return pick;
   } finally {
-    // Cleanup: Gemini files + local trims
+    // Cleanup: Gemini files + local trims (parent cache cleaned at outer level)
     await cleanupGeminiSegments(trimmedSegments);
     for (const t of trimmedSegments) {
       await unlink(t.localPath).catch(() => {});
     }
   }
+}
+
+// ── Timing helpers ──
+
+function logSlotTiming(
+  slotIndex: number,
+  retrieveMs: number, trimMs: number, uploadMs: number,
+  pickMs: number, critiqueMs: number, totalMs: number,
+) {
+  console.log(
+    `[curator-v2] Slot ${slotIndex} timing: ` +
+    `retrieve=${(retrieveMs / 1000).toFixed(1)}s, ` +
+    `trim=${(trimMs / 1000).toFixed(1)}s, ` +
+    `upload=${(uploadMs / 1000).toFixed(1)}s, ` +
+    `pick=${(pickMs / 1000).toFixed(1)}s, ` +
+    `critique=${(critiqueMs / 1000).toFixed(1)}s, ` +
+    `total=${(totalMs / 1000).toFixed(1)}s`,
+  );
+}
+
+function addToTotals(
+  totals: PhaseTotals,
+  retrieveMs: number, trimMs: number, uploadMs: number,
+  pickMs: number, critiqueMs: number,
+) {
+  totals.retrieveMs += retrieveMs;
+  totals.trimMs += trimMs;
+  totals.uploadMs += uploadMs;
+  totals.pickMs += pickMs;
+  totals.critiqueMs += critiqueMs;
 }
 
 // ── Gemini Pro picker call ──
@@ -271,23 +345,25 @@ async function callProPicker(
   };
 }
 
-// ── Fallback: pick highest quality candidate ──
+// ── Fallback / placeholder helpers ──
+
+function placeholderResult(slot: BriefSlot): CuratorV2Result {
+  return {
+    slotIndex: slot.index,
+    segmentId: '',
+    parentAssetId: '',
+    parentR2Key: '',
+    trimStartS: 0,
+    trimEndS: 0,
+    score: 0,
+    reasoning: 'No candidates found in asset_segments for this slot',
+    candidateCount: 0,
+  };
+}
 
 function fallbackResult(slot: BriefSlot, candidates: CandidateSegment[]): CuratorV2Result {
   const best = candidates.sort((a, b) => b.qualityScore - a.qualityScore)[0];
-  if (!best) {
-    return {
-      slotIndex: slot.index,
-      segmentId: '',
-      parentAssetId: '',
-      parentR2Key: '',
-      trimStartS: 0,
-      trimEndS: 0,
-      score: 0,
-      reasoning: 'Fallback: no candidates available',
-      candidateCount: 0,
-    };
-  }
+  if (!best) return placeholderResult(slot);
   return {
     slotIndex: slot.index,
     segmentId: best.segmentId,

@@ -1,3 +1,9 @@
+-- NOTE: An ivfflat index on asset_segments(embedding) was originally created
+-- in migration 001 with `lists = 50`. It was dropped on 2026-04-13 because at
+-- ~182 rows the index cells were too small to return useful candidates for
+-- text-derived query embeddings. Sequential scan is fast enough at this scale.
+-- Recreate the index when asset_segments hits ~1000 rows, with `lists ≈ rows / 1000`.
+
 CREATE OR REPLACE FUNCTION match_segments(
   query_embedding VECTOR(512),
   brand_filter TEXT,

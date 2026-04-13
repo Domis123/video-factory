@@ -13,6 +13,9 @@ SLOT REQUIREMENTS:
 - Minimum quality: {min_quality}
 - This is slot {slot_index} of {total_slots} in the video
 
+PREVIOUSLY PICKED PARENT ASSETS (avoid these unless none of the candidates are from a different parent):
+{previously_picked_parents}
+
 CANDIDATES:
 {candidate_metadata_block}
 
@@ -20,7 +23,7 @@ EVALUATION CRITERIA (in priority order):
 1. Visual relevance — does this clip actually show what the slot describes?
 2. Quality — framing, lighting, focus, editability (already scored at ingestion; trust scores unless the video contradicts them)
 3. Editing fit — does the clip's energy and motion match the slot's role (hook vs demo vs transition vs closer)?
-4. Variety — if not the first slot, prefer a different parent clip from previous picks when possible
+4. Variety — if not the first slot, STRONGLY prefer a candidate from a different parent clip than the ones listed above. Only reuse a parent if no other candidate is visually relevant.
 
 OUTPUT FORMAT: Return ONLY a JSON object, no prose:
 {

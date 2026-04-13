@@ -23,6 +23,10 @@ export interface TrimmedSegment {
  * Always re-encodes to 720p libx264 CRF 28 to keep trimmed files small
  * (~3-8 MB for 5-15s segments). Stream-copy was dropped because 4K UGC
  * produced 79 MB trims that bottlenecked Gemini uploads.
+ *
+ * Optional parentCache avoids re-downloading the same parent file across
+ * multiple trims. When provided, the caller owns the lifecycle — parent
+ * files are NOT deleted after each trim. Call cleanupParentCache() in finally.
  */
 export async function trimSegmentFromR2(
   parentAssetR2Key: string,
@@ -30,16 +34,33 @@ export async function trimSegmentFromR2(
   endS: number,
   segmentId: string,
   workDir: string,
+  parentCache?: Map<string, string>,
 ): Promise<TrimmedSegment> {
   await mkdir(workDir, { recursive: true });
 
-  const parentPath = `${workDir}/_parent_${segmentId}.mp4`;
   const outPath = `${workDir}/${segmentId}.mp4`;
   const duration = endS - startS;
+  const usingCache = parentCache !== undefined;
 
-  // 1. Download parent from R2
-  console.log(`[segment-trimmer] Downloading ${parentAssetR2Key} for segment ${segmentId}...`);
-  await downloadToFile(parentAssetR2Key, parentPath);
+  // 1. Resolve parent path — check cache first
+  let parentPath: string;
+  let cacheHit = false;
+
+  if (usingCache && parentCache.has(parentAssetR2Key)) {
+    parentPath = parentCache.get(parentAssetR2Key)!;
+    cacheHit = true;
+  } else {
+    parentPath = `${workDir}/_parent_${segmentId}.mp4`;
+    console.log(`[segment-trimmer] Downloading ${parentAssetR2Key} for segment ${segmentId}...`);
+    await downloadToFile(parentAssetR2Key, parentPath);
+    if (usingCache) {
+      parentCache.set(parentAssetR2Key, parentPath);
+    }
+  }
+
+  if (cacheHit) {
+    console.log(`[segment-trimmer] Cache hit for ${parentAssetR2Key} (segment ${segmentId})`);
+  }
 
   try {
     // 2. Re-encode to 720p — small files for Gemini analysis
@@ -71,9 +92,30 @@ export async function trimSegmentFromR2(
       durationSeconds: duration,
     };
   } finally {
-    // 3. Always delete the parent temp file
-    await unlink(parentPath).catch(() => {});
+    // 3. Delete parent temp file only when NOT using cache
+    if (!usingCache) {
+      await unlink(parentPath).catch(() => {});
+    }
   }
+}
+
+// ── Parent cache cleanup ──
+
+/**
+ * Deletes all cached parent files. Call in finally after all trims are done.
+ */
+export async function cleanupParentCache(
+  cache: Map<string, string>,
+): Promise<void> {
+  for (const [r2Key, localPath] of cache) {
+    try {
+      await unlink(localPath);
+      console.log(`[segment-trimmer] Cleaned up cached parent: ${r2Key}`);
+    } catch {
+      // File may already be gone — that's fine
+    }
+  }
+  cache.clear();
 }
 
 // ── Upload trimmed segments to Gemini Files API ──
