@@ -7,9 +7,17 @@ import { env } from '../config/env.js';
 
 // ── Segment analysis types ──
 
+export const SEGMENT_TYPES = [
+  'setup', 'exercise', 'transition', 'hold', 'cooldown',
+  'talking-head', 'b-roll', 'unusable',
+] as const;
+
+export type SegmentType = typeof SEGMENT_TYPES[number];
+
 export interface SegmentAnalysis {
   start_s: number;
   end_s: number;
+  segment_type: SegmentType;
   description: string;
   visual_tags: string[];
   best_used_as: string[];
@@ -28,11 +36,12 @@ const VALID_BEST_USED_AS = [
 const segmentSchema = z.object({
   start_s: z.number().min(0),
   end_s: z.number().positive(),
+  segment_type: z.enum(SEGMENT_TYPES),
   description: z.string().min(1),
   visual_tags: z.array(z.string()).min(1),
-  best_used_as: z.array(z.enum(VALID_BEST_USED_AS)).min(1),
+  best_used_as: z.array(z.enum(VALID_BEST_USED_AS)),
   motion_intensity: z.number().int().min(1).max(10),
-  recommended_duration_s: z.number().positive(),
+  recommended_duration_s: z.number().min(0),
   has_speech: z.boolean(),
   quality_score: z.number().int().min(1).max(10),
 });
@@ -154,6 +163,20 @@ export async function analyzeClipSegments(
         if (seg.end_s <= seg.start_s) {
           console.warn(`[gemini-segments] Dropping segment ${i}: end_s <= start_s after clamping`);
           continue;
+        }
+        // Business rules for 'unusable' segments — coerce rather than drop
+        if (seg.segment_type === 'unusable') {
+          if (seg.recommended_duration_s !== 0) {
+            console.warn(`[gemini-segments] Coercing unusable segment ${i} recommended_duration_s ${seg.recommended_duration_s} → 0`);
+            seg.recommended_duration_s = 0;
+          }
+          if (seg.quality_score > 3) {
+            console.warn(`[gemini-segments] Coercing unusable segment ${i} quality_score ${seg.quality_score} → 3`);
+            seg.quality_score = 3;
+          }
+          if (seg.best_used_as.length > 0) {
+            seg.best_used_as = [];
+          }
         }
         validSegments.push(seg);
       } else {

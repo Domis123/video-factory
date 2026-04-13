@@ -64,7 +64,7 @@ if (segments.length > 0) {
     const s = segments[i];
     console.log(
       `  [${i}] ${s.start_s.toFixed(1)}s–${s.end_s.toFixed(1)}s (${(s.end_s - s.start_s).toFixed(1)}s) ` +
-        `motion:${s.motion_intensity} quality:${s.quality_score} speech:${s.has_speech}`,
+        `type:${s.segment_type} motion:${s.motion_intensity} quality:${s.quality_score} speech:${s.has_speech}`,
     );
     console.log(`       ${s.description}`);
     console.log(`       tags: ${s.visual_tags.join(', ')}`);
@@ -90,6 +90,26 @@ await test('Total covered duration > 50% of source', async () => {
   const pct = (covered / duration) * 100;
   console.log(`     Covered: ${covered.toFixed(1)}s / ${duration.toFixed(1)}s (${pct.toFixed(1)}%)`);
   if (pct < 50) throw new Error(`Only ${pct.toFixed(1)}% covered, need > 50%`);
+});
+
+// ── Validate: segment_type distribution ──
+const typeCounts: Record<string, number> = {};
+for (const s of segments) {
+  typeCounts[s.segment_type] = (typeCounts[s.segment_type] ?? 0) + 1;
+}
+const distStr = Object.entries(typeCounts).map(([k, v]) => `${k}=${v}`).join(', ');
+console.log(`     Distribution: ${distStr}`);
+
+await test('At least 2 distinct segment_types (clips >30s)', async () => {
+  if (duration <= 30) {
+    console.log('     Skipped (clip ≤30s)');
+    return;
+  }
+  const distinctTypes = Object.keys(typeCounts).length;
+  if (distinctTypes < 2) {
+    throw new Error(`Only ${distinctTypes} distinct segment_type(s): ${Object.keys(typeCounts).join(', ')}. Expected ≥2 for a ${duration.toFixed(0)}s clip.`);
+  }
+  console.log(`     ${distinctTypes} distinct types`);
 });
 
 // ── Keyframe extraction ──
