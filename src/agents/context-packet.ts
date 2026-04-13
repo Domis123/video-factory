@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import type { BrandConfig, CreativeBrief, ClipSelectionList, CopyPackage, ContextPacket, MusicTrack } from '../types/database.js';
 import { generateBrief } from './creative-director.js';
-import { selectClips } from './asset-curator.js';
+import { curateAssets } from './asset-curator-dispatch.js';
 import { generateCopy } from './copywriter.js';
 import { selectMusicTrack } from '../lib/music-selector.js';
 import { buildTemplateConfig } from '../lib/template-config-builder.js';
@@ -28,7 +28,7 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
 
   // Agent 2: Asset Curator → Clip Selections
   console.log('[context-packet] Agent 2: Asset Curator...');
-  const clips = await selectClips({ brief });
+  const clips = await curateAssets({ brief }, input.brandConfig.brand_id);
   // Claude varies the wrapper key name across runs — observed so far:
   // `clip_selections`, `selections`, `segments`. The array contents are
   // always structurally valid (each item has a `segment_id`). Instead of

@@ -10,6 +10,7 @@ export interface TrimmedSegment {
   segmentId: string;
   localPath: string;
   geminiFileName: string | null;
+  geminiFileUri: string | null;
   durationSeconds: number;
 }
 
@@ -19,8 +20,9 @@ export interface TrimmedSegment {
  * Downloads a parent clip from R2, trims the segment range via ffmpeg,
  * and returns the local trimmed file path.
  *
- * Strategy: try stream-copy first (fast, lossless). If ffmpeg fails
- * (common with HEVC/iOS UGC), retry with libx264 re-encode.
+ * Always re-encodes to 720p libx264 CRF 28 to keep trimmed files small
+ * (~3-8 MB for 5-15s segments). Stream-copy was dropped because 4K UGC
+ * produced 79 MB trims that bottlenecked Gemini uploads.
  */
 export async function trimSegmentFromR2(
   parentAssetR2Key: string,
@@ -40,47 +42,36 @@ export async function trimSegmentFromR2(
   await downloadToFile(parentAssetR2Key, parentPath);
 
   try {
-    // 2. Try stream copy first
-    const copyResult = await exec({
+    // 2. Re-encode to 720p — small files for Gemini analysis
+    const result = await exec({
       command: 'ffmpeg',
       args: [
         '-y', '-ss', String(startS), '-i', parentPath,
         '-t', String(duration),
-        '-c', 'copy', '-avoid_negative_ts', 'make_zero',
+        '-vf', 'scale=-2:720',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-b:a', '96k',
+        '-movflags', '+faststart',
+        '-avoid_negative_ts', 'make_zero',
         outPath,
       ],
     });
 
-    if (copyResult.exitCode !== 0) {
-      // 3. Fallback: re-encode
-      console.warn(`[segment-trimmer] Stream copy failed for ${segmentId}, re-encoding...`);
-      const encodeResult = await exec({
-        command: 'ffmpeg',
-        args: [
-          '-y', '-ss', String(startS), '-i', parentPath,
-          '-t', String(duration),
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-          '-c:a', 'aac',
-          '-avoid_negative_ts', 'make_zero',
-          outPath,
-        ],
-      });
-
-      if (encodeResult.exitCode !== 0) {
-        throw new Error(
-          `ffmpeg re-encode failed for segment ${segmentId} (exit ${encodeResult.exitCode}): ${encodeResult.stderr}`,
-        );
-      }
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `ffmpeg trim+downscale failed for segment ${segmentId} (exit ${result.exitCode}): ${result.stderr}`,
+      );
     }
 
     return {
       segmentId,
       localPath: outPath,
       geminiFileName: null,
+      geminiFileUri: null,
       durationSeconds: duration,
     };
   } finally {
-    // 4. Always delete the parent temp file
+    // 3. Always delete the parent temp file
     await unlink(parentPath).catch(() => {});
   }
 }
@@ -106,6 +97,7 @@ export async function uploadSegmentsToGemini(
 
       let file = uploadResult.file;
       seg.geminiFileName = file.name;
+      seg.geminiFileUri = file.uri;
 
       // Poll until ACTIVE
       while (file.state === FileState.PROCESSING) {
@@ -120,6 +112,8 @@ export async function uploadSegmentsToGemini(
         );
       }
 
+      // Update URI after polling (may have changed)
+      seg.geminiFileUri = file.uri;
       console.log(`[segment-trimmer] Gemini file ACTIVE: ${file.name} (segment ${seg.segmentId})`);
     }),
   );

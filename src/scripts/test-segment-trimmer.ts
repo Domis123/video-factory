@@ -105,7 +105,9 @@ async function main() {
 
   console.log(`  ffprobe duration: ${probeDuration.toFixed(2)}s (expected ~${expectedDuration.toFixed(2)}s)`);
 
-  check('Trimmed file size > 10 KB', fileStat.size > 10 * 1024);
+  const sizeKB = fileStat.size / 1024;
+  const sizeMB = sizeKB / 1024;
+  check(`Trimmed file size between 100 KB and 10 MB (got ${sizeMB.toFixed(2)} MB)`, sizeKB > 100 && sizeMB < 10);
   check(
     `ffprobe duration within ±0.5s of expected (${probeDuration.toFixed(2)} vs ${expectedDuration.toFixed(2)})`,
     Math.abs(probeDuration - expectedDuration) <= 0.5,
