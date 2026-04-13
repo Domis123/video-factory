@@ -15,6 +15,7 @@
     "test:clip": "tsx src/scripts/test-clip.ts",
     "test:segment-analyzer": "tsx src/scripts/test-segment-analyzer.ts",
     "backfill:segments": "tsx src/scripts/backfill-segments.ts",
+    "test:segment-trimmer": "tsx src/scripts/test-segment-trimmer.ts",
     "start": "tsx src/index.ts",
     "start:prod": "node dist/index.js"
   },
