@@ -22,6 +22,7 @@ export interface CandidateSegment {
   description: string;
   qualityScore: number;
   distance: number;
+  clipR2Key: string | null;
 }
 
 /**
@@ -96,6 +97,7 @@ export async function retrieveCandidatesForSlot(
       description: m.description as string,
       qualityScore: Number(m.quality_score),
       distance: Number(m.distance),
+      clipR2Key: (m.clip_r2_key as string) ?? null,
     });
   }
 

@@ -17,16 +17,14 @@ export interface TrimmedSegment {
 // ── Trim a segment from its R2 parent clip ──
 
 /**
- * Downloads a parent clip from R2, trims the segment range via ffmpeg,
- * and returns the local trimmed file path.
+ * Produces a local trimmed segment file, choosing between two paths:
  *
- * Always re-encodes to 720p libx264 CRF 28 to keep trimmed files small
- * (~3-8 MB for 5-15s segments). Stream-copy was dropped because 4K UGC
- * produced 79 MB trims that bottlenecked Gemini uploads.
+ * FAST PATH: if clipR2Key is provided, streams the pre-trimmed 720p file
+ * directly from R2 (~5 MB download, no ffmpeg). Falls back to slow path
+ * if the R2 fetch fails (e.g. file deleted).
  *
- * Optional parentCache avoids re-downloading the same parent file across
- * multiple trims. When provided, the caller owns the lifecycle — parent
- * files are NOT deleted after each trim. Call cleanupParentCache() in finally.
+ * SLOW PATH: downloads the full parent clip from R2, re-encodes to 720p
+ * CRF 28 via ffmpeg. Uses parentCache to avoid redundant downloads.
  */
 export async function trimSegmentFromR2(
   parentAssetR2Key: string,
@@ -35,14 +33,35 @@ export async function trimSegmentFromR2(
   segmentId: string,
   workDir: string,
   parentCache?: Map<string, string>,
+  clipR2Key?: string | null,
 ): Promise<TrimmedSegment> {
   await mkdir(workDir, { recursive: true });
 
   const outPath = `${workDir}/${segmentId}.mp4`;
   const duration = endS - startS;
+
+  // ── FAST PATH: pre-trimmed clip exists in R2 ──
+  if (clipR2Key) {
+    try {
+      console.log(`[segment-trimmer] FAST PATH (cached): ${clipR2Key}`);
+      await downloadToFile(clipR2Key, outPath);
+      return {
+        segmentId,
+        localPath: outPath,
+        geminiFileName: null,
+        geminiFileUri: null,
+        durationSeconds: duration,
+      };
+    } catch (err) {
+      console.warn(`[segment-trimmer] Fast path failed for ${clipR2Key}, falling back to slow path: ${(err as Error).message}`);
+      // Fall through to slow path
+    }
+  }
+
+  // ── SLOW PATH: download parent + ffmpeg encode ──
+  console.log(`[segment-trimmer] SLOW PATH (encoding): ${parentAssetR2Key}`);
   const usingCache = parentCache !== undefined;
 
-  // 1. Resolve parent path — check cache first
   let parentPath: string;
   let cacheHit = false;
 
@@ -63,7 +82,6 @@ export async function trimSegmentFromR2(
   }
 
   try {
-    // 2. Re-encode to 720p — small files for Gemini analysis
     const result = await exec({
       command: 'ffmpeg',
       args: [
@@ -92,7 +110,6 @@ export async function trimSegmentFromR2(
       durationSeconds: duration,
     };
   } finally {
-    // 3. Delete parent temp file only when NOT using cache
     if (!usingCache) {
       await unlink(parentPath).catch(() => {});
     }

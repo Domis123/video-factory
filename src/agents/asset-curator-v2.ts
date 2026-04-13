@@ -155,6 +155,7 @@ async function curateSlot(
           candidate.segmentId,
           slotWorkDir,
           parentCache,
+          candidate.clipR2Key,
         );
         trimmedSegments.push(trimmed);
       } catch (err) {
