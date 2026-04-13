@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, unlink, stat, readFile } from 'node:fs/promises';
-import { extname, join, dirname } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { createReadStream } from 'node:fs';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
@@ -10,8 +10,7 @@ import { execOrThrow } from '../lib/exec.js';
 import { analyzeClip } from '../lib/gemini.js';
 import { analyzeClipMetadata } from '../lib/clip-analysis.js';
 import { analyzeClipSegments } from '../lib/gemini-segments.js';
-import { extractKeyframe } from '../lib/keyframe-extractor.js';
-import { embedImage } from '../lib/clip-embed.js';
+import { processSegmentsForAsset } from '../lib/segment-processor.js';
 import type { Asset } from '../types/database.js';
 
 export interface IngestionInput {
@@ -167,44 +166,8 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
       const segments = await analyzeClipSegments(input.filePath, durationSeconds, brandContext);
       console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
 
-      for (let i = 0; i < segments.length; i++) {
-        const seg = segments[i];
-        const midpoint = (seg.start_s + seg.end_s) / 2;
-        const segmentUuid = randomUUID();
-        const keyframePath = `/tmp/video-factory/keyframes/${segmentUuid}.jpg`;
-        await mkdir(dirname(keyframePath), { recursive: true });
-
-        await extractKeyframe(input.filePath, midpoint, keyframePath);
-        const keyframeBuffer = await readFile(keyframePath);
-        const embedding = await embedImage(keyframeBuffer);
-
-        const keyframeR2Key = `keyframes/${brandId}/${segmentUuid}.jpg`;
-        await uploadFile(keyframeR2Key, keyframeBuffer, 'image/jpeg');
-
-        await supabaseAdmin.from('asset_segments').insert({
-          id: segmentUuid,
-          parent_asset_id: assetId,
-          brand_id: brandId,
-          segment_index: i,
-          start_s: seg.start_s,
-          end_s: seg.end_s,
-          segment_type: seg.segment_type,
-          description: seg.description,
-          visual_tags: seg.visual_tags,
-          best_used_as: seg.best_used_as,
-          motion_intensity: seg.motion_intensity,
-          recommended_duration_s: seg.recommended_duration_s,
-          has_speech: seg.has_speech,
-          quality_score: seg.quality_score,
-          keyframe_r2_key: keyframeR2Key,
-          embedding: `[${embedding.join(',')}]`,
-          ingestion_model: process.env['GEMINI_INGESTION_MODEL'] || 'gemini-2.5-pro-preview-05-06',
-        });
-
-        await unlink(keyframePath).catch(() => {});
-      }
-
-      console.log(`[ingestion] ${segments.length} asset_segments rows written for asset ${assetId}`);
+      const inserted = await processSegmentsForAsset(assetId, brandId, input.filePath, segments);
+      console.log(`[ingestion] ${inserted} asset_segments rows written for asset ${assetId}`);
     } else {
       console.warn(`[ingestion] Skipping segmentation: no duration for asset ${assetId}`);
     }
