@@ -22,6 +22,7 @@ import { transitionJob, claimJob, logEvent } from '../lib/job-manager.js';
 // going through logEvent('state_transition', ...), because job_events.to_status
 // is NOT NULL and a bare logEvent has no target status to report.
 import { buildContextPacket } from '../agents/context-packet.js';
+import { formatFullBrief } from '../lib/format-full-brief.js';
 import { renderVideo } from './renderer.js';
 import { prepareClips } from './clip-prep.js';
 import { transcribeAll } from './transcriber.js';
@@ -68,6 +69,14 @@ export async function runPlanning(jobId: string): Promise<void> {
       brandConfig: brand as BrandConfig,
     });
 
+    let fullBrief: string;
+    try {
+      fullBrief = formatFullBrief(contextPacket);
+    } catch (formatErr) {
+      console.error(`[pipeline] formatFullBrief failed for ${jobId}:`, formatErr);
+      fullBrief = `(format failed: ${(formatErr as Error).message})`;
+    }
+
     // Store Context Packet in job
     await supabaseAdmin
       .from('jobs')
@@ -77,6 +86,7 @@ export async function runPlanning(jobId: string): Promise<void> {
         hook_text: contextPacket.copy.hook_variants[0]?.text ?? null,
         cta_text: contextPacket.brief.segments.find((s) => s.type === 'cta')?.text_overlay.text ?? null,
         brief_summary: `${contextPacket.brief.template_id} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
+        full_brief: fullBrief,
         clip_selections: contextPacket.clips as unknown as Record<string, unknown>,
         copy_package: contextPacket.copy as unknown as Record<string, unknown>,
       })

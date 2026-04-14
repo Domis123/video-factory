@@ -4,6 +4,7 @@ import type { BrandConfig, CreativeBrief, BriefSegment } from '../types/database
 import type { VideoType } from '../types/video-types.js';
 import { VIDEO_TYPE_CONFIGS, getAllowedVideoTypes } from '../types/video-types.js';
 import { selectVideoType, getVideoTypeConfig } from '../lib/video-type-selector.js';
+import { withLLMRetry } from '../lib/retry-llm.js';
 
 const PROMPT_PATH = new URL('./prompts/creative-director.md', import.meta.url);
 
@@ -66,27 +67,40 @@ export async function generateBrief(input: CreativeDirectorInput): Promise<Creat
     },
   });
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    }),
-  });
+  const data = await withLLMRetry(async () => {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    });
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${err}`);
-  }
+    if (!response.ok) {
+      const errText = await response.text();
+      const error = new Error(`Claude API error ${response.status}: ${errText}`) as Error & {
+        status: number;
+        error?: { type: string };
+      };
+      error.status = response.status;
+      try {
+        const parsed = JSON.parse(errText);
+        if (parsed?.error?.type) error.error = { type: parsed.error.type };
+      } catch {
+        /* body wasn't JSON, ignore */
+      }
+      throw error;
+    }
 
-  const data = (await response.json()) as { content: { type: string; text: string }[] };
+    return (await response.json()) as { content: { type: string; text: string }[] };
+  }, { label: 'creative-director' });
   const text = data.content.find((c) => c.type === 'text')?.text;
   if (!text) throw new Error('No text response from Claude');
 

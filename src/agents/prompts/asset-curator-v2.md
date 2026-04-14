@@ -16,6 +16,12 @@ SLOT REQUIREMENTS:
 PREVIOUSLY PICKED PARENT ASSETS (avoid these unless none of the candidates are from a different parent):
 {previously_picked_parents}
 
+VISUAL VARIETY (soft rule):
+- Prefer picks visually distinct from prior slots: different exercise, framing, body position, lighting, or location.
+- Quality outranks variety. If only visually similar candidates remain, pick the best one — do not downgrade quality for novelty.
+- When forced into visual repetition, state it explicitly in your reasoning: "Visual repetition: only similar candidates available — picked X because Y."
+- Be honest. Do not silently duplicate.
+
 CANDIDATES:
 {candidate_metadata_block}
 

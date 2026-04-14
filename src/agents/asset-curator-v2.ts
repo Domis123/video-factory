@@ -12,6 +12,7 @@ import {
   cleanupParentCache,
   type TrimmedSegment,
 } from '../lib/segment-trimmer.js';
+import { withLLMRetry } from '../lib/retry-llm.js';
 
 // ── Types ──
 
@@ -206,7 +207,7 @@ async function curateSlot(
 
     // 5. Call Gemini Pro with video parts
     t0 = Date.now();
-    const pick = await callProPicker(activeTrimmed, prompt, slot, candidateMap);
+    const pick = await callProPicker(activeTrimmed, prompt, slot, candidateMap, 'curator-v2-pick');
     pickMs = Date.now() - t0;
 
     // 6. Self-critique: if score < 7, ask for a second pick
@@ -218,7 +219,7 @@ async function curateSlot(
         `Pick a DIFFERENT candidate from the same list and explain why it's better.\n\n` +
         prompt;
 
-      const secondPick = await callProPicker(activeTrimmed, critiquePrompt, slot, candidateMap);
+      const secondPick = await callProPicker(activeTrimmed, critiquePrompt, slot, candidateMap, 'curator-v2-critique');
       critiqueMs = Date.now() - t0;
 
       if (secondPick.score >= 7) {
@@ -279,6 +280,7 @@ async function callProPicker(
   prompt: string,
   slot: BriefSlot,
   candidateMap: Map<string, CandidateSegment>,
+  label: string,
 ): Promise<CuratorV2Result> {
   const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({
@@ -303,7 +305,7 @@ async function callProPicker(
   parts.push({ text: prompt });
 
   console.log(`[curator-v2] Calling ${MODEL_ID} for slot ${slot.index} with ${trimmedSegments.length} candidates...`);
-  const result = await model.generateContent(parts);
+  const result = await withLLMRetry(() => model.generateContent(parts), { label });
   const text = result.response.text();
 
   // Parse response
@@ -316,13 +318,61 @@ async function callProPicker(
     raw = JSON.parse(match[0]);
   }
 
+  let pick: z.infer<typeof pickSchema>;
   const parsed = pickSchema.safeParse(raw);
-  if (!parsed.success) {
-    console.error(`[curator-v2] Slot ${slot.index}: Zod validation failed:`, parsed.error.issues);
-    return fallbackResult(slot, [...candidateMap.values()]);
-  }
+  if (parsed.success) {
+    pick = parsed.data;
+  } else {
+    console.warn(
+      `[curator-v2] Slot ${slot.index}: initial Zod validation failed, attempting corrective retry:`,
+      parsed.error.issues,
+    );
+    try {
+      const zodErrorLines = parsed.error.issues
+        .map((e) => `- ${e.path.join('.')}: ${e.message}`)
+        .join('\n');
+      const correctivePrompt =
+        prompt +
+        `\n\nYour previous response failed schema validation:\n\n${zodErrorLines}\n\n` +
+        `Return ONLY valid JSON matching the required schema. Do not wrap in markdown fences or add explanation outside the JSON object.`;
 
-  const pick = parsed.data;
+      const correctiveParts: any[] = [];
+      for (const t of trimmedSegments) {
+        if (!t.geminiFileUri) continue;
+        correctiveParts.push({
+          fileData: { mimeType: 'video/mp4', fileUri: t.geminiFileUri },
+        });
+      }
+      correctiveParts.push({ text: correctivePrompt });
+
+      const correctiveResult = await withLLMRetry(
+        () => model.generateContent(correctiveParts),
+        { label: `${label}-corrective`, maxAttempts: 2 },
+      );
+      const correctiveText = correctiveResult.response.text();
+
+      let correctiveRaw: unknown;
+      try {
+        correctiveRaw = JSON.parse(correctiveText);
+      } catch {
+        const m = correctiveText.match(/\{[\s\S]*\}/);
+        if (!m) throw new Error(`Failed to parse Pro corrective response for slot ${slot.index}: ${correctiveText.slice(0, 200)}`);
+        correctiveRaw = JSON.parse(m[0]);
+      }
+
+      const correctiveParsed = pickSchema.safeParse(correctiveRaw);
+      if (!correctiveParsed.success) {
+        throw new Error('Pro response failed Zod validation after corrective retry');
+      }
+      pick = correctiveParsed.data;
+      console.log(`[curator-v2] Slot ${slot.index}: corrective retry succeeded`);
+    } catch (err) {
+      console.error(
+        `[curator-v2] Slot ${slot.index}: Pro failed Zod validation twice (initial + corrective), falling back to highest-quality candidate: ${(err as Error).message}`,
+      );
+      return fallbackResult(slot, [...candidateMap.values()]);
+    }
+  }
 
   // Validate picked ID exists in candidates
   const picked = candidateMap.get(pick.picked_segment_id);

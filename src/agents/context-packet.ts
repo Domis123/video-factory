@@ -7,6 +7,7 @@ import { curateAssets } from './asset-curator-dispatch.js';
 import { generateCopy } from './copywriter.js';
 import { selectMusicTrack } from '../lib/music-selector.js';
 import { buildTemplateConfig } from '../lib/template-config-builder.js';
+import { formatFullBrief } from '../lib/format-full-brief.js';
 import { VIDEO_TYPE_CONFIGS, type VideoType } from '../types/video-types.js';
 
 export interface PlanningInput {
@@ -139,6 +140,14 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
 export async function planJob(jobId: string, input: PlanningInput): Promise<ContextPacket> {
   const contextPacket = await buildContextPacket(input);
 
+  let fullBrief: string;
+  try {
+    fullBrief = formatFullBrief(contextPacket);
+  } catch (formatErr) {
+    console.error(`[context-packet] formatFullBrief failed for ${jobId}:`, formatErr);
+    fullBrief = `(format failed: ${(formatErr as Error).message})`;
+  }
+
   // Store in job
   const { error } = await supabaseAdmin
     .from('jobs')
@@ -149,6 +158,7 @@ export async function planJob(jobId: string, input: PlanningInput): Promise<Cont
       hook_text: contextPacket.copy.hook_variants[0]?.text ?? null,
       cta_text: contextPacket.brief.segments.find((s) => s.type === 'cta')?.text_overlay.text ?? null,
       brief_summary: `${contextPacket.brief.video_type} | ${contextPacket.brief.template_id} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
+      full_brief: fullBrief,
       clip_selections: contextPacket.clips as unknown as Record<string, unknown>,
       copy_package: contextPacket.copy as unknown as Record<string, unknown>,
     })

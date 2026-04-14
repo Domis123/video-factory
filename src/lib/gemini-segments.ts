@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 import { z } from 'zod';
 import { env } from '../config/env.js';
+import { withLLMRetry } from './retry-llm.js';
 
 // ── Segment analysis types ──
 
@@ -120,15 +121,18 @@ export async function analyzeClipSegments(
     });
 
     console.log(`[gemini-segments] Sending to ${MODEL_ID} for analysis...`);
-    const result = await model.generateContent([
-      {
-        fileData: {
-          mimeType: file.mimeType,
-          fileUri: file.uri,
+    const result = await withLLMRetry(
+      () => model.generateContent([
+        {
+          fileData: {
+            mimeType: file.mimeType,
+            fileUri: file.uri,
+          },
         },
-      },
-      { text: prompt },
-    ]);
+        { text: prompt },
+      ]),
+      { label: 'ingestion-segments' },
+    );
 
     const text = result.response.text();
 
