@@ -1,6 +1,47 @@
 # Video Factory — MVP Progress Tracker
 
-**Last updated:** 2026-04-14 morning UTC
+**Last updated:** 2026-04-14 end-of-day UTC
+
+---
+
+## Session 2026-04-14 — Phase 2 Cleanup Shipped
+
+**What shipped**
+- PR #1 (Phase 1+2+2.5 + docs v3.9) released to `origin/main` at `bd19edc`.
+- Squashed Phase 2 cleanup released to `origin/main` at `269ff99`, tag `phase2-complete` pushed.
+
+**Cleanup contents (one squash, 7 pre-merge commits)**
+- `retry-llm.ts` helper + wrap 4 LLM call sites (Sonnet CD, Sonnet Copywriter, Gemini Pro curator pick+critique, Gemini Pro ingestion).
+- Zod corrective retry in curator V2 picker — catches malformed Pro JSON that would have been silent fallbacks.
+- V2 prompt: 4-bullet soft visual-variety rule with explicit repetition signal for operator.
+- `jobs.full_brief TEXT` column + reusable `apply-migration.ts` runner (via `apply_migration_sql` RPC bootstrap).
+- `format-full-brief.ts` formatter (label dedup, energy+pacing in headers, IG 200-char truncate, FALLBACK prefix, 45k cap).
+- Worker wiring in `pipeline.ts` + `context-packet.ts`: auto-populate `full_brief` on planning completion, try/catch so formatter bugs can't fail planning.
+
+**Side quests**
+- S1 runaway loop (23 dup jobs); planning queue drained via untracked `drain-planning-queue.ts`.
+- Bootstrapped Supabase DDL path via `apply_migration_sql` RPC (SECURITY DEFINER, service_role only).
+- Migration 005 return-type fix codified as Arch Rule 22 (DROP + CREATE + NOTIFY, no CREATE OR REPLACE).
+- Sheet cell escape via leading apostrophe in S2 code node.
+- Branch-to-origin workaround: VPS lacks GH creds → laptop pulls via `git fetch ssh://…/home/video-factory`, pushes from there.
+
+**Production validation**
+- Test job `10e7612b` ran full new code path at 10:58 UTC; `full_brief` populated + synced to sheet column G.
+- Zod corrective retry fired on slot 1, recovered, q=9 pick.
+- Wall time ~4 min, matches 4.4-min Phase 2.5 baseline.
+- Backfilled `full_brief` for 5 pre-Step-7 jobs (2862–3450 chars each).
+
+**Residual**
+- Cosmetic apostrophe prefix visible in Sheet cell.
+- `feat/sub-clip-segmentation` preserved on origin as Phase 1 reference.
+- Supabase anon key hardcoded in n8n export (accepted risk).
+- VPS still GH-credless; pushes go via laptop.
+
+**Next**
+- Phase 3: CD archetype + variable slot count + Remotion template variants + pre-normalization at ingestion.
+- Content sprint: 15–20 more ab/core UGC (waiting on head of creatives).
+
+See `docs/SESSION_LOG_2026-04-14.md` for full narrative.
 
 ---
 

@@ -53,6 +53,11 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 - **Video Processing**: FFmpeg
 - **Admin Panel**: Google Sheets ("Video Pipeline" spreadsheet)
 
+## Cost Accounting
+**Gemini API is currently free for this project via company credits — DO NOT factor Gemini costs into per-video or per-month totals.** Only Claude Sonnet costs (Creative Director + Copywriter, ~$0.25/video) count against the real budget. Revisit if the company credit arrangement ends.
+
+Applies to: Gemini 3.1 Pro ingestion (segment analysis + CLIP embedding via local @xenova/transformers which is already free), Gemini 3.1 Pro curator V2 (pick + critique). The "~$0.75/video" number cited in earlier docs assumed paid Gemini — real out-of-pocket cost is ~$0.25/video while credits last.
+
 ## Database Tables
 - `brand_configs` — Brand settings, colors (regex-validated hex), fonts, caption presets, voice guidelines, allowed_video_types, color_grade_preset
 - `assets` (53 rows) — Ingested UGC clips with AI-generated tags, quality scores, usable segments, dominant_color_hex, motion_intensity, avg_brightness. Parent table for `asset_segments`. Legacy Gemini Flash catalog, stays as-is.
