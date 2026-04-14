@@ -1,3 +1,5 @@
+DROP FUNCTION IF EXISTS match_segments(TEXT, TEXT, TEXT[], INT, INT);
+
 CREATE OR REPLACE FUNCTION match_segments(
   query_embedding TEXT,
   brand_filter    TEXT,
