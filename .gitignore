@@ -7,3 +7,4 @@ dist/
 env.video-factory
 video/
 music-tracks/
+.cache/transformers/

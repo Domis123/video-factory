@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, unlink, stat } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { createReadStream } from 'node:fs';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
@@ -9,6 +9,8 @@ import { buildProbeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow } from '../lib/exec.js';
 import { analyzeClip } from '../lib/gemini.js';
 import { analyzeClipMetadata } from '../lib/clip-analysis.js';
+import { analyzeClipSegments } from '../lib/gemini-segments.js';
+import { processSegmentsForAsset } from '../lib/segment-processor.js';
 import type { Asset } from '../types/database.js';
 
 export interface IngestionInput {
@@ -152,6 +154,27 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
 
   if (error) throw new Error(`Supabase insert failed: ${error.message}`);
   console.log(`[ingestion] Asset saved: ${assetId}`);
+
+  // ── Phase 1: Sub-clip segmentation (additive, non-blocking) ──
+  // Produces asset_segments rows alongside the legacy assets row.
+  // On failure, log and continue — the legacy row is already written
+  // and the backfill script can re-process later.
+  try {
+    const durationSeconds = probe.duration_seconds ?? 0;
+    if (durationSeconds > 0) {
+      const brandContext = `Brand: ${brandId}. ${description || 'UGC content.'}`;
+      const segments = await analyzeClipSegments(input.filePath, durationSeconds, brandContext);
+      console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
+
+      const inserted = await processSegmentsForAsset(assetId, brandId, input.filePath, segments);
+      console.log(`[ingestion] ${inserted} asset_segments rows written for asset ${assetId}`);
+    } else {
+      console.warn(`[ingestion] Skipping segmentation: no duration for asset ${assetId}`);
+    }
+  } catch (segErr) {
+    console.error(`[ingestion] Segmentation failed for asset ${assetId}:`, segErr);
+    // Do NOT rethrow. Legacy assets row is already written. Backfill can re-run later.
+  }
 
   return data as Asset;
 }
