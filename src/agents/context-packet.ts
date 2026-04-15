@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
-import type { BrandConfig, CreativeBrief, ClipSelectionList, CopyPackage, ContextPacket, MusicTrack } from '../types/database.js';
-import { generateBrief } from './creative-director.js';
+import type { BrandConfig, ClipSelectionList, ContextPacket, MusicTrack } from '../types/database.js';
+import { generateBriefDispatched } from './creative-director-dispatch.js';
 import { curateAssets } from './asset-curator-dispatch.js';
 import { generateCopy } from './copywriter.js';
 import { selectMusicTrack } from '../lib/music-selector.js';
 import { buildTemplateConfig } from '../lib/template-config-builder.js';
-import { formatFullBrief } from '../lib/format-full-brief.js';
 import { VIDEO_TYPE_CONFIGS, type VideoType } from '../types/video-types.js';
 
 export interface PlanningInput {
@@ -19,12 +18,30 @@ export interface PlanningInput {
 export async function buildContextPacket(input: PlanningInput): Promise<ContextPacket> {
   console.log('[context-packet] Starting planning pipeline...');
 
-  // Agent 1: Creative Director → Brief
+  // Agent 1: Creative Director → Brief (dispatcher routes by ENABLE_PHASE_3_CD)
   console.log('[context-packet] Agent 1: Creative Director...');
-  const brief = await generateBrief({
+  const dispatched = await generateBriefDispatched({
     ideaSeed: input.ideaSeed,
     brandConfig: input.brandConfig,
   });
+
+  if (dispatched.phase === 'phase3') {
+    // Phase 3 brief generated + Zod-validated, but downstream (curator/copywriter/renderer)
+    // still expects the Phase 2 shape. W2/W3/W4 wire those up; until then we stop here
+    // so operators get a clear signal rather than a silent Phase-2-shape mismatch.
+    console.log(
+      `[context-packet] Phase 3 brief generated: ${dispatched.brief.video_type}, ` +
+      `${dispatched.brief.total_duration_target}s, ${dispatched.brief.segments.length} segments, ` +
+      `slot_count=${dispatched.brief.creative_direction.slot_count}, ` +
+      `color=${dispatched.brief.creative_direction.color_treatment}`,
+    );
+    throw new Error(
+      'Phase 3 CD enabled but downstream agents (W2/W3/W4) not yet shipped. ' +
+      'Brief generation succeeded; pipeline cannot proceed. See W1 Step 3.',
+    );
+  }
+
+  const brief = dispatched.brief;
   console.log(`[context-packet] Brief created: ${brief.template_id}, ${brief.total_duration_target}s, ${brief.segments.length} segments`);
 
   // Agent 2: Asset Curator → Clip Selections
@@ -133,39 +150,5 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
   };
 
   console.log(`[context-packet] Context Packet assembled: ${contextPacket.context_packet_id}`);
-  return contextPacket;
-}
-
-/** Run planning and store Context Packet in the job record */
-export async function planJob(jobId: string, input: PlanningInput): Promise<ContextPacket> {
-  const contextPacket = await buildContextPacket(input);
-
-  let fullBrief: string;
-  try {
-    fullBrief = formatFullBrief(contextPacket);
-  } catch (formatErr) {
-    console.error(`[context-packet] formatFullBrief failed for ${jobId}:`, formatErr);
-    fullBrief = `(format failed: ${(formatErr as Error).message})`;
-  }
-
-  // Store in job
-  const { error } = await supabaseAdmin
-    .from('jobs')
-    .update({
-      context_packet: contextPacket as unknown as Record<string, unknown>,
-      video_type: contextPacket.brief.video_type,
-      template_id: contextPacket.brief.template_id,
-      hook_text: contextPacket.copy.hook_variants[0]?.text ?? null,
-      cta_text: contextPacket.brief.segments.find((s) => s.type === 'cta')?.text_overlay.text ?? null,
-      brief_summary: `${contextPacket.brief.video_type} | ${contextPacket.brief.template_id} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
-      full_brief: fullBrief,
-      clip_selections: contextPacket.clips as unknown as Record<string, unknown>,
-      copy_package: contextPacket.copy as unknown as Record<string, unknown>,
-    })
-    .eq('id', jobId);
-
-  if (error) throw new Error(`Failed to store context packet: ${error.message}`);
-
-  console.log(`[context-packet] Stored in job ${jobId}`);
   return contextPacket;
 }

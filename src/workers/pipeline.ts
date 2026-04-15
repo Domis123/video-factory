@@ -82,10 +82,11 @@ export async function runPlanning(jobId: string): Promise<void> {
       .from('jobs')
       .update({
         context_packet: contextPacket as unknown as Record<string, unknown>,
+        video_type: contextPacket.brief.video_type,
         template_id: contextPacket.brief.template_id,
         hook_text: contextPacket.copy.hook_variants[0]?.text ?? null,
         cta_text: contextPacket.brief.segments.find((s) => s.type === 'cta')?.text_overlay.text ?? null,
-        brief_summary: `${contextPacket.brief.template_id} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
+        brief_summary: `${contextPacket.brief.video_type} | ${contextPacket.brief.template_id} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
         full_brief: fullBrief,
         clip_selections: contextPacket.clips as unknown as Record<string, unknown>,
         copy_package: contextPacket.copy as unknown as Record<string, unknown>,

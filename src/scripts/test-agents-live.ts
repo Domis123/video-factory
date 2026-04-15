@@ -5,7 +5,7 @@
 
 import 'dotenv/config';
 import type { BrandConfig } from '../types/database.js';
-import { generateBrief } from '../agents/creative-director.js';
+import { generateBriefPhase2 } from '../agents/creative-director.js';
 import { selectClips } from '../agents/asset-curator.js';
 import { generateCopy } from '../agents/copywriter.js';
 import { buildContextPacket } from '../agents/context-packet.js';
@@ -57,6 +57,7 @@ const mockBrand: BrandConfig = {
   allowed_video_types: ['workout-demo', 'tips-listicle', 'transformation'],
   color_grade_preset: 'warm-vibrant',
   color_lut_r2_key: null,
+  allowed_color_treatments: null,
   drive_input_folder_id: null,
   drive_output_folder_id: null,
   active: true,
@@ -84,7 +85,7 @@ async function main() {
 
   // ── Agent 1: Creative Director ──
   console.log('── Agent 1: Creative Director (calling Claude API...) ──');
-  const brief = await generateBrief({ ideaSeed, brandConfig: mockBrand });
+  const brief = await generateBriefPhase2({ ideaSeed, brandConfig: mockBrand });
   console.log(`   Template: ${brief.template_id}, Duration: ${brief.total_duration_target}s, Segments: ${brief.segments.length}`);
 
   assert('Brief has brief_id', !!brief.brief_id);

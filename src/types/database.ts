@@ -43,6 +43,7 @@ export interface BrandConfig {
   allowed_video_types: string[];
   color_grade_preset: string | null;
   color_lut_r2_key: string | null;
+  allowed_color_treatments: string[] | null;
   drive_input_folder_id: string | null;
   drive_output_folder_id: string | null;
   active: boolean;
@@ -243,6 +244,82 @@ export interface BriefSegment {
     duration: number;
     text_overlay: { text: string; style: string };
   }[];
+}
+
+// ── Phase 3 Creative Brief (additive — Phase 2 types above stay intact) ──
+
+export type Phase3ColorTreatment =
+  | 'warm-vibrant' | 'cool-muted' | 'high-contrast' | 'soft-pastel'
+  | 'moody-dark' | 'natural' | 'golden-hour' | 'clean-bright';
+
+export type Phase3TransitionIn =
+  | 'hard-cut' | 'crossfade' | 'slide' | 'zoom'
+  | 'whip-pan' | 'fade-from-black';
+
+export type Phase3InternalCutStyle = 'hold' | 'hard-cuts' | 'soft-cuts';
+
+export type Phase3OverlayStyle =
+  | 'bold-center' | 'subtitle' | 'label' | 'cta' | 'minimal' | 'none';
+
+export type Phase3OverlayPosition =
+  | 'top-left' | 'top-center' | 'top-right'
+  | 'center'
+  | 'bottom-left' | 'bottom-center' | 'bottom-right';
+
+export type Phase3OverlayAnimation =
+  | 'pop-in' | 'slide-up' | 'fade' | 'type-on' | 'none';
+
+export type Phase3MusicTempo = 'slow' | 'medium' | 'fast';
+
+export interface Phase3BriefSegment {
+  type: 'hook' | 'body' | 'cta';
+  label: string;
+  pacing: 'slow' | 'medium' | 'fast';
+  cut_duration_target_s: number;
+  transition_in: Phase3TransitionIn;
+  internal_cut_style: Phase3InternalCutStyle;
+  text_overlay: {
+    style: Phase3OverlayStyle;
+    position: Phase3OverlayPosition;
+    animation: Phase3OverlayAnimation;
+    char_target: number;
+  };
+  clip_requirements: {
+    mood: string;
+    has_speech: boolean;
+    min_quality: number;
+    content_type: string[];
+    visual_elements: string[];
+    aesthetic_guidance: string;
+  };
+}
+
+export interface Phase3CreativeBrief {
+  brief_id: string;
+  brand_id: string;
+  video_type: string;
+  composition_id: 'phase3-parameterized-v1';
+  total_duration_target: number;
+  caption_preset: string;
+  idea_seed: string;
+  vibe: string | null;
+  creative_direction: {
+    creative_vision: string;
+    slot_count: number;
+    energy_per_slot: number[];
+    color_treatment: Phase3ColorTreatment;
+  };
+  segments: Phase3BriefSegment[];
+  audio: {
+    strategy: 'music-primary';
+    music: {
+      mood: string;
+      tempo: Phase3MusicTempo;
+      energy_level: number;
+      volume_level: number;
+      pinned_track_id: string | null;
+    };
+  };
 }
 
 // ── Clip Selection List (Agent 2: Asset Curator output) ──

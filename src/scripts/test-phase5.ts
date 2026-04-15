@@ -62,6 +62,7 @@ const mockBrand: BrandConfig = {
   allowed_video_types: ['workout-demo', 'tips-listicle', 'transformation'],
   color_grade_preset: 'warm-vibrant',
   color_lut_r2_key: null,
+  allowed_color_treatments: null,
   drive_input_folder_id: null,
   drive_output_folder_id: null,
   active: true,

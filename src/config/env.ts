@@ -43,6 +43,9 @@ const envSchema = z.object({
   ENABLE_COLOR_GRADING: z.string().default('false').transform((v) => v === 'true'),
   ENABLE_MUSIC_SELECTION: z.string().default('false').transform((v) => v === 'true'),
   ENABLE_DYNAMIC_PACING: z.string().default('false').transform((v) => v === 'true'),
+  // Phase 3 Creative Director — new parameterized schema (slot_count 3-12, energy_per_slot,
+  // color_treatment, per-slot transitions). Off by default until downstream W2/W3/W4 ship.
+  ENABLE_PHASE_3_CD: z.string().default('false').transform((v) => v === 'true'),
   // Audio ducking + CRF18 are ON by default — they don't depend on data we don't have yet.
   ENABLE_AUDIO_DUCKING: z.string().default('true').transform((v) => v !== 'false'),
   ENABLE_CRF18_ENCODING: z.string().default('true').transform((v) => v !== 'false'),

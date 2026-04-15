@@ -6,7 +6,7 @@ import { VIDEO_TYPE_CONFIGS, getAllowedVideoTypes } from '../types/video-types.j
 import { selectVideoType, getVideoTypeConfig } from '../lib/video-type-selector.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
 
-const PROMPT_PATH = new URL('./prompts/creative-director.md', import.meta.url);
+const PROMPT_PATH = new URL('./prompts/creative-director-phase2.md', import.meta.url);
 
 export interface CreativeDirectorInput {
   ideaSeed: string;
@@ -27,11 +27,11 @@ async function loadPrompt(): Promise<string> {
 }
 
 /** Call Claude API to generate a Creative Brief (requires ANTHROPIC_API_KEY) */
-export async function generateBrief(input: CreativeDirectorInput): Promise<CreativeBrief> {
+export async function generateBriefPhase2(input: CreativeDirectorInput): Promise<CreativeBrief> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.warn('[creative-director] No ANTHROPIC_API_KEY — using mock mode');
-    return generateMockBrief(input);
+    return generateMockBriefPhase2(input);
   }
 
   // Select video type before calling the agent
@@ -234,7 +234,7 @@ function normalizeBrief(raw: Record<string, unknown>, brandConfig: BrandConfig, 
 }
 
 /** Mock brief for development — uses video type system */
-export function generateMockBrief(input: CreativeDirectorInput): CreativeBrief {
+export function generateMockBriefPhase2(input: CreativeDirectorInput): CreativeBrief {
   const briefId = randomUUID();
   const videoType = selectVideoType(input.brandConfig.brand_id, input.ideaSeed);
   const vtConfig = VIDEO_TYPE_CONFIGS[videoType];

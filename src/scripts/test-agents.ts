@@ -4,7 +4,7 @@
  */
 
 import type { BrandConfig } from '../types/database.js';
-import { generateMockBrief } from '../agents/creative-director.js';
+import { generateMockBriefPhase2 } from '../agents/creative-director.js';
 import { selectMockClips } from '../agents/asset-curator.js';
 import { generateMockCopy } from '../agents/copywriter.js';
 import { buildContextPacket } from '../agents/context-packet.js';
@@ -51,6 +51,7 @@ const mockBrand: BrandConfig = {
   allowed_video_types: ['workout-demo', 'tips-listicle', 'transformation'],
   color_grade_preset: 'warm-vibrant',
   color_lut_r2_key: null,
+  allowed_color_treatments: null,
   drive_input_folder_id: null,
   drive_output_folder_id: null,
   active: true,
@@ -78,7 +79,7 @@ async function main() {
 
   // Test 1: Creative Director
   console.log('── Agent 1: Creative Director ──');
-  const brief = generateMockBrief({ ideaSeed, brandConfig: mockBrand });
+  const brief = generateMockBriefPhase2({ ideaSeed, brandConfig: mockBrand });
   assert('Brief has brief_id', !!brief.brief_id);
   assert('Brief brand matches', brief.brand_id === 'nordpilates');
   assert('Brief has video_type', !!brief.video_type);
