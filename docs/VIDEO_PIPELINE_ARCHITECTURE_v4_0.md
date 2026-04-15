@@ -1,7 +1,25 @@
-# Video Factory — Architecture v3.9
+# Video Factory — Architecture v4.0
 
-**Last updated:** 2026-04-14 morning UTC
-**Status:** ✅ **Phase 2 + Phase 2.5 shipped and live.** First production V2 video rendered and rated **4-5/10** by operator. V2 architecture works correctly — quality cap is now from library content gap + template monotony + Creative Director monotony. **Phase 3 (Creative Director archetype + Remotion variants + pre-normalization) is the next biggest quality unlock.**
+**Last updated:** 2026-04-15
+**Status:** ✅ **Phase 1, Phase 2, Phase 2.5, and Phase 2 cleanup shipped and live on origin/main.** Tagged `phase2-complete`. Phase 3 designed and locked, pre-implementation. See `docs/PHASE_3_DESIGN.md` for the Phase 3 source of truth.
+
+**What changed in v4.0:** Phase 3 design locked. Architecture rules expanded with Phase-3-specific principles. Model assignments and component descriptions updated to reflect upcoming Phase 3 changes. Phase 2 cleanup outcomes documented (retry helper, Zod corrective, full_brief column, V2 prompt variety). Historical v3.9 content preserved where it doesn't contradict Phase 3.
+
+---
+
+## Phase 3 (planned, pre-implementation)
+
+Phase 3 eliminates "every video feels the same" by giving the Creative Director open-ended creative freedom and rebuilding the Remotion composition as parameterized instead of templated. Five workstreams (W1: CD rewrite, W2: Curator V2 update, W3: Copywriter update, W4: Remotion parameterized composition, W5: clean-slate ingestion). Three milestones (3.1, 3.2, 3.3). Behind feature flags `ENABLE_PHASE_3_CD` and `ENABLE_PHASE_3_REMOTION` until final flip.
+
+**Source of truth:** `docs/PHASE_3_DESIGN.md`. All Phase 3 agent briefs reference that doc. This architecture doc points to it; do not duplicate the design content here.
+
+**Key Phase 3 architecture decisions:**
+- Creative Director outputs a richer schema (creative_vision paragraph, color_treatment, per-slot transition_in + internal_cut_style + aesthetic_guidance)
+- Remotion becomes a single parameterized composition, no template variants
+- Existing 182 segments dropped, library re-ingested via new pre-normalized pipeline
+- 8 color treatments, brand-restricted via brand_config.allowed_color_treatments
+- Slot count variable 3-12, no fixed 5
+- Vibe input from operator (free-text, optional) or CD-generated when blank
 
 ---
 
@@ -59,6 +77,14 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 | Asset Curator V2 | **Gemini 3.1 Pro Preview** | Watches actual pre-trimmed segment videos from R2, not text tags |
 | Creative Director | **Claude Sonnet 4.6** | Planning structure — slated for Phase 3 enhancement (archetype + variable slots) |
 | Copywriter | **Claude Sonnet 4.6** | Strongest model for hooks/CTAs |
+
+### Agent Roles (Phase 3 behavior)
+
+**Creative Director** — Claude Sonnet 4.6. Reads brand_config + idea_seed + optional vibe + library overview. Outputs a rich creative brief: creative_vision paragraph, slot count (3-12), per-slot energy curve, color_treatment, per-slot pacing/cut style/transitions/text overlay structure/clip requirements with aesthetic guidance, and music constraints. In Phase 3, CD takes on much more creative responsibility — vibe interpretation, energy curve design, color treatment selection, per-slot creative decisions. See `docs/PHASE_3_DESIGN.md` for the full output schema.
+
+**Asset Curator V2** — Gemini 3.1 Pro Preview. CLIP retrieval via `match_segments` RPC → FAST PATH R2 fetch of pre-trimmed clip (Phase 2.5) → Pro pick → self-critique. Dispatched via `asset-curator-dispatch.ts`, which is imported by `context-packet.ts`. In Phase 3, Curator V2 reads the new `aesthetic_guidance` field per slot and the global `creative_vision` paragraph as additional context. Hard requirements (mood, content_type, min_quality) remain authoritative; aesthetic_guidance and creative_vision are interpreted as flavor.
+
+**Copywriter** — Claude Sonnet 4.6. Generates hooks, captions, CTAs. In Phase 3, Copywriter also owns per-slot overlay text generation (CD specifies overlay style/position/animation/char_target, Copywriter fills in the actual text per slot in tone-consistent fashion). Reads the global creative_vision paragraph for tone consistency across all generated copy.
 
 ### VPS Binaries
 
@@ -367,7 +393,7 @@ Real UGC authenticity is the product. Goal: "authentic UGC that outperforms manu
 
 ---
 
-## 13. Architecture Rules (23 total, 3 added in v3.9)
+## 13. Architecture Rules (28 total, MUST follow)
 
 1. Drive is drop zone only. Pipeline reads from R2.
 2. No long-lived n8n executions. State in Supabase.
@@ -392,6 +418,11 @@ Real UGC authenticity is the product. Goal: "authentic UGC that outperforms manu
 21. **Pre-trim expensive transforms at ingestion when the output is cacheable and the input fits in storage.** Pay once per source file, not per render.
 22. **Never trust CREATE OR REPLACE FUNCTION for return type changes.** Always DROP + CREATE + NOTIFY pgrst for RPC migrations that touch return signature.
 23. **Drop approximate vector indexes at small table sizes.** ivfflat cell centroids become stale as rows grow. Sequential scan beats them until `lists ≈ rows / 1000` is meaningful.
+24. **Composition is parameterized, not template-instanced.** Phase 3 ships one Remotion composition that reads a brief and renders accordingly. Do not author multiple template variants. Variety comes from CD decisions, not template selection.
+25. **Brand consistency lives in small surface area.** Only logo, color palette restrictions (`allowed_color_treatments`), and caption preset are brand-locked. Everything else (cut style, slot count, transitions, energy curve, vibe) is free per video. Resist the urge to template more.
+26. **Hybrid structured + free-text fields where LLMs and code both consume the data.** Structured fields for code to act on deterministically. Free-text fields for downstream LLM agents to read for nuance. Use both where both matter (creative_vision + structured fields, aesthetic_guidance + clip_requirements enums, etc.).
+27. **Defer polish features in favor of variety features.** Beat-locked music, music ducking, overlay timing sophistication, reference-guided generation — all parked for later phases. Quality variety improvements ship before quality polish improvements.
+28. **Clean-slate ingestion when content sprint is incoming.** Don't migrate existing segments to new pipelines when fresh content is about to land anyway. Operator effort goes into new uploads, not data migration.
 
 ### Informal rule under consideration (not yet locked)
 
@@ -497,6 +528,27 @@ git stash push -m 'vps-lock-drift' package-lock.json && git checkout <branch> &&
 **For SQL migrations that touch RPC return types:** use `DROP FUNCTION` + `CREATE FUNCTION` + `NOTIFY pgrst, 'reload schema'` pattern. `CREATE OR REPLACE` silently fails for return-type changes.
 
 **For Anthropic 529 / Gemini 503 errors:** the cleanup commit adds a centralized retry helper. Until that ships, expect occasional planning failures during API capacity surges. Workaround: re-create the job after 5-10 minutes.
+
+---
+
+## Recently Shipped
+
+### Phase 2 cleanup (shipped 2026-04-14)
+
+Released as squashed commit `269ff99` on `origin/main`, tagged `phase2-complete`. Seven-commit cleanup branch consolidated into one release. Key outcomes:
+
+- `withLLMRetry` helper wraps all Sonnet + Gemini calls with duck-typed retry logic (handles 429/502/503/504/529, Anthropic overloaded_error, network errors)
+- Zod corrective retry on V2 picker — sends schema errors back to Pro, single corrective attempt before fallback. Caught two real "Expected object received array" Pro malformations in production validation runs
+- `full_brief` column on jobs table for human-readable brief dumps in operator sheet
+- Reusable migration runner via `apply_migration_sql` SECURITY DEFINER function + `apply-migration.ts` script (service_role only, hardened with search_path lock)
+- V2 prompt soft visual variety rule with explicit "Visual repetition" signal for library exhaustion detection
+
+Side fixes:
+- S1 runaway loop bug (filter on Job-ID-empty without status writeback caused 30s re-fires creating 23 duplicate jobs in 11 minutes)
+- BullMQ drain script for emergency queue obliteration
+- Migration 005 fix (DROP FUNCTION before CREATE OR REPLACE for return-type changes — formalized as Architecture Rule 22)
+
+See `docs/SESSION_LOG_2026-04-14.md` for full session history.
 
 ---
 

@@ -1,6 +1,82 @@
 # Video Factory — MVP Progress Tracker
 
-**Last updated:** 2026-04-14 end-of-day UTC
+**Last updated:** 2026-04-15
+
+---
+
+## Session 2026-04-15 — Phase 3 Planning Locked
+
+### Headline
+
+Phase 3 design session complete. CD output schema designed field-by-field over 12 decisions. Five workstreams locked, three milestones defined, both behind feature flags. Documentation grounded before any code begins.
+
+**Source of truth:** `docs/PHASE_3_DESIGN.md` — read this before any Phase 3 work.
+
+### What was decided
+
+| Decision | Value |
+|---|---|
+| Vibe input format | Free-text tag, optional, operator-typed or CD-generated |
+| Vibe interpretation | Loose guidance (CD can push back when idea_seed contradicts) |
+| Brief structure | Hybrid: structured fields for code + creative_vision paragraph for LLM nuance |
+| Slot count range | 3-12 (wider than originally planned, accepting slower planning for variety) |
+| Energy curve | Per-slot energy_per_slot array, values 1-10 |
+| Pacing per slot | Hybrid: enum (slow/medium/fast) + numeric cut_duration_target_s |
+| Cut style | Two enums: transition_in (6 values) + internal_cut_style (3 values) |
+| Beat-locked cuts | Deferred to Phase 4 |
+| Overlay text owner | Copywriter (not CD) |
+| Overlay style enum | 6 values including "minimal" and "none" |
+| Overlay timing | Slot-start, full-duration only (sophistication deferred to 3.5) |
+| Aesthetic guidance | Per-slot free-text field, no ingestion changes |
+| Music selection | CD specifies constraints + optional pinned_track_id |
+| Per-slot music intensity | Deferred to Phase 3.5 |
+| Color treatments | 8 named treatments, brand-restricted via allowed_color_treatments |
+| Brand config editability | Path C (critical fields in Supabase, tuning fields in sheet) — sheet sync (W6) deferred to Phase 3.5 |
+| Clean-slate scope | Full re-ingest — drop existing 182 segments, start fresh |
+| Test brand | nordpilates (operator to fix brand_config drift first) |
+| Reference-guided generation | Deferred to Phase 4 — system scrapes top similar videos and uses as inspiration |
+
+### Workstreams + milestones
+
+- **W1** — Creative Director rewrite (2-3 sessions)
+- **W2** — Asset Curator V2 prompt update (1-2 sessions)
+- **W3** — Copywriter agent update, owns overlay text (1-2 sessions)
+- **W4** — Remotion parameterized composition (4-6 sessions, biggest workstream)
+- **W5** — Clean-slate ingestion + pre-normalization (1-2 sessions, independent)
+
+- **Milestone 3.1** — W1+W2+W3 ship behind feature flag, brief validation via Full Brief column without rendering
+- **Milestone 3.2** — W5 ships independently, new uploads use new pipeline
+- **Milestone 3.3** — W4 ships, both feature flags flipped together, first Phase 3 production video
+
+### Brand color palettes (initial, edit-in-Supabase until W6 ships)
+
+- **nordpilates:** warm-vibrant, soft-pastel, golden-hour, natural, cool-muted
+- **carnimeat:** high-contrast, warm-vibrant, moody-dark, natural, clean-bright
+- **welcomebaby, nodiet:** TBD when those brands begin Phase 3 production
+
+### Success criterion
+
+8 of 10 consecutive Phase 3 production videos pass operator approval (`jobs.review_decision = 'approve'`).
+
+### Total estimated effort
+
+9-15 agent sessions across 2-3 weeks. Roughly 3x Phase 2 cleanup.
+
+### What's next
+
+W0 (this documentation) → operator review → W1 (CD rewrite) as first agent task.
+
+### Lessons learned (additions to the running list)
+
+58. **Field-by-field schema design with Q&A is slower upfront but produces better foundations.** 12 decisions in 30 minutes, every field has the operator's fingerprints on it. Cleanup phase later is much harder when the schema was drafted unilaterally.
+
+59. **Hybrid structured + free-text wins repeatedly for LLM-driven systems.** Pattern: structured fields for code to act on deterministically, free-text fields for downstream LLM agents to read for nuance. Field 2 (creative_vision + structured fields), Field 5 (pacing enum + numeric), Field 8 (clip_requirements enums + aesthetic_guidance text) all converged on this pattern independently.
+
+60. **Defer polish features aggressively in design phase.** Beat-locked music, per-slot music intensity, overlay timing all parked for later. Phase 3 stays focused on the "every video feels the same" problem and resists scope creep.
+
+61. **Clean-slate ingestion is the operator-preferred path when content sprint is incoming.** Migrating existing data to a new pipeline is rarely worth the engineering cost when fresh content is about to land anyway.
+
+62. **Brand consistency is best protected through small surface area — logo + colors + caption font locked, everything else free-form.** Resist the urge to template the entire video. Templates produce sameness, which is exactly what Phase 3 is trying to eliminate.
 
 ---
 
