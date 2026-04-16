@@ -117,7 +117,7 @@ Audit log of state transitions per job. Useful for debugging timing, retry analy
 
 ## ⚠️ asset_segments (inferred, partially verified via Phase 1/2 work)
 
-Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment analyzer at ingestion time. 182 rows for nordpilates as of Phase 2.5.
+Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment analyzer at ingestion time. **0 rows as of 2026-04-16 (clean-slated for W5 re-ingestion; was 182 rows for nordpilates through Phase 2.5).**
 
 | Column | Type | Notes |
 |---|---|---|
@@ -136,9 +136,8 @@ Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment
 | `clip_r2_key` | text | **Phase 2.5:** R2 path to pre-trimmed segment clip (~720p). Populated for all 182 rows. |
 | `created_at` | timestamptz | |
 
-**Phase 3 W5 will:**
-- Drop existing 182 rows (clean-slate per Architecture Rule 28)
-- Re-ingest content through new pre-normalized pipeline; new `clip_r2_key` values point at clips trimmed from 1080p normalized parents (vs 720p current)
+**Phase 3 W5 (2026-04-16):**
+- Clean-slated 182 rows (Architecture Rule 28). Re-ingestion through pre-normalized pipeline will populate new rows where `clip_r2_key` points at clips trimmed from 1080p normalized parents.
 
 **Indexes:**
 - `embedding` previously had ivfflat index, was DROPPED at small table size (Architecture Rule 23). Sequential scan is faster until ~1000 rows.
@@ -156,14 +155,14 @@ Parent UGC video files uploaded to R2.
 | `id` | uuid | PK |
 | `brand_id` | varchar | FK to brand_configs.brand_id |
 | `r2_key` | text | R2 path to original parent file |
-| `pre_normalized_r2_key` | text | **Phase 3 W5 will add:** R2 path to 1080p H.264 normalized version |
+| `pre_normalized_r2_key` | text | ✅ **Added 2026-04-16 via migration 007 (Phase 3 W5).** R2 path to 1080p H.264 normalized version |
 | `filename` | text | Original filename |
 | `duration_s` | numeric | Total duration |
 | `analyzed_at` | timestamptz | When Gemini Flash analyzed it (legacy ingestion) |
 | `analysis` | jsonb | Legacy Gemini Flash analysis |
 | `created_at` | timestamptz | |
 
-53 rows for nordpilates as of Phase 2.5.
+**0 rows as of 2026-04-16 (clean-slated for W5 re-ingestion; was 53 rows for nordpilates through Phase 2.5).**
 
 ---
 
@@ -278,7 +277,7 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | 004 | `004_add_full_brief_column.sql` | Applied (Phase 2 cleanup) | Add full_brief (numbering collision; touches different table — no conflict) |
 | 005 | `005_match_segments_with_clip_key.sql` | Applied | Updated RPC (DROP+CREATE per Architecture Rule 22) |
 | 006 | `006_brand_configs_color_treatments.sql` | ✅ **Applied 2026-04-15 (Phase 3 W1)** | Add allowed_color_treatments TEXT[] + backfill nordpilates and carnimeat |
-| 007 | `007_pre_normalized_clips.sql` | ⏳ Phase 3 W5, planned | Add pre_normalized_r2_key TEXT to assets |
+| 007 | `007_pre_normalized_clips.sql` | ✅ **Applied 2026-04-16 (Phase 3 W5)** | Add pre_normalized_r2_key TEXT to assets |
 
 ---
 
@@ -288,6 +287,7 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 |---|---|---|
 | 2026-04-15 | `brand_configs.allowed_video_types` updated for nordpilates, carnimeat, highdiet to multi-type arrays | MVP single-type lock was simplicity, not strategy. Updated to enable Phase 3 video_type variety. |
 | 2026-04-15 | `jobs.brief_summary` backfilled to new `{video_type} | {template_id} | {duration}s | {N} segments` format for ~6 historical rows | Format alignment after W1 changed `runPlanning`'s output format. |
+| 2026-04-16 | Clean-slate: `DELETE FROM assets WHERE brand_id='nordpilates'` (53 rows, cascade deleted 182 asset_segments). All nordpilates + carnimeat test R2 objects deleted (434 objects across 8 prefixes). | Phase 3 W5 — Architecture Rule 28. Content sprint will re-ingest through pre-normalized pipeline. |
 
 ---
 

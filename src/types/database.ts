@@ -56,6 +56,7 @@ export interface Asset {
   brand_id: string;
   drive_file_id: string | null;
   r2_key: string;
+  pre_normalized_r2_key?: string | null;
   r2_url: string;
   filename: string | null;
   duration_seconds: number | null;

@@ -18,6 +18,8 @@
     "test:segment-trimmer": "tsx src/scripts/test-segment-trimmer.ts",
     "test:curator-v2": "tsx src/scripts/test-curator-v2.ts",
     "test:cd-phase3": "ENABLE_PHASE_3_CD=true tsx src/scripts/smoke-test-cd-phase3.ts",
+    "test:pre-normalize": "tsx src/scripts/test-pre-normalize.ts",
+    "clean-slate:nordpilates": "tsx src/scripts/clean-slate-nordpilates.ts",
     "backfill:clips": "tsx src/scripts/backfill-segment-clips.ts",
     "start": "tsx src/index.ts",
     "start:prod": "node dist/index.js"

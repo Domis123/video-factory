@@ -1,17 +1,19 @@
 # Video Factory — CLAUDE.md
 
 ## Project Overview
-Automated video production pipeline for social media brands. UGC footage → AI creative planning → branded short-form videos (30-60s) for TikTok/IG/YT. Phase 1 (ingestion overhaul) shipped: 182 sub-clip segments with CLIP embeddings + Gemini 3.1 Pro analysis across 52 nordpilates clips. Phase 2 (curator overhaul) shipped + LIVE: asset-curator-v2 with pgvector retrieval + on-the-fly trim + Gemini Pro picking + self-critique, `ENABLE_CURATOR_V2=true` (flipped 2026-04-13 13:46 UTC). Phase 2.5 shipped + LIVE: pre-trimmed 720p clips at ingestion + backfill complete (182/182 segments carry `clip_r2_key`, 355 MB added to R2). Curator wall time 261s (4.4 min), 9-10/10 in isolated test. **First V2 production video rendered 2026-04-14, rated 4-5/10** — V2 works correctly, ceiling now set by library content gap + Creative Director monotony + template monotony. Phase 3 (CD archetype + Remotion variants + pre-normalization) is the next biggest quality unlock. MVP: 3 brands, 1 video type, 5-10 videos/week. Target scale: 30-50 brands, 4 video types, 150-300 videos/week.
+Automated video production pipeline for social media brands. UGC footage → AI creative planning → branded short-form videos (30-60s) for TikTok/IG/YT. Phase 1 (ingestion overhaul) shipped: 182 sub-clip segments with CLIP embeddings + Gemini 3.1 Pro analysis across 53 nordpilates clips. Phase 2 (curator overhaul) shipped + LIVE: asset-curator-v2 with pgvector retrieval + on-the-fly trim + Gemini Pro picking + self-critique, `ENABLE_CURATOR_V2=true` (flipped 2026-04-13 13:46 UTC). Phase 2.5 shipped + LIVE: pre-trimmed 720p clips at ingestion + backfill complete (182/182 segments carry `clip_r2_key`, 355 MB added to R2). Phase 2 cleanup shipped (commit `269ff99`, tag `phase2-complete`): retry helper, Zod corrective retry on V2, full_brief column, V2 prompt soft variety, S1 runaway loop fix. **Phase 3 W1 shipped 2026-04-15 (commit `df6a326`, tag `phase3-w1-complete`)**: Creative Director rewrite behind `ENABLE_PHASE_3_CD` flag (default false). New schema: creative_vision + slot_count 3-12 + per-slot energy/transition/cut style + 8 color treatments + brand-restricted color palette. Dispatcher pattern preserves Phase 2 path for instant rollback. Downstream Phase 3 consumers (W2 Curator update, W3 Copywriter, W4 Remotion) not yet shipped — flipping the flag throws on the Phase 3 path until those land. MVP: 3 brands, 1 video type, 5-10 videos/week. Target scale: 30-50 brands, 4 video types, 150-300 videos/week.
 
 ## Key Documentation
-- **`docs/VIDEO_PIPELINE_ARCHITECTURE_v3_9.md`** — Architecture v3.9. Current source of truth. Phase 1+2+2.5 shipped and live; first V2 video diagnosed. Supersedes v3.8.
-- **`docs/MVP_PROGRESS (6).md`** — Day-by-day progress tracker with timing data, Phase 1/2/2.5 results, first V2 video diagnosis (4-5/10), cleanup commit queue, Phase 3 plan. Supersedes (5).
-- **`docs/AGENT_CONTEXT_UPDATE.md`** — Operator handoff note after Phase 2+2.5 ship with session recap, known issues (503 retry needed, Zod schema-aware retry), and rules about what NOT to touch.
+- **`docs/VIDEO_PIPELINE_ARCHITECTURE_v5_0.md`** — Architecture v5.0. Current source of truth. Phase 1+2+2.5+Phase 2 cleanup+Phase 3 W1 shipped and live (Phase 3 W1 behind flag). Supersedes v4.0.
+- **`docs/PHASE_3_DESIGN.md`** — Phase 3 master design doc, source of truth for all Phase 3 work. W1 marked ✅ shipped; W2-W5 still planned.
+- **`docs/MVP_PROGRESS (7).md`** — Day-by-day progress tracker with timing data, Phase 1/2/2.5 results, first V2 video diagnosis (4-5/10), Phase 3 W1 ship report. Supersedes (6).
+- **`docs/SUPABASE_SCHEMA.md`** — DB schema reference, verified columns, migration history through 006.
+- **`docs/AGENT_CONTEXT_UPDATE.md`** — Operator handoff note after Phase 2+2.5 ship with session recap, known issues, and rules about what NOT to touch. Historical.
 - **`docs/PHASE_2_CURATOR_BRIEF.md`** — Historical (Phase 2 agent brief, fully implemented). Keep for reference.
 - **`docs/VPS-SERVERS.md`** — Infrastructure docs: both VPS servers, deployment, costs, how they work together.
 - `env.video-factory` — All credentials (Supabase, Redis, R2). Copy to `.env` for local dev.
 
-## Architecture Rules (23 total, MUST follow)
+## Architecture Rules (28 total, MUST follow)
 1. **Google Drive is a drop zone only.** Ingestion copies to R2. The render pipeline NEVER reads from Drive. All clip references use R2 keys.
 2. **No long-lived n8n executions.** Every workflow completes immediately. State is persisted to Supabase. New workflows triggered by webhooks.
 3. **Supabase is the source of truth.** Sheets is the primary input/view layer for workers. All Sheet edits are validated by n8n before writing to Supabase. Workers never access Supabase directly.
@@ -35,34 +37,41 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 21. **Pre-trim expensive transforms at ingestion when the output is cacheable and the input fits in storage.** Pay once per source file, not per render. (Phase 2.5 pattern; applies to Phase 3 pre-normalization.)
 22. **Never trust `CREATE OR REPLACE FUNCTION` for return-type changes.** Always `DROP FUNCTION` + `CREATE FUNCTION` + `NOTIFY pgrst, 'reload schema'` for RPC migrations that touch return signature.
 23. **Drop approximate vector indexes at small table sizes.** ivfflat cell centroids become stale as rows grow. Sequential scan beats them until `lists ≈ rows / 1000` is meaningful.
+24. **Composition is parameterized, not template-instanced.** Phase 3 ships one Remotion composition that reads a brief and renders accordingly. Do not author multiple template variants. Variety comes from CD decisions, not template selection.
+25. **Brand consistency lives in small surface area.** Only logo, color palette restrictions (`allowed_color_treatments`), and caption preset are brand-locked. Everything else (cut style, slot count, transitions, energy curve, vibe) is free per video.
+26. **Hybrid structured + free-text fields where LLMs and code both consume the data.** Structured fields for code to act on deterministically. Free-text fields for downstream LLM agents to read for nuance.
+27. **Defer polish features in favor of variety features.** Beat-locked music, music ducking, overlay timing sophistication, reference-guided generation — all parked for later phases. Quality variety improvements ship before quality polish improvements.
+28. **Clean-slate ingestion when content sprint is incoming.** Don't migrate existing segments to new pipelines when fresh content is about to land anyway. Operator effort goes into new uploads, not data migration.
 
 ## Tech Stack
 - **Orchestrator**: n8n (self-hosted, Hetzner) — 46.224.56.174
 - **Database**: Supabase Postgres (free tier, pgvector enabled) — `https://kfdfcoretoaukcoasfmu.supabase.co`
 - **Job Queue**: BullMQ + Upstash Redis (serverless, TLS required, drainDelay 120s)
 - **Storage**: Cloudflare R2 (S3-compatible, zero egress) — clips + keyframes + rendered videos
-- **Creative Director**: Claude Sonnet 4.6 (planning structure)
-- **Copywriter**: Claude Sonnet 4.6 (hooks, CTAs, captions)
+- **Creative Director**:
+  - **Phase 2 (live default)**: Claude Sonnet 4.6, `generateBriefPhase2` in `src/agents/creative-director.ts`
+  - **Phase 3 (behind flag)**: Claude Sonnet 4.6, `generateBriefPhase3` in `src/agents/creative-director-phase3.ts`. Zod corrective retry. Routed via `creative-director-dispatch.ts` based on `ENABLE_PHASE_3_CD`.
+- **Copywriter**: Claude Sonnet 4.6 (hooks, CTAs, captions). Phase 3 will own per-slot overlay text generation (W3, not yet shipped).
 - **Asset Curator V1**: Claude Sonnet 4.6 (text-based, legacy `assets` table) — emergency fallback only, NOT called in production (flag is true)
-- **Asset Curator V2**: Gemini 3.1 Pro Preview — LIVE in production. CLIP retrieval via `match_segments` RPC → FAST PATH R2 fetch of pre-trimmed clip (Phase 2.5) → Pro pick → self-critique. Dispatched via `asset-curator-dispatch.ts`, which is imported by `context-packet.ts`.
+- **Asset Curator V2**: Gemini 3.1 Pro Preview — LIVE in production. CLIP retrieval via `match_segments` RPC → FAST PATH R2 fetch of pre-trimmed clip (Phase 2.5) → Pro pick → self-critique. Dispatched via `asset-curator-dispatch.ts`.
 - **Ingestion Analyzer**: Gemini 3.1 Pro Preview (sub-clip segment analysis, Phase 1 shipped)
 - **Legacy Clip Analyzer**: Gemini Flash (still writes legacy `assets` row)
 - **Embeddings**: CLIP ViT-B/32 via `@xenova/transformers` (self-hosted, 512-dim) + Supabase pgvector
 - **Transcription**: whisper.cpp (self-hosted on render workers)
-- **Video Templates**: Remotion (React-based)
+- **Video Templates**: Remotion (React-based) — Phase 3 W4 will replace templated layouts with single parameterized composition
 - **Video Processing**: FFmpeg
 - **Admin Panel**: Google Sheets ("Video Pipeline" spreadsheet)
 
 ## Cost Accounting
-**Gemini API is currently free for this project via company credits — DO NOT factor Gemini costs into per-video or per-month totals.** Only Claude Sonnet costs (Creative Director + Copywriter, ~$0.25/video) count against the real budget. Revisit if the company credit arrangement ends.
+**Gemini API is currently free for this project via company credits — DO NOT factor Gemini costs into per-video or per-month totals.** Only Claude Sonnet costs (Creative Director + Copywriter, ~$0.25-0.40/video) count against the real budget. Phase 3 CD uses ~2x more output tokens than Phase 2 (richer schema), so per-video Sonnet cost rises modestly when ENABLE_PHASE_3_CD flips. Revisit if the company credit arrangement ends.
 
-Applies to: Gemini 3.1 Pro ingestion (segment analysis + CLIP embedding via local @xenova/transformers which is already free), Gemini 3.1 Pro curator V2 (pick + critique). The "~$0.75/video" number cited in earlier docs assumed paid Gemini — real out-of-pocket cost is ~$0.25/video while credits last.
+Smoke test reference: 6 Phase 3 briefs cost ~$0.33 (in=62K, out=9.5K tokens, $3/MTok input, $15/MTok output).
 
 ## Database Tables
-- `brand_configs` — Brand settings, colors (regex-validated hex), fonts, caption presets, voice guidelines, allowed_video_types, color_grade_preset
-- `assets` (53 rows) — Ingested UGC clips with AI-generated tags, quality scores, usable segments, dominant_color_hex, motion_intensity, avg_brightness. Parent table for `asset_segments`. Legacy Gemini Flash catalog, stays as-is.
-- `asset_segments` (182 rows, Phase 1+2.5 complete — all rows have `clip_r2_key` populated) — Sub-clip segments with rich Gemini 3.1 Pro descriptions, visual_tags, best_used_as, segment_type (8-value taxonomy), motion_intensity, has_speech, quality_score, keyframe_r2_key, **clip_r2_key (Phase 2.5: pre-trimmed 720p CRF 28, ~5MB, uploaded at ingestion, at R2 path `segments/{brand_id}/{segment_uuid}.mp4`)**, CLIP embedding `VECTOR(512)` (L2 normalized). Queried via `match_segments` RPC (migration 005) for cosine similarity + brand/type/quality filters. **ivfflat index was dropped** — at 182 rows stale centroids routed text queries into empty cells; sequential scan is fast enough until ~1000 rows.
-- `jobs` — Video production jobs with full state machine (ENUM `job_status`), video_type
+- `brand_configs` — Brand settings, colors (regex-validated hex), fonts, caption presets, voice guidelines, allowed_video_types, color_grade_preset, **allowed_color_treatments (Phase 3 W1, migration 006)**.
+- `assets` (0 rows — clean-slated 2026-04-16 for W5 re-ingestion) — Ingested UGC clips with AI-generated tags, quality scores, usable segments, dominant_color_hex, motion_intensity, avg_brightness, **pre_normalized_r2_key (W5, migration 007)**. Parent table for `asset_segments`. Legacy Gemini Flash catalog.
+- `asset_segments` (0 rows — clean-slated 2026-04-16, cascade from assets) — Sub-clip segments with rich Gemini 3.1 Pro descriptions, visual_tags, best_used_as, segment_type (8-value taxonomy), motion_intensity, has_speech, quality_score, keyframe_r2_key, **clip_r2_key (Phase 2.5)**, CLIP embedding `VECTOR(512)`. Queried via `match_segments` RPC. ivfflat index dropped — sequential scan suffices until ~1000 rows.
+- `jobs` — Video production jobs with full state machine (ENUM `job_status`), video_type, **full_brief (Phase 2 cleanup)**.
 - `job_events` — Event log for every state transition, error, retry, timeout
 - `music_tracks` (15 rows) — Licensed background music, mood-tagged, energy_level, tempo_bpm
 
@@ -91,7 +100,26 @@ Terminal states: DELIVERED, FAILED. Rejection loops exist at BRIEF_REVIEW and HU
 - **tips-listicle** — Medium cuts (2-4s), energy 5-7. All brands
 - **transformation** — Slow build → dramatic cut, energy 3→8. Brands: nordpilates, nodiet, highdiet
 
-Video type is auto-selected from brand + idea_seed keywords via `video-type-selector.ts`.
+In Phase 2: video_type pre-selected by `selectVideoType()` from idea_seed keywords before CD call. In Phase 3 (behind flag): CD picks video_type itself based on signal mapping in the prompt; `selectVideoType()` deprecated and only runs on Phase 2 path. **`brand_configs.allowed_video_types` updated 2026-04-15 to permit multi-type per brand**: nordpilates → ['workout-demo', 'tips-listicle', 'transformation'], carnimeat → ['recipe-walkthrough', 'tips-listicle', 'transformation'], highdiet → ['workout-demo', 'tips-listicle', 'transformation']. Single-type lock was MVP simplicity, not brand strategy.
+
+## Phase 3 Color Treatments (W1, migration 006)
+8 named treatments. Phase 3 CD picks one per video; brand_configs.allowed_color_treatments restricts the available set per brand.
+
+| Treatment | CSS filter (W4 will refine) |
+|---|---|
+| `warm-vibrant` | `saturate(1.2) brightness(1.05) hue-rotate(-5deg)` |
+| `cool-muted` | `saturate(0.7) brightness(0.95) hue-rotate(15deg)` |
+| `high-contrast` | `saturate(1.1) contrast(1.3) brightness(0.95)` |
+| `soft-pastel` | `saturate(0.8) brightness(1.1) contrast(0.9)` |
+| `moody-dark` | `saturate(0.8) brightness(0.85) contrast(1.2)` |
+| `natural` | `saturate(1.0)` |
+| `golden-hour` | `saturate(1.15) brightness(1.05) sepia(0.15) hue-rotate(-10deg)` |
+| `clean-bright` | `saturate(0.95) brightness(1.15) contrast(1.05)` |
+
+Brand defaults (migration 006):
+- nordpilates: warm-vibrant, soft-pastel, golden-hour, natural, cool-muted
+- carnimeat: high-contrast, warm-vibrant, moody-dark, natural, clean-bright
+- Others: NULL (no restriction; CD picks any of 8)
 
 ## BullMQ Queue Names
 - `ingestion` — Asset ingestion (Drive → R2 → Supabase)
@@ -103,68 +131,66 @@ Video type is auto-selected from brand + idea_seed keywords via `video-type-sele
 ```
 src/
 ├── config/          — env.ts (flags + WHISPER paths), supabase.ts, redis.ts, r2.ts
-├── types/           — database.ts (all DB + Context Packet types), video-types.ts (VideoType configs)
+├── types/           — database.ts (all DB + Context Packet types + Phase3CreativeBrief), video-types.ts (VideoType configs)
 ├── lib/             — ffmpeg.ts, gemini.ts (Flash legacy),
 │                      gemini-segments.ts (Phase 1, Pro),
-│                      clip-embed.ts (Phase 1, @xenova/transformers),
+│                      clip-embed.ts (Phase 1),
 │                      keyframe-extractor.ts (Phase 1),
-│                      segment-processor.ts (Phase 1+2.5, shared helper, now pre-trims 720p clips),
-│                      segment-trimmer.ts (Phase 2, FAST/SLOW path + parent cache + Gemini upload),
+│                      segment-processor.ts (Phase 1+2.5),
+│                      segment-trimmer.ts (Phase 2),
+│                      retry-llm.ts (Phase 2 cleanup),
 │                      r2-storage.ts, job-manager.ts, exec.ts,
 │                      beat-detector.ts, color-grading.ts, music-selector.ts,
 │                      template-config-builder.ts, clip-analysis.ts,
-│                      video-type-selector.ts
-├── workers/         — ingestion.ts (Phase 1 extended), clip-prep.ts, transcriber.ts,
+│                      video-type-selector.ts (Phase 2 only — deprecated for Phase 3),
+│                      format-full-brief.ts (Phase 2 cleanup),
+│                      parent-normalizer.ts (Phase 3 W5)
+├── workers/         — ingestion.ts (Phase 1+2.5+W5), clip-prep.ts, transcriber.ts,
 │                      audio-mixer.ts, sync-checker.ts, exporter.ts, qa-checker.ts,
 │                      renderer.ts, pipeline.ts, music-ingest.ts
 ├── agents/
-│   ├── prompts/     — creative-director.md, asset-curator.md, copywriter.md,
+│   ├── prompts/     — creative-director.md (Phase 3, 460+ lines, 4 example briefs),
+│   │                  creative-director-phase2.md (Phase 2, 210 lines, preserved for rollback),
+│   │                  asset-curator.md, copywriter.md,
 │   │                  segment-analyzer.md (Phase 1),
 │   │                  asset-curator-v2.md (Phase 2)
-│   ├── creative-director.ts (Sonnet), asset-curator.ts (V1 Sonnet),
-│   │   asset-curator-v2.ts (Phase 2, Pro), asset-curator-dispatch.ts (Phase 2),
-│   │   curator-v2-retrieval.ts (Phase 2, CLIP → match_segments RPC),
-│   │   copywriter.ts (Sonnet)
-│   └── context-packet.ts  — runs all 3 agents, merges into Context Packet (routes curator through dispatcher)
+│   ├── creative-director.ts (Phase 2 generateBriefPhase2),
+│   │   creative-director-phase3.ts (Phase 3 generator, Zod corrective retry),
+│   │   creative-director-phase3-schema.ts (Zod schema + cross-field validation),
+│   │   creative-director-dispatch.ts (flag-gated dispatcher),
+│   │   asset-curator.ts (V1), asset-curator-v2.ts (Phase 2),
+│   │   asset-curator-dispatch.ts (Phase 2),
+│   │   curator-v2-retrieval.ts (Phase 2),
+│   │   copywriter.ts
+│   └── context-packet.ts  — runs all 3 agents via dispatchers, merges into Context Packet
 ├── templates/
 │   ├── types.ts     — TemplateProps, ResolvedSegment, helpers
 │   ├── Root.tsx     — Remotion composition registry (registerRoot)
 │   ├── components/  — CaptionTrack, HookText, CTAScreen, LogoWatermark, TransitionEffect, SegmentVideo
 │   └── layouts/     — HookDemoCTA, HookListicleCTA, HookTransformation
+│                      [Phase 3 W4 will replace these with single parameterized composition]
 ├── index.ts         — HTTP API + BullMQ workers
 ├── scripts/         — seed-brand.ts, upload-brand-logos.ts, test-*,
-│                      backfill-segments.ts (Phase 1), test-clip.ts (Phase 1),
-│                      test-segment-analyzer.ts (Phase 1),
+│                      backfill-segments.ts (Phase 1), test-clip.ts,
+│                      test-segment-analyzer.ts,
 │                      test-segment-trimmer.ts (Phase 2),
 │                      test-curator-v2.ts (Phase 2),
 │                      backfill-segment-clips.ts (Phase 2.5),
-│                      migrations/001_asset_segments.sql,
-│                      migrations/002_asset_segments_type.sql,
-│                      migrations/003_match_segments_function.sql (Phase 2),
-│                      migrations/004_asset_segments_clip_key.sql (Phase 2.5),
-│                      migrations/005_match_segments_with_clip_key.sql (Phase 2.5)
+│                      apply-migration.ts (Phase 2 cleanup migration runner),
+│                      smoke-test-cd-phase3.ts (W1, validates Phase 3 CD against live Claude),
+│                      test-pre-normalize.ts (W5), test-ingestion-w5.ts (W5),
+│                      clean-slate-nordpilates.ts (W5, one-shot wipe),
+│                      migrations/001 through 007
 └── brands/          — nordpilates.json, ketoway.json, carnimeat.json
 
-n8n-workflows/       — Importable n8n workflow JSONs
-├── S1-new-job.json          — v2 final ✅
-├── S2-brief-review.json     — v2 final ✅
-├── S3-qa-decision.json      — v1 ⏸ — Needs v2 rebuild
-├── S7-music-ingest.json     — v2 ✅
-├── S8-ugc-ingest.json       — v1 manual ✅ — Backend now writes segments; interface unchanged
-├── P2-periodic-sync.json    — v2 ✅
-├── S4-brand-config.json     — ⏸ deactivated for MVP
-├── S5-caption-preset.json   — ⏸ deactivated for MVP
-├── S6-music-track.json      — ⏸ deactivated for MVP
-├── P1-job-status-push.json  — Webhook: Supabase → Sheet (event-driven)
-├── P3-dashboard-refresh.json — ⏸ deactivated for MVP
-└── P4-monthly-archive.json  — ⏸ deactivated for MVP
+n8n-workflows/       — Importable n8n workflow JSONs (see VPS-SERVERS.md for active workflow list)
 ```
 
 ## Google Sheets Admin Panel ("Video Pipeline")
 Spreadsheet ID: `1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78`
 Workers manage everything from a single Google Spreadsheet with 6 tabs:
-1. **Jobs** (gid: 645720058) — Create idea seeds, review briefs (approve/reject), QA videos. Polled every 30s.
-2. **Brands** (gid: 219264500) — Edit colors, fonts, CTA style, voice guidelines, allowed video types, color grade preset. Polled every 5min.
+1. **Jobs** (gid: 645720058) — Create idea seeds, review briefs (approve/reject), QA videos. Polled every 30s. Columns: Row Status, Job ID, Brand, Idea Seed, Status, Brief Summary, Full Brief, Hook Text, Preview URL, Auto QA, Review Decision, Rejection Notes, QA Decision, QA Issues. **Future: Vibe column to be added when Phase 3 vibe param wires through (deferred from W1).**
+2. **Brands** — Edit colors, fonts, CTA style, voice guidelines, allowed video types, color grade preset. Polled every 5min.
 3. **Caption Presets** — Flattened JSONB (20 columns per brand). n8n reassembles to nested JSON.
 4. **Music Library** — Auto-populated via S7 workflow (Drive → VPS → R2 → Supabase → Sheet). Workers just drop MP3s in Drive.
 5. **Templates** — Reference tab listing available templates + video type mapping.
@@ -179,8 +205,9 @@ Workers manage everything from a single Google Spreadsheet with 6 tabs:
 | Review brief | Sheet (Jobs tab) | Set approve/reject in Review Decision |
 | QA video | Sheet (Jobs tab) | Watch Preview URL, set QA Decision |
 | Edit brand | Sheet (Brands tab) | Change colors/fonts/CTA/video types |
+| Edit Phase 3 brand color palette | Supabase web UI directly (interim, until W6) | Edit `brand_configs.allowed_color_treatments` |
 
-**Sync**: n8n mediates bidirectionally. Sheet→Supabase edits are validated (hex regex, ranges, required fields). Errors shown in column A ("Row Status"). Supabase→Sheet updates are event-driven + 5min cron catch-up.
+**Sync**: n8n mediates bidirectionally. Sheet→Supabase edits are validated (hex regex, ranges, required fields). Errors shown in column A ("Row Status"). Supabase→Sheet updates are event-driven + 5min cron catch-up. P2 Periodic Sync now includes Full Brief column with apostrophe escape (Phase 2 cleanup).
 
 ## Google Drive Folder Structure
 - **Music Uploads**: `1s2vUnIoJUt7rltSRlJeY9uqQyQ5_Lzso` — Workers drop MP3s here, S7 processes and moves to Processed
@@ -197,8 +224,8 @@ Workers manage everything from a single Google Spreadsheet with 6 tabs:
 
 ## HTTP API (VPS port 3000)
 - `POST /enqueue` — n8n calls this to add jobs to BullMQ queues. Body: `{ queue, jobId }`
-- `POST /music-ingest` — n8n S7 sends audio binary. Header: `x-track-meta` (plain JSON or base64-encoded JSON). Returns track record with ID, duration, BPM.
-- `POST /ugc-ingest` — n8n S8 sends video binary. Header: `x-asset-meta` (plain JSON or base64-encoded JSON) with `filename`, `brand_id`, optional `description`, `drive_file_id`. Falls back to `{brand_id}_{description}.ext` parsing if header missing. Idempotent on `(filename, brand_id)` — returns `{ok:true, duplicate:true, ...}` for repeats. Streams the request body to a temp file via `req.pipe(createWriteStream(...))` (RAM stays ~64KB regardless of upload size) and rejects payloads >500MB via `Content-Length` check before any I/O. Module-scope concurrency guard still rejects overlapping requests with 503 — keeps Gemini analysis from running in parallel even with the 8GB headroom on the upgraded CX32. **Phase 1:** After legacy `assets` row insert, runs Gemini Pro segment analysis + CLIP embedding → writes `asset_segments` rows. Non-blocking: segmentation failure doesn't break ingestion.
+- `POST /music-ingest` — n8n S7 sends audio binary. Header: `x-track-meta`. Returns track record with ID, duration, BPM.
+- `POST /ugc-ingest` — n8n S8 sends video binary. Header: `x-asset-meta`. Idempotent on `(filename, brand_id)`. Streams to disk via `req.pipe(createWriteStream(...))`. **Phase 1+2.5**: After legacy `assets` row insert, runs Gemini Pro segment analysis + CLIP embedding + 720p clip pre-trim → writes `asset_segments` rows. Non-blocking: segmentation failure doesn't break ingestion.
 - `GET /health` — Health check. Returns `{ status: "ok", worker: "worker-1" }`
 
 ## Build Commands
@@ -206,23 +233,23 @@ Workers manage everything from a single Google Spreadsheet with 6 tabs:
 npm run build              # TypeScript compilation
 npm run test:connectivity  # Verify Supabase + Redis + R2
 npm run setup:r2           # Initialize R2 folder structure
-npm run test:pipeline      # Full integration test (FFprobe, FFmpeg, ingestion, job manager, QA)
+npm run test:pipeline      # Full integration test
 npm run test:agents        # AI agents mock mode test (30 checks)
-npm run test:agents:live   # AI agents live test with Claude Sonnet API (27 checks)
-npm run test:quality       # Quality upgrade modules test (41 checks)
-npm run test:phase5        # Phase 5 integration test (28 checks: queues, lifecycle, renderer)
-npm run test:clip          # CLIP embedder test (identity, semantic, cross-modal checks)
-npm run test:segment-analyzer  # Gemini Pro segment analyzer test (ffprobe, segments, types, keyframes)
-npm run test:segment-trimmer   # FAST/SLOW path trimmer test (size bounds, Gemini upload)
-npm run test:curator-v2    # End-to-end 5-slot curator V2 test against live DB (no render, no job row)
-npm run backfill:segments  # Backfill asset_segments for existing assets (idempotent, interactive)
-npm run backfill:clips     # Phase 2.5: backfill clip_r2_key (pre-trimmed 720p clips) for existing segments
+npm run test:agents:live   # AI agents live test with Claude Sonnet API
+npm run test:quality       # Quality upgrade modules test
+npm run test:phase5        # Phase 5 integration test
+npm run test:clip          # CLIP embedder test
+npm run test:segment-analyzer  # Gemini Pro segment analyzer test
+npm run test:segment-trimmer   # FAST/SLOW path trimmer test
+npm run test:curator-v2    # End-to-end 5-slot curator V2 test
+npm run test:cd-phase3     # Phase 3 CD smoke test (6 fixtures, ~$0.33, ~120s)
+npm run backfill:segments  # Backfill asset_segments for existing assets
+npm run backfill:clips     # Phase 2.5 backfill: clip_r2_key for existing segments
 npm start                  # Start all BullMQ workers (dev mode via tsx)
 npm run start:prod         # Start workers in production (compiled JS)
 ```
 
 ## UGC File Naming Convention
-Workers drop files into brand-specific Google Drive folders. Simple prefix naming:
 ```
 {brand_id}_{description}.mov
 ```
@@ -232,24 +259,18 @@ Examples: `nordpilates_yoga-flow-demo.mov`, `ketoway_meal-prep-chicken.mp4`
 - Description is stored as a searchable tag in `assets.tags`
 - Any extension works: `.mov`, `.mp4`, `.webm`
 
-## Remotion Video Templates
+## Remotion Video Templates (Phase 2 — being replaced in Phase 3 W4)
 All templates render at 1080x1920 30fps (vertical short-form). Each layout is a React component that takes a `TemplateProps` object containing the full Context Packet, pre-resolved clip paths, whisper transcriptions, logo, and music.
 
-**Available layouts** (mapped by `template_id` in Root.tsx):
+**Available layouts** (Phase 2):
 - `hook-demo-cta` — Hook → Product demo → CTA (workout-demo, recipe-walkthrough)
 - `hook-listicle-cta` — Hook → Numbered tips with progress bar → CTA (tips-listicle)
 - `hook-transformation` — Hook → Before/After split-wipe reveal → CTA (transformation)
 
-**Reusable components:**
-- `CaptionTrack` — Word-by-word captions with 3 animation modes (word-highlight, karaoke, word-pop), spring physics
-- `HookText` — 5 entrance animations (pop-in, slide-up, typewriter, scale-rotate, glitch)
-- `CTAScreen` — Pulsing action badge, 5 styles (link-in-bio, swipe-up, follow, shop-now, minimal)
-- `LogoWatermark` — Persistent overlay, configurable position/opacity/size
-- `TransitionEffect` — 8 types (cut, fade, slide-left, slide-up, zoom, wipe, beat-flash, beat-zoom)
-- `SegmentVideo` — Handles single or multi-clip segments automatically
+**Phase 3 W4 will ship** a single parameterized composition (`phase3-parameterized-v1`) that consumes the full Phase 3 brief and renders accordingly. Per Architecture Rule 24, no template variants — variety from CD decisions only. Old layouts stay in codebase during W4 development; deleted at Milestone 3.3 cleanup.
 
 ## Feature Flags (.env)
-See `docs/VIDEO_PIPELINE_ARCHITECTURE_v3_9.md` §9 for full table. Current state:
+See `docs/VIDEO_PIPELINE_ARCHITECTURE_v5_0.md` §9 for full table. Current state:
 - `ENABLE_AUDIO_DUCKING=true` *(active)*
 - `ENABLE_CRF18_ENCODING=true` *(active)*
 - `ENABLE_BEAT_SYNC=true` *(active — Day 6)*
@@ -257,59 +278,73 @@ See `docs/VIDEO_PIPELINE_ARCHITECTURE_v3_9.md` §9 for full table. Current state
 - `ENABLE_MUSIC_SELECTION=true` *(active — Day 6)*
 - `ENABLE_DYNAMIC_PACING=false` — post-MVP
 - `ENABLE_CURATOR_V2=true` *(LIVE — flipped 2026-04-13 13:46 UTC)*
+- **`ENABLE_PHASE_3_CD=false` *(W1 shipped 2026-04-15, flag remains off in production until W2/W3/W4 ship + Milestone 3.3 flip)***
+- `ENABLE_PHASE_3_REMOTION=false` — to be added at W4
 - `GEMINI_INGESTION_MODEL=gemini-3.1-pro-preview` — segment analyzer model
-- `GEMINI_CURATOR_MODEL=gemini-3.1-pro-preview` — curator V2 picker + critique model (defaults to ingestion model if unset)
+- `GEMINI_CURATOR_MODEL=gemini-3.1-pro-preview` — curator V2 picker + critique model
 - `FALLBACK_MUSIC_TRACK_ID=f6a6f64f-...` — Die With A Smile 249s (deprecated post-selector)
 
 ## Quality Roadmap
-See `docs/VIDEO_PIPELINE_ARCHITECTURE_v3_9.md` §12 and `docs/MVP_PROGRESS (6).md` for full details. Summary:
-- **Tier 1 (Day 6):** ✅ DONE — Music tagging, color grading, beat sync, music selection all enabled.
-- **Phase 1 — Ingestion Overhaul:** ✅ DONE (2026-04-13) — pgvector + `asset_segments` + Gemini Pro analysis + CLIP embeddings. 182 segments across 53 clips, ~98% success, $3.47 cost.
-- **Phase 2 — Curator Overhaul:** ✅ DONE + LIVE (2026-04-13) — `asset-curator-v2.ts` + dispatcher + retrieval + trimmer with per-slot CLIP retrieval, type+quality filters, on-the-fly ffmpeg trim, Gemini Pro pick + self-critique, parent cache, variety preference. Validated at 9-10/10 on all 5 test slots, ~$0.20/video incremental.
-- **Phase 2.5 — Pre-trim optimization:** ✅ DONE + LIVE (2026-04-13) — Ingestion pre-trims 720p CRF 28 clips to R2 at `segments/{brand}/{uuid}.mp4`, recorded in `asset_segments.clip_r2_key`. Trimmer FAST PATH streams ~5MB instead of downloading full parent + ffmpeg. Backfill complete: 182/182 segments, 355 MB, 25m 26s, $0 (local ffmpeg only). Curator wall time: 17.9 min → **4.4 min** (4.1× speedup).
-- **Phase 2 production validation:** ✅ DONE (2026-04-14) — First V2 video rendered (job `d74679d2-...`, "5 min pilates abs burner"), rated **4-5/10**. V2 architecture works as designed; rating cap surfaced three other bottlenecks (library content gap, Creative Director monotony, Remotion template monotony). See `MVP_PROGRESS (6).md` for diagnosis.
-- **Cleanup commit (next):** ⏳ QUEUED — centralized retry helper (`src/lib/retry-llm.ts`) for 429/502/503/504/529/network, schema-aware Zod retry on V2 picker, V2 prompt update (segment_id dedup + visual variety), `brief_summary` column in Jobs sheet via S2 workflow update, push `phase2-complete` tag.
-- **Content sprint (this week):** ⏳ QUEUED — ingest 15-20 more nordpilates ab/core UGC clips to unblock library ceiling on abs videos.
-- **Phase 3 (Week 3, biggest remaining quality unlock):** ⏳ PLANNED — Creative Director archetype (`calm-instructional`, `high-energy-listicle`, `transformation-story`, `tip-stack`, `before-after`, `myth-buster`) + `energy_curve` + variable `slot_count` (3–8) + per-slot `cut_style`/`duration_target_s`/`energy_level`; 2-3 Remotion template variants per video type; pre-normalization at ingestion (drops clip prep 6-17 min → ~1 min). Target 7+/10 sustained.
-- **Week 4+:** Second brand (ketoway) + stabilization. Target: 8/10 across brands.
+See `docs/VIDEO_PIPELINE_ARCHITECTURE_v5_0.md` §12 and `docs/MVP_PROGRESS (7).md` for full details. Summary:
+- **Phase 1 — Ingestion Overhaul:** ✅ DONE (2026-04-13) — pgvector + `asset_segments` + Gemini Pro analysis + CLIP embeddings. Originally 182 segments across 53 clips; **clean-slated 2026-04-16 for W5 re-ingestion.**
+- **Phase 2 — Curator Overhaul:** ✅ DONE + LIVE (2026-04-13) — `asset-curator-v2.ts` + dispatcher + retrieval + trimmer. Validated 9-10/10 on test slots.
+- **Phase 2.5 — Pre-trim optimization:** ✅ DONE + LIVE (2026-04-13) — Curator wall time 17.9 min → 4.4 min.
+- **Phase 2 production validation:** ✅ DONE (2026-04-14) — First V2 video rated 4-5/10. Three diagnosed bottlenecks: library content gap, CD monotony, template monotony.
+- **Phase 2 cleanup:** ✅ DONE + LIVE (2026-04-14) — retry helper, Zod corrective retry, full_brief column, V2 prompt soft variety, S1 runaway loop fix. Tagged `phase2-complete`.
+- **Phase 3 W1 — Creative Director rewrite:** ✅ DONE (2026-04-15, behind flag) — New schema (creative_vision + slot_count 3-12 + per-slot energy/transition/cut + 8 color treatments), Zod corrective retry, dispatcher pattern, prompt rewrite with 4 examples, signal-mapping rules, smoke test harness validating 6/6 Zod + 6/6 signal-mapping. Tagged `phase3-w1-complete`. ENABLE_PHASE_3_CD=false in production.
+- **Phase 3 W5 — Clean-slate ingestion:** ✅ DONE (2026-04-16) — Pre-normalize parents to 1080p H.264 at ingestion (migration 007 + `preNormalizeParent()`). Clean-slate drop of 53 nordpilates assets + 182 segments + all R2 objects. Ready for content sprint re-ingestion.
+- **Content sprint:** ⏳ QUEUED post-W5 — ingest 15-20 more nordpilates ab/core UGC clips through new pipeline.
+- **Phase 3 W2/W3/W4:** ⏳ PLANNED — Curator V2 update (W2), Copywriter update (W3), Remotion parameterized composition (W4). W4 is largest workstream.
+- **Milestone 3.3 — flag flip + first Phase 3 production video.** Success criterion: 8 of 10 consecutive Phase 3 videos approved.
 
 ## Infrastructure
-- **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX32 (4 vCPU, 8GB RAM, 80GB SSD), Ubuntu — upgraded from CX22 on 2026-04-10 for render concurrency headroom
+- **VPS (video-factory-01)**: 95.216.137.35 — Hetzner CX32 (4 vCPU, 8GB RAM, 80GB SSD), Ubuntu — upgraded from CX22 on 2026-04-10
 - **n8n server**: 46.224.56.174 — Hetzner, Ubuntu 24.04
 - **GitHub**: https://github.com/Domis123/video-factory (private)
-- **Deploy**: `ssh root@95.216.137.35` → `cd /home/video-factory && git pull && npm install && npm run build && systemctl restart video-factory` (`npm install` matters when new deps are added, e.g. `@xenova/transformers` in Phase 1)
+- **Deploy**: `ssh root@95.216.137.35` → `cd /home/video-factory && git pull && npm install && npm run build && systemctl restart video-factory`
 - **Logs**: `journalctl -u video-factory -f`
 - **Service**: `systemctl start|stop|restart|status video-factory`
 - whisper.cpp installed at `/opt/whisper.cpp/build/bin/whisper-cli` with `base.en` model
 
 ## Important Technical Notes
 - Upstash Redis requires `tls: {}` and `maxRetriesPerRequest: null` in ioredis config
-- BullMQ drainDelay: 120s between empty-queue polls (~6.5K cmds/day idle, ~195K/mo, well under Upstash 500K free tier limit). 30s burned through the limit in days.
+- BullMQ drainDelay: 120s between empty-queue polls (~6.5K cmds/day idle, ~195K/mo, well under Upstash 500K free tier limit)
 - R2 client needs `forcePathStyle: true` and `region: "auto"`
 - Job status uses Postgres ENUM — TypeScript `JobStatus` type must exactly match
 - Atomic job claiming: `.update({status}).eq('id', jobId).eq('status', fromStatus)` prevents race conditions
 - 5 pilot brands seeded: nordpilates, ketoway, carnimeat, nodiet, highdiet
+- **`brand_configs.allowed_video_types` updated 2026-04-15** to support multi-type per brand (was single-type from MVP simplicity).
+- **`brand_configs.allowed_color_treatments` added 2026-04-15** via migration 006 (Phase 3 W1). nordpilates and carnimeat backfilled; others NULL.
 - Quality upgrade migration applied to Supabase (2026-04-07): new columns on jobs, assets, brand_configs
-- **Gemini 4K downscale**: `src/lib/gemini.ts` downscales clips >50MB to 720p (libx264 ultrafast, no audio) before base64-encoding for analysis. Raw 4K UGC (100MB+) balloons to 130MB+ as base64 in the JS heap. Originally added to keep the 4GB CX22 alive; still in place on the CX32 because base64 in V8 is wasteful regardless. Downscale temp files cleaned up in `finally`.
-- **UGC ingestion streaming + concurrency guard**: `/ugc-ingest` streams the request body straight to a temp file (`req.pipe(createWriteStream)`) instead of buffering into RAM, rejects payloads >500MB via `Content-Length`, and a module-scope `ugcIngesting` flag still serializes overlapping requests with 503. The streaming fix replaced the original `Buffer.concat` body parser after a 1GB OOM during the 54-clip parallel upload.
-- **Shared segment processor**: `src/lib/segment-processor.ts` — `processSegmentsForAsset()` handles keyframe extraction, CLIP embedding, R2 upload, DB insert, AND (Phase 2.5) pre-trim of 720p CRF 28 clips uploaded to `segments/{brand}/{uuid}.mp4`. Clip-trim failure is non-fatal: `clip_r2_key` stays null and the curator falls back to SLOW path. Single code path prevents drift between live ingestion and backfill.
-- **Backfill idempotency**: `backfill-segments.ts` uses set subtraction (all assets minus those with existing segment rows) — safe to re-run after partial failures. Serial processing with 2s sleep avoids Gemini rate limits. `backfill-segment-clips.ts` (Phase 2.5) uses `WHERE clip_r2_key IS NULL` — same idempotency pattern, with parent caching so each 4K source is only downloaded once across its segments.
-- **Gemini Files API flow**: `gemini-segments.ts` uploads video via Files API, polls until ACTIVE, analyzes, deletes in `finally`. Avoids base64 heap pressure for segment analysis. `segment-trimmer.ts` reuses the same upload+cleanup pattern for candidate clips during curator V2.
-- **Curator V2 two-path trim**: `segment-trimmer.ts` FAST PATH streams the pre-trimmed 720p file (~5MB) from R2 when `clip_r2_key` is set. Falls through to SLOW PATH (download parent + ffmpeg encode) if R2 fetch fails or the column is null. Both paths end with the same TrimmedSegment contract so the picker doesn't care which was used. Parent downloads are cached across slots in a shared `Map<r2Key, localPath>` cleaned up in the outermost finally.
-- **Curator V2 variety**: prompt receives `{previously_picked_parents}` and is instructed to STRONGLY prefer different parent clips across slots. Test softens duplicate assertion to warn-only when 3+ slots share a parent (2 sharing is acceptable given 53-clip library). Verified in validation: Pro reasoning strings explicitly mention "avoiding previously used parent".
-- **`match_segments` RPC accepts TEXT not VECTOR**: supabase-js doesn't reliably serialize vectors to pgvector types, so the function takes a string and casts to `vector(512)` internally (migration 005). Do NOT "fix" this signature.
-- **ivfflat index is deliberately absent**: dropped when stale centroids routed CLIP text queries into empty cells at 182 rows. Sequential scan is fast enough. Recreate with `lists ≈ rows/1000` when library hits ~1000 rows. Migration 003 header documents this.
-- **CREATE OR REPLACE FUNCTION silently fails on return-type changes**: any RPC migration that adds/removes a RETURNS TABLE column needs `DROP FUNCTION IF EXISTS ...` first, then CREATE, then `NOTIFY pgrst, 'reload schema'`. Bit us on migration 005.
-- **Known gaps (filed, non-blocking)**: Gemini Pro Preview returns 503 occasionally — retry-once-with-exponential-backoff pending in a cleanup commit. Zod validation failures on picker output do blind retry instead of schema-aware retry — also pending cleanup.
-- VPS system deps: `ffmpeg`, `chromium-browser`, and whisper.cpp built from source must be installed manually — `apt install ffmpeg chromium-browser` then build whisper.cpp via `cmake -B build && cmake --build build -j2`.
+- **Gemini 4K downscale**: `src/lib/gemini.ts` downscales clips >50MB to 720p (libx264 ultrafast, no audio) before base64-encoding for analysis. Originally added to keep the 4GB CX22 alive; still in place on the CX32.
+- **UGC ingestion streaming + concurrency guard**: `/ugc-ingest` streams the request body straight to a temp file, rejects payloads >500MB via `Content-Length`. Module-scope `ugcIngesting` flag serializes overlapping requests with 503.
+- **Shared segment processor**: `src/lib/segment-processor.ts` — `processSegmentsForAsset()` handles keyframe extraction, CLIP embedding, R2 upload, DB insert, AND (Phase 2.5) pre-trim of 720p CRF 28 clips. Single code path prevents drift.
+- **Backfill idempotency**: `backfill-segments.ts` uses set subtraction. `backfill-segment-clips.ts` (Phase 2.5) uses `WHERE clip_r2_key IS NULL`. Both safe to re-run.
+- **Gemini Files API flow**: `gemini-segments.ts` uploads video via Files API, polls until ACTIVE, analyzes, deletes in `finally`.
+- **Curator V2 two-path trim**: FAST PATH streams pre-trimmed 720p file (~5MB) from R2; SLOW PATH falls back to download parent + ffmpeg encode. Same TrimmedSegment contract.
+- **Curator V2 variety**: prompt receives `{previously_picked_parents}` and is instructed to STRONGLY prefer different parent clips across slots.
+- **`match_segments` RPC accepts TEXT not VECTOR**: supabase-js doesn't reliably serialize vectors to pgvector types. Function takes a string and casts to `vector(512)` internally (migration 005). Do NOT "fix" this signature.
+- **ivfflat index is deliberately absent**: dropped when stale centroids routed CLIP text queries into empty cells. Tables clean-slated at W5; sequential scan is fast. Recreate with `lists ≈ rows/1000` when library hits ~1000 rows.
+- **CREATE OR REPLACE FUNCTION silently fails on return-type changes**: any RPC migration that adds/removes a RETURNS TABLE column needs `DROP FUNCTION IF EXISTS` first, then CREATE, then `NOTIFY pgrst, 'reload schema'`. Bit us on migration 005.
+- **Phase 2 cleanup retry helper**: `src/lib/retry-llm.ts` — `withLLMRetry({ label })` wraps Sonnet + Gemini calls with duck-typed retry on 429/502/503/504/529/network errors. Used by Phase 2 CD, Phase 3 CD, and Curator V2.
+- **Phase 2 cleanup full_brief**: `src/lib/format-full-brief.ts` formats the entire context packet into operator-readable text. P2 sync writes to Full Brief sheet column with apostrophe escape (`'` prefix) to defeat Sheets' `=` formula parser.
+- **Phase 2 cleanup migration runner**: `src/scripts/apply-migration.ts` uses the `apply_migration_sql` SECURITY DEFINER RPC to apply DDL via supabase-js. Service-role only, hardened with search_path lock. Used for migrations 005, 006.
+- **Phase 3 W1 dispatcher pattern**: mirrors `asset-curator-dispatch.ts`. `creative-director-dispatch.ts` reads `ENABLE_PHASE_3_CD` and routes to `generateBriefPhase2` (the existing Phase 2 path, renamed in W1) or `generateBriefPhase3` (new). Discriminated union return forces downstream handling.
+- **Phase 3 W1 Zod corrective retry**: `creative-director-phase3.ts` parses model output with `validatePhase3Brief()`. On Zod failure, sends schema errors back to model in a single corrective retry. If still bad, throws. Mirrors curator V2 cleanup pattern.
+- **Phase 3 W1 placeholder guard**: `ensureBriefId()` substitutes `<will be set by system>` and `<from input>` placeholders with real values before Zod parses. Prevents valid-but-garbage strings reaching the DB. Runs on both first response and corrective retry.
+- **VPS system deps**: `ffmpeg`, `chromium-browser`, and whisper.cpp built from source — `apt install ffmpeg chromium-browser` then build whisper.cpp via `cmake -B build && cmake --build build -j2`.
 
 ## Current Status
-- **Phase 1 shipped (2026-04-13).** 182 segments across 53 clips, CLIP retrieval validated.
-- **Phase 2 shipped + LIVE (2026-04-13 13:46 UTC).** Curator V2 is the default in production. `feat/curator-v2` merged to main on VPS. Service restarted clean. Tag `phase2-complete` pending push from laptop (VPS lacks GitHub credentials).
-- **Phase 2.5 shipped + LIVE (2026-04-13).** Pre-trim at ingestion. Backfill complete: 182/182 segments, 355 MB to R2, $0 cost. Curator wall time 17.9 min → 4.4 min. Test picks 9-10/10 on all slots, 5/5 unique parents.
-- **Phase 2 production validated (2026-04-14).** First V2 video rendered (job `d74679d2-3c62-4e10-8e03-6da774b55dc1`, "5 min pilates abs burner", nordpilates, 35s, 5 segments). End-to-end ~16 min (planning ~5 min, render + export the rest). Rated **4-5/10** by operator. V2 worked correctly; rating ceiling is from three layers below the picker.
-- **Diagnosis of 4-5/10**: (1) library content gap — only ~3-6 truly ab-focused segments in nordpilates; Pro cannot pick clips that don't exist; (2) Creative Director monotony — CD makes only 3 decisions (video type, brief, template), so different briefs produce structurally identical videos; (3) V2 prompt gap — variety preference prevents same-parent reuse but allows visually similar segments across slots.
-- **Next action**: cleanup commit (retry helper + Zod schema-aware retry + V2 prompt fix for visual variety + `brief_summary` sheet column + push `phase2-complete` tag). Then content sprint (ingest 15-20 more ab/core UGC). Then Phase 3 (CD archetype + Remotion template variants + pre-normalization at ingestion). Do NOT roll back V2 — it is strictly better than V1.
-- **Data**: 53 assets (nordpilates), 182 asset_segments (all with clip_r2_key), 15 music_tracks, 3 brand_configs, 3+ jobs (including first V2 production render).
-- **n8n workflows**: S1 v2 ✅, S2 v2 ✅ (needs `brief_summary` column added in cleanup commit), S3 v1 ⏸ (needs v2 rebuild before first `delivered`), S7 v2 ✅, S8 v1 ✅ (manual, backend writes pre-trimmed clips), P2 v2 ✅.
-- **Total infra**: ~€15/mo + ~$0.75/video (CD + Copywriter $0.25 Sonnet, curator V2 $0.20 Pro, ingestion $0.06/clip amortized).
+- **Phase 1 shipped (2026-04-13).** Originally 182 segments across 53 clips. Clean-slated 2026-04-16 for W5 re-ingestion.
+- **Phase 2 shipped + LIVE (2026-04-13 13:46 UTC).** Curator V2 default in production.
+- **Phase 2.5 shipped + LIVE (2026-04-13).** Pre-trim at ingestion. Backfill complete.
+- **Phase 2 production validated (2026-04-14).** First V2 video rendered, rated 4-5/10. Diagnosis: library content gap + CD monotony + template monotony.
+- **Phase 2 cleanup shipped (2026-04-14, commit `269ff99`, tag `phase2-complete`).** Retry helper, Zod corrective retry, full_brief column, V2 prompt soft variety, S1 runaway loop fix.
+- **Phase 3 design locked (2026-04-15).** Five workstreams (W1: CD rewrite, W2: Curator V2 update, W3: Copywriter update, W4: Remotion parameterized composition, W5: clean-slate ingestion). Three milestones (3.1, 3.2, 3.3). Behind feature flags. See `docs/PHASE_3_DESIGN.md`.
+- **Phase 3 W1 shipped (2026-04-15, commit `df6a326`, tag `phase3-w1-complete`).** Creative Director rewrite behind ENABLE_PHASE_3_CD flag. Phase 2 path preserved for rollback. Smoke test passed 6/6 Zod + 6/6 signal-mapping correct + 4 unique slot_counts + 5 unique color treatments. Migration 006 applied. brand_configs.allowed_video_types expanded to multi-type per brand.
+- **Doc sync committed 2026-04-15 (commit `ea61805`).** Architecture v5.0, MVP progress (7), updated PHASE_3_DESIGN and SUPABASE_SCHEMA all live on main. v4.0 and (6) deleted.
+- **Phase 3 W5 shipped (2026-04-16).** Pre-normalize at ingestion (migration 007 + `preNormalizeParent()`). Clean-slate drop: 53 assets, 182 segments, 434 R2 objects wiped. Ingestion pipeline ready for content sprint.
+- **Next action**: Content sprint — ingest 15-20 more nordpilates ab/core UGC clips through the new W5 pipeline. Then W2/W3/W4 in sequence (W4 is largest, blocks Milestone 3.3).
+- **Data**: 0 assets (clean-slated), 0 asset_segments (clean-slated), 15 music_tracks, 5 brand_configs (3 active for Phase 3: nordpilates, carnimeat, highdiet), 6+ jobs (including first V2 production render).
+- **n8n workflows**: S1 v2 ✅, S2 v2 ✅, S3 v1 ⏸ (needs v2 rebuild before first `delivered`), S7 v2 ✅, S8 v1 ✅ (manual), P2 v2 ✅ (with apostrophe escape).
+- **Total infra**: ~€15/mo + ~$0.25-0.40/video Claude (varies with Phase 2 vs Phase 3 CD).

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { stat, unlink } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { createReadStream } from 'node:fs';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
-import { uploadFile } from '../lib/r2-storage.js';
+import { uploadFile, deleteFile } from '../lib/r2-storage.js';
+import { preNormalizeParent } from '../lib/parent-normalizer.js';
 import { buildProbeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow } from '../lib/exec.js';
 import { analyzeClip } from '../lib/gemini.js';
@@ -112,71 +113,95 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
   const clipMeta = await analyzeClipMetadata(input.filePath);
   console.log(`[ingestion] Color: ${clipMeta.dominant_color_hex}, Motion: ${clipMeta.motion_intensity}, Brightness: ${clipMeta.avg_brightness}, Cuts: ${clipMeta.scene_cuts}`);
 
-  // 3. Upload to R2
+  // 3. Upload raw original to R2 (archival copy)
   const stream = createReadStream(input.filePath);
   await uploadFile(r2Key, stream, 'video/mp4');
-  console.log(`[ingestion] Uploaded to R2: ${r2Key}`);
+  console.log(`[ingestion] Uploaded raw to R2: ${r2Key}`);
 
-  // 4. Insert into Supabase
-  const allTags = [...analysis.tags];
-  if (description) allTags.push(description);
-
-  const row = {
-    id: assetId,
-    brand_id: brandId,
-    drive_file_id: input.driveFileId ?? null,
-    r2_key: r2Key,
-    r2_url: `${env.R2_ENDPOINT}/${env.R2_BUCKET}/${r2Key}`,
-    filename: input.filename ?? null,
-    duration_seconds: probe.duration_seconds,
-    resolution: probe.resolution,
-    aspect_ratio: probe.aspect_ratio,
-    file_size_mb: probe.file_size_mb,
-    content_type: analysis.content_type,
-    mood: analysis.mood,
-    quality_score: analysis.quality_score,
-    has_speech: analysis.has_speech,
-    transcript_summary: analysis.transcript_summary,
-    visual_elements: analysis.visual_elements,
-    usable_segments: analysis.usable_segments,
-    dominant_color_hex: clipMeta.dominant_color_hex,
-    motion_intensity: clipMeta.motion_intensity,
-    avg_brightness: clipMeta.avg_brightness,
-    scene_cuts: clipMeta.scene_cuts,
-    tags: allTags,
-  };
-
-  const { data, error } = await supabaseAdmin
-    .from('assets')
-    .insert(row)
-    .select()
-    .single();
-
-  if (error) throw new Error(`Supabase insert failed: ${error.message}`);
-  console.log(`[ingestion] Asset saved: ${assetId}`);
-
-  // ── Phase 1: Sub-clip segmentation (additive, non-blocking) ──
-  // Produces asset_segments rows alongside the legacy assets row.
-  // On failure, log and continue — the legacy row is already written
-  // and the backfill script can re-process later.
+  // 4. Pre-normalize parent to 1080p H.264 + upload to R2
+  let normalizedLocalPath: string | null = null;
+  let normR2Key: string | null = null;
   try {
-    const durationSeconds = probe.duration_seconds ?? 0;
-    if (durationSeconds > 0) {
-      const brandContext = `Brand: ${brandId}. ${description || 'UGC content.'}`;
-      const segments = await analyzeClipSegments(input.filePath, durationSeconds, brandContext);
-      console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
-
-      const inserted = await processSegmentsForAsset(assetId, brandId, input.filePath, segments);
-      console.log(`[ingestion] ${inserted} asset_segments rows written for asset ${assetId}`);
-    } else {
-      console.warn(`[ingestion] Skipping segmentation: no duration for asset ${assetId}`);
-    }
-  } catch (segErr) {
-    console.error(`[ingestion] Segmentation failed for asset ${assetId}:`, segErr);
-    // Do NOT rethrow. Legacy assets row is already written. Backfill can re-run later.
+    const normResult = await preNormalizeParent({
+      inputPath: input.filePath,
+      brandId,
+      assetId,
+    });
+    normalizedLocalPath = normResult.localPath;
+    normR2Key = normResult.r2Key;
+    console.log(
+      `[ingestion] Pre-normalized: ${normR2Key} (${(normResult.fileSizeBytes / 1024 / 1024).toFixed(1)}MB, ${(normResult.encodeMs / 1000).toFixed(1)}s encode)`,
+    );
+  } catch (normErr) {
+    try { await deleteFile(r2Key); } catch { /* swallow */ }
+    console.error(`[ingestion] Pre-normalization failed, deleted orphan raw ${r2Key}`);
+    throw normErr;
   }
 
-  return data as Asset;
+  try {
+    // 5. Insert into Supabase
+    const allTags = [...analysis.tags];
+    if (description) allTags.push(description);
+
+    const row = {
+      id: assetId,
+      brand_id: brandId,
+      drive_file_id: input.driveFileId ?? null,
+      r2_key: r2Key,
+      pre_normalized_r2_key: normR2Key,
+      r2_url: `${env.R2_ENDPOINT}/${env.R2_BUCKET}/${r2Key}`,
+      filename: input.filename ?? null,
+      duration_seconds: probe.duration_seconds,
+      resolution: probe.resolution,
+      aspect_ratio: probe.aspect_ratio,
+      file_size_mb: probe.file_size_mb,
+      content_type: analysis.content_type,
+      mood: analysis.mood,
+      quality_score: analysis.quality_score,
+      has_speech: analysis.has_speech,
+      transcript_summary: analysis.transcript_summary,
+      visual_elements: analysis.visual_elements,
+      usable_segments: analysis.usable_segments,
+      dominant_color_hex: clipMeta.dominant_color_hex,
+      motion_intensity: clipMeta.motion_intensity,
+      avg_brightness: clipMeta.avg_brightness,
+      scene_cuts: clipMeta.scene_cuts,
+      tags: allTags,
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('assets')
+      .insert(row)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Supabase insert failed: ${error.message}`);
+    console.log(`[ingestion] Asset saved: ${assetId}`);
+
+    // 6. Sub-clip segmentation (non-blocking) — reads from normalized parent
+    const segmentSourcePath = normalizedLocalPath ?? input.filePath;
+    try {
+      const durationSeconds = probe.duration_seconds ?? 0;
+      if (durationSeconds > 0) {
+        const brandContext = `Brand: ${brandId}. ${description || 'UGC content.'}`;
+        const segments = await analyzeClipSegments(segmentSourcePath, durationSeconds, brandContext);
+        console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
+
+        const inserted = await processSegmentsForAsset(assetId, brandId, segmentSourcePath, segments);
+        console.log(`[ingestion] ${inserted} asset_segments rows written for asset ${assetId}`);
+      } else {
+        console.warn(`[ingestion] Skipping segmentation: no duration for asset ${assetId}`);
+      }
+    } catch (segErr) {
+      console.error(`[ingestion] Segmentation failed for asset ${assetId}:`, segErr);
+    }
+
+    return data as Asset;
+  } finally {
+    if (normalizedLocalPath) {
+      await unlink(normalizedLocalPath).catch(() => {});
+    }
+  }
 }
 
 // BullMQ processor (used when running as a queue worker)
