@@ -1,23 +1,35 @@
-# Video Factory — Architecture v5.0
+# Video Factory — Architecture v5.1
 
-**Last updated:** 2026-04-15
-**Status:** ✅ **Phase 1, Phase 2, Phase 2.5, Phase 2 cleanup, and Phase 3 W1 shipped and live on origin/main.** Tagged `phase3-w1-complete` (commit `df6a326`). Phase 3 W2-W5 still planned. ENABLE_PHASE_3_CD remains false in production until W2/W3/W4 ship.
+**Last updated:** 2026-04-16
+**Status:** ✅ **Phase 1, Phase 2, Phase 2.5, Phase 2 cleanup, Phase 3 W1, and Phase 3 W5 shipped and live on origin/main.** Tagged `phase3-w5-complete` (commit `f1b8120`). Phase 3 W2-W4 still planned. ENABLE_PHASE_3_CD remains false in production until W2/W3/W4 ship. **Content sprint in progress** — ingesting 50-100 nordpilates UGC clips through the new pre-normalized pipeline.
 
-**What changed in v5.0:**
+**What changed in v5.1:**
+- Phase 3 W5 (clean-slate ingestion + pre-normalization) shipped.
+- Migration 007 applied: `assets.pre_normalized_r2_key` TEXT.
+- New function `src/lib/parent-normalizer.ts`: `preNormalizeParent()` → 1080×1920 30fps, CRF 22 medium, AAC 128k 44.1k stereo.
+- Ingestion wiring: pre-normalize inserted between R2 raw upload and `assets` INSERT; all downstream consumers (Gemini Pro segment analyzer, keyframe extraction, 720p scout trim) now read the normalized parent.
+- R2 layout added: `parents/normalized/{brand}/{asset_id}.mp4`.
+- Clean-slate drop: 53 nordpilates assets + 182 segments + all R2 nordpilates prefixes deleted before sprint. Carnimeat test debris also swept.
+- Side fixes: `/ugc-ingest` Content-Length cap raised from 500MB to 2GB (commit `22e977e`); n8n S8 `Send to VPS` timeout raised from 10 min to 30 min (workflow-side change).
+- Rule count unchanged at 28. No new rules for W5; rule 21 (pre-trim at ingestion) already covered the pattern.
+- New section: §11.6 — Phase 3 W5 Ship Report (encode timings, first production ingestion, what landed).
+
+**What changed in v5.0 (carried from prior release):**
 - Phase 3 W1 (Creative Director rewrite) shipped behind feature flag.
 - Architecture rules unchanged from v4.0 (28 total).
 - Model assignments and component descriptions updated to reflect Phase 3 W1 shipped state (dispatcher pattern, Zod corrective retry, new schema).
 - Phase 3 design intent moved from "planned" framing to "W1 shipped, W2-W5 planned" framing.
-- New section: §11.5 — Phase 3 W1 Ship Report (smoke test results, what landed, what's next).
-- Historical v4.0 content preserved where it doesn't contradict W1 shipped state.
+- Section §11.5 — Phase 3 W1 Ship Report.
 
 ---
 
-## Phase 3 Status (W1 shipped, W2-W5 planned)
+## Phase 3 Status (W1 + W5 shipped, W2-W4 planned)
 
 Phase 3 eliminates "every video feels the same" by giving the Creative Director open-ended creative freedom and rebuilding the Remotion composition as parameterized instead of templated. Five workstreams; three milestones.
 
 **W1 — Creative Director rewrite** ✅ SHIPPED 2026-04-15 (commit `df6a326`, tag `phase3-w1-complete`). Behind `ENABLE_PHASE_3_CD` flag (default false in production).
+
+**W5 — Clean-slate ingestion + pre-normalization** ✅ SHIPPED 2026-04-16 (commit `f1b8120`, tag `phase3-w5-complete`). Live — every new ingestion pre-normalizes parent to 1080×1920 H.264 before segmentation. Clean-slate drop of old 53/182 nordpilates library executed before sprint. First new-pipeline ingestion verified end-to-end (12 segments from 986MB 4K source, ~14 min total).
 
 **W2 — Curator V2 update** ⏳ PLANNED. Read new aesthetic_guidance + creative_vision context.
 
@@ -25,14 +37,12 @@ Phase 3 eliminates "every video feels the same" by giving the Creative Director 
 
 **W4 — Remotion parameterized composition** ⏳ PLANNED. Single composition replaces template variants. Largest workstream.
 
-**W5 — Clean-slate ingestion + pre-normalization** ⏳ PLANNED. Independent of W2/W3/W4; **next workstream after W1 per operator decision (2026-04-15)**. Unblocks content sprint with new pre-normalized pipeline.
-
 **Source of truth:** `docs/PHASE_3_DESIGN.md`. All Phase 3 agent briefs reference that doc.
 
 **Key Phase 3 architecture decisions (now landing or shipped):**
 - Creative Director outputs a richer schema (creative_vision paragraph, color_treatment, per-slot transition_in + internal_cut_style + aesthetic_guidance) — **W1 SHIPPED**
 - Remotion becomes a single parameterized composition, no template variants — W4 planned
-- Existing 182 segments dropped, library re-ingested via new pre-normalized pipeline — W5 planned (next)
+- **Existing 182 segments dropped + library re-ingested via new pre-normalized pipeline — W5 SHIPPED**
 - 8 color treatments, brand-restricted via brand_config.allowed_color_treatments — **W1 SHIPPED via migration 006**
 - Slot count variable 3-12, no fixed 5 — **W1 SHIPPED**
 - Vibe input from operator (free-text, optional) — **W1 deferred** (CD-generated when blank; operator vibe wires through after S1 sheet column ships)
@@ -155,24 +165,43 @@ Supabase INSERT (status: planning) + BullMQ enqueue planning
 delivered
 ```
 
-### Ingestion Pipeline (Phase 1 + 2.5; W5 will add pre-normalization)
+### Ingestion Pipeline (Phase 1 + 2.5 + W5 — pre-normalization shipped)
 
 ```
 Operator drops UGC file
-  ↓ S8 polls or manual upload
+  ↓ S8 polls every 5 min OR manual upload
 POST /ugc-ingest with x-asset-meta JSON header
-  ↓ Ingestion Worker
-  1. Stream file to R2 at assets/{brand_id}/{uuid}.MOV
-     [Phase 3 W5 will: pre-normalize parent to 1080p H.264, upload to parents/normalized/]
-  2. INSERT assets row
-  3. gemini-segments.analyzeClipSegments (Files API, Pro segment analyzer)
-  4. For each segment returned:
-     4a. Extract keyframe at midpoint → upload to keyframes/{brand_id}/{segment_uuid}.jpg
-     4b. Compute CLIP embedding from keyframe → 512 floats, L2 normalized
-     4c. (Phase 2.5) ffmpeg trim to 720p CRF 28 → upload to segments/{brand_id}/{segment_uuid}.mp4
-     4d. INSERT asset_segments row with embedding + keyframe_r2_key + clip_r2_key
-  5. Delete local parent file
+  Stream body → /tmp/ugc-ingest/{uuid}.{ext}  (req.pipe, RAM ~64KB, 2GB Content-Length cap)
+  ↓ Ingestion Worker (ingestAsset)
+  1. ffprobe (probeFile): duration, resolution, codec, size
+  2. analyzeClip (legacy Gemini Flash on raw): content_type/mood/quality/description/usable_segments[] → assets row legacy columns
+       [LEGACY — scheduled for removal at Milestone 3.3]
+  3. analyzeClipMetadata (3× parallel ffmpeg on raw): dominant color, motion, brightness
+  4. uploadFile: stream raw to R2 at assets/{brand_id}/{uuid}.{ext}  [archival original]
+  5. W5: preNormalizeParent({ inputPath, brandId, assetId })
+       ffmpeg → 1080×1920 30fps H.264 CRF 22 medium, AAC 128k 44.1k stereo
+       Upload to R2 at parents/normalized/{brand_id}/{asset_id}.mp4
+       Return { localPath, r2Key, durationS, fileSizeBytes, encodeMs }
+       Hard-required: throw on failure (after best-effort cleanup of orphan raw R2 key)
+  6. INSERT assets row (now includes pre_normalized_r2_key)
+  7. Segmentation (existing try/catch non-blocking), using NORMALIZED local path:
+     7a. analyzeClipSegments (Gemini Pro Files API on normalized): N segments with types, descriptions, timestamps
+     7b. processSegmentsForAsset: for each segment (serial):
+         - Extract keyframe at midpoint via ffmpeg → upload to keyframes/{brand}/{seg_uuid}.jpg
+         - CLIP embedding from keyframe (512 floats, L2 normalized)
+         - ffmpeg trim from normalized: 720p CRF 28 → upload to segments/{brand}/{seg_uuid}.mp4
+         - INSERT asset_segments with embedding + keyframe_r2_key + clip_r2_key
+         - Delete local keyframe + trimmed clip
+  8. Finally: delete /tmp/ugc-ingest/{uuid}.{ext} and {uuid}_normalized.mp4
 ```
+
+**Per-clip timing (first production W5 ingestion, 2026-04-16):**
+- 986MB 4K 3:36 source, 3400×1912 HEVC → 444MB 1080×1920 H.264 normalized
+- Pre-normalize encode: 4:42 (CRF 22 medium on CX32)
+- Gemini Flash legacy analysis: 3:19 (dominated by 986→? MB downscale)
+- Gemini Pro Files API upload + poll + analysis: 1:03 → 12 segments
+- 12 × (keyframe + CLIP + 720p trim + R2 + DB): ~58s (~5s/segment)
+- **Total end-to-end: ~14 min.** Short clips (20-60s) complete in 40-90s (validated 2026-04-16 on 22.9MB/3.9s clip: 48s total).
 
 ---
 
@@ -239,29 +268,37 @@ Takes `query_embedding` as TEXT (not VECTOR), casts internally. supabase-js does
 | 004 | `004_add_full_brief_column.sql` | Applied (Phase 2 cleanup) | Add full_brief (numbering collision with above; touches different table — no conflict) |
 | 005 | `005_match_segments_with_clip_key.sql` | Applied | Updated RPC to return clip_r2_key (DROP+CREATE per Architecture Rule 22) |
 | 006 | `006_brand_configs_color_treatments.sql` | **Applied (Phase 3 W1, 2026-04-15)** | Add allowed_color_treatments TEXT[] + backfill nordpilates/carnimeat |
-| 007 | `007_pre_normalized_clips.sql` | **Phase 3 W5, planned** | Add pre_normalized_r2_key TEXT to assets |
+| 007 | `007_pre_normalized_clips.sql` | **Applied (Phase 3 W5, 2026-04-16)** | Add pre_normalized_r2_key TEXT to assets |
 
 ---
 
 ## 6. R2 Storage Layout
 
 ```
-assets/{brand}/{uuid}.MOV            — original UGC parent files
-keyframes/{brand}/{segment_uuid}.jpg — single-frame keyframes (Phase 1)
-segments/{brand}/{segment_uuid}.mp4  — pre-trimmed 720p mp4s (Phase 2.5)
-parents/normalized/{brand}/{asset_id}.mp4  — Phase 3 W5: 1080p H.264 normalized parents
+assets/{brand}/{uuid}.{ext}                  — original UGC parent files (archival)
+parents/normalized/{brand}/{asset_id}.mp4   — Phase 3 W5: 1080×1920 30fps H.264 normalized parents (LIVE)
+keyframes/{brand}/{segment_uuid}.jpg         — single-frame keyframes (Phase 1)
+segments/{brand}/{segment_uuid}.mp4          — 720p CRF 28 scout clips derived from normalized parent (Phase 2.5 + W5)
 music/{brand}/{track}.mp3
 logos/{brand}/{variant}.png
 renders/{job_id}/{format}.mp4
 ```
 
-Storage growth from Phase 2.5: +355 MB for 182 existing segments. Negligible cost.
+**Storage growth:**
+- Phase 2.5: +355 MB for 182 existing segments (now deleted with clean-slate).
+- Phase 3 W5 ongoing: ~450MB per parent clip (normalized 1080p) + ~5MB per segment (720p scout). For a 50-100 clip sprint, expect ~25-55GB added to R2.
 
 ---
 
 ## 7. HTTP API (port 3000)
 
-Unchanged from v4.0. `/ugc-ingest` writes pre-trimmed clips alongside keyframes and assets.
+`/ugc-ingest` contract:
+- Streams request body to `/tmp/ugc-ingest/{uuid}.{ext}` via `req.pipe(createWriteStream)` — RAM ~64KB regardless of upload size.
+- Content-Length cap: **2GB** (raised from 500MB on 2026-04-16, commit `22e977e`). Streaming removes the actual RAM risk; 500MB was stale.
+- Single-flight: `ugcIngesting` module-scope flag rejects overlapping with 503.
+- Dedup: on `(filename, brand_id)` match → early return `{ok: true, duplicate: true, ...}`.
+- Response body includes `asset_id`, `r2_key`, `pre_normalized_r2_key`, `brand_id`, `content_type`, `quality_score`, `duration_seconds`.
+- Synchronous end-to-end: returns only after all segment processing completes. Timing: ~45s for short clips (20-60s source), up to ~15 min for 3-5min 4K HEVC sources. **n8n S8 `Send to VPS` timeout raised to 30 min (2026-04-16) to match.** Async migration deferred to Milestone 3.3 cleanup.
 
 ---
 
@@ -320,9 +357,9 @@ Add per-slot overlay text generation. CD specifies structure (style/position/ani
 
 Single `phase3-parameterized-v1` composition replaces template variants. Iterates over Phase 3 brief's `segments[]`. Implements 8 color treatments as CSS filter chains, 6 transitions, 3 internal cut styles, variable slot counts via frame-count arithmetic. Largest workstream. Estimated 4-6 sessions.
 
-### W5 — Clean-slate ingestion + pre-normalization (planned, NEXT)
+### W5 — Clean-slate ingestion + pre-normalization ✅ SHIPPED (see §11.6)
 
-Pre-normalize parent clips to 1080p H.264 at ingestion. New uploads use new pipeline. Existing 182 segments dropped (clean-slate per Architecture Rule 28). Drops render-time clip prep from 6-17 min to ~1 min. Independent of W2/W3/W4. **Per operator decision (2026-04-15), W5 ships next** to unblock content sprint with new pipeline before W2/W3/W4 begin. Estimated 1-2 sessions.
+Shipped 2026-04-16 (commit `f1b8120`, tag `phase3-w5-complete`). Live — every new ingestion pre-normalizes parent to 1080×1920 H.264 at CRF 22 medium before segmentation. Clean-slate drop of 53/182 nordpilates library executed pre-sprint. First production ingestion verified end-to-end (12 segments from 986MB 4K source).
 
 ---
 
@@ -365,6 +402,75 @@ Pre-normalize parent clips to 1080p H.264 at ingestion. New uploads use new pipe
 
 ---
 
+## 11.6 — Phase 3 W5 Ship Report
+
+**Shipped:** 2026-04-16. Commit `f1b8120` on main, tag `phase3-w5-complete`. Four-commit branch (`feat/phase3-w5-ingestion`) squash-merged from laptop.
+
+**What landed:**
+- **Migration 007** (`007_pre_normalized_clips.sql`) — `assets.pre_normalized_r2_key TEXT` nullable. Applied via existing `apply-migration.ts` runner.
+- **`src/lib/parent-normalizer.ts`** (74 lines, NEW) — `preNormalizeParent()` sibling to existing `buildNormalizeCommand` (latter kept for render-time use). FFmpeg: `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30` + `-c:v libx264 -pix_fmt yuv420p -crf 22 -preset medium` + `-c:a aac -b:a 128k -ar 44100 -ac 2` + `-movflags +faststart`. Returns localPath, r2Key, durationS, fileSizeBytes, encodeMs.
+- **`src/workers/ingestion.ts`** — pre-normalization step inserted between raw R2 upload and `assets` INSERT. Downstream `analyzeClipSegments` and `processSegmentsForAsset` now read the normalized local path. Assets INSERT populates `pre_normalized_r2_key`. Orphan raw cleanup (best-effort `deleteFile`) on pre-normalize failure.
+- **`src/scripts/test-pre-normalize.ts`** (77 lines, NEW) + `npm run test:pre-normalize` — standalone smoke harness.
+- **`src/scripts/test-ingestion-w5.ts`** (129 lines, NEW) — end-to-end /ugc-ingest verification harness.
+- **`src/scripts/clean-slate-nordpilates.ts`** (147 lines, NEW) + `npm run clean-slate:nordpilates` — scripted DB + R2 wipe. Idempotent, re-runnable, greppable in git history.
+- **Doc sync in-commit:** CLAUDE.md, docs/SUPABASE_SCHEMA.md updated.
+
+**Clean-slate executed 2026-04-16:**
+
+| Scope | Pre | Post |
+|---|---|---|
+| nordpilates assets (DB) | 53 | 0 |
+| nordpilates asset_segments (DB, cascade) | 182 | 0 |
+| R2 assets/nordpilates/ | 55 | 0 |
+| R2 segments/nordpilates/ | 182 | 0 |
+| R2 keyframes/nordpilates/ | 182 | 0 |
+| R2 parents/normalized/nordpilates/ | 2 (Step 2 test files) | 0 |
+| R2 assets/carnimeat/ (test debris) | 4 | 0 |
+| R2 segments/carnimeat/ (test debris) | 3 | 0 |
+| R2 keyframes/carnimeat/ (test debris) | 3 | 0 |
+| R2 parents/normalized/carnimeat/ (test debris) | 3 | 0 |
+
+Cascade on `asset_segments.parent_asset_id` confirmed — single `DELETE FROM assets WHERE brand_id='nordpilates'` dropped both tables.
+
+**First production W5 ingestion (2026-04-16, `NP_concept_17.MOV`):**
+
+| Stage | Timing | Notes |
+|---|---|---|
+| Stream upload (986 MB, 3400×1912 HEVC 60fps) | instant | 2GB cap fix working |
+| Legacy Gemini Flash analysis | 3:19 | Includes internal 720p downscale (existing, unrelated to W5) |
+| clip-analysis ffmpeg (3× parallel: color/motion/brightness on raw) | 2:09 | Unchanged |
+| Raw → R2 (assets/nordpilates/{uuid}.MOV) | ~26s | |
+| **preNormalizeParent** | **4:42 encode** | 986MB → 444MB (~45% ratio). yuvj420p tag carried from JPEG-range source; functionally identical 4:2:0. |
+| Parent normalized → R2 (parents/normalized/nordpilates/{uuid}.mp4) | ~1s | |
+| INSERT assets row (with pre_normalized_r2_key) | <1s | |
+| Gemini Pro Files API upload + poll + analyze | 1:03 | 12/12 segments validated on 215.6s source |
+| 12 × (keyframe + CLIP + 720p trim + R2 + DB) | ~58s | ~5s/segment |
+| **Total end-to-end** | **~14 min** | |
+
+**Production verification (Step 5, 2026-04-16):**
+- `SELECT count(*), count(clip_r2_key), count(embedding) FROM asset_segments WHERE brand_id='nordpilates'` → 12 / 12 / 12. Zero partial-write failures.
+- Segment type distribution: 5 hold (avg q 8.0), 3 transition (5.3), 3 setup (5.0), 1 b-roll (7.0). No `exercise` segments — consistent with the low-motion yoga/pool content this particular clip contained.
+
+**Short-clip performance** (validated 2026-04-16 during sprint start on 22.9MB 3.9s source): 48s end-to-end. Confirms time dominance is Gemini Flash downscale + pre-normalize encode, both of which scale with source duration and bitrate. 20-60s short clips complete in 40-90s.
+
+**Side fixes delivered during W5 validation:**
+- `/ugc-ingest` Content-Length cap: 500MB → 2GB (commit `22e977e`). 500MB guard predated the streaming rewrite; RAM is ~64KB regardless of upload size. 4K HEVC at 3-4 min easily exceeds 500MB.
+- Upstash Redis: upgraded free → pay-as-you-go. Diagnosis: no regression; steady-state ~518k commands/mo driven entirely by ioredis keepAlive pings on 6 persistent connections, not a bug. Pay-as-you-go nets ~$1.20/mo at current volume.
+- n8n S8 `Send to VPS` timeout: 10 min → 30 min. HTTP was closing before 3-5 min 4K ingestions completed, causing false negatives (file stayed in source folder, VPS had actually succeeded). Re-queue on next S8 poll self-heals via the `(filename, brand_id)` dedup check. Synchronous-HTTP-for-long-work is a real architecture smell; async migration filed as Milestone 3.3 cleanup work.
+
+**Deferred from W5 (flagged for Milestone 3.3 cleanup):**
+- Legacy `analyzeClip` Gemini Flash call runs unconditionally on every ingestion. Populates legacy `assets` columns (content_type, mood, quality_score, description, usable_segments) that nothing in V2/Phase 3 reads for clip selection. Keep during Phase 2 rollback window; delete at 3.3 when Phase 2 CD path formally retires.
+- Async ingestion via BullMQ queue instead of synchronous HTTP. Filed as 3.3 cleanup.
+- `clip-analysis.ts` reads raw 4K (could read normalized 1080p post-W5 for faster color/motion/brightness). Minor.
+
+**Key discoveries during W5:**
+1. **Candidate 1 slot-in was the right call** (Step 0 inspection). Between raw R2 upload and `assets` INSERT. Zero contract changes to r2_key semantics, natural path for downstream consumers to pick up the normalized version.
+2. **Sibling over parameterized** for parent-normalizer. `buildNormalizeCommand` has render-time concerns (CRF 18, preset slow, loudnorm) baked in; parameterizing would have muddled its purpose. Sibling in `parent-normalizer.ts` at 74 lines.
+3. **Duplicate dedup + timeout misalignment.** S8's 10-min HTTP timeout combined with 14-min ingestion produced false-negative "failed" executions that self-healed via next-cycle dedup. Correct system behavior, but observability was confusing. 30-min timeout resolves it.
+4. **Brand ≠ content-fit.** Gemini Flash classifies each clip's content (lifestyle, workout, etc). S8 pipes based on filename prefix, not content. A lifestyle clip filed under nordpilates still ingests as nordpilates — flagged for operator discipline at sprint time, not a system bug.
+
+---
+
 ## 12. Quality Roadmap
 
 ### Philosophy
@@ -382,26 +488,30 @@ Real UGC authenticity is the product. Goal: "authentic UGC that outperforms manu
 - **Phase 2 production validation** — First V2 video rendered, rated 4-5/10, diagnosis complete
 - **Phase 2 cleanup** — Retry helper, Zod corrective on V2, full_brief column, V2 prompt soft variety, S1 runaway loop fix. Tagged `phase2-complete`.
 - **Phase 3 W1 — Creative Director rewrite** ✅ SHIPPED (2026-04-15, behind ENABLE_PHASE_3_CD flag, default false). Smoke validated 6/6 Zod + 6/6 signal mapping. Tagged `phase3-w1-complete`.
+- **Phase 3 W5 — Clean-slate ingestion + pre-normalization** ✅ SHIPPED (2026-04-16, commit `f1b8120`, tag `phase3-w5-complete`). preNormalizeParent() live; ingestion writes 1080p normalized parent to R2. Clean-slate drop of old 53/182 library. First production ingestion verified (12 segments, 14min end-to-end on 986MB 4K source).
 
 ### In Progress / Next
 
-**Phase 3 W5** (next workstream per operator decision, 2026-04-15):
-- Pre-normalize parent clips to 1080p H.264 at ingestion
-- Migration 007 adds `pre_normalized_r2_key` to assets
-- Drop existing 182 segments (clean-slate)
-- Independent of W2/W3/W4
-
-**Content sprint** (post-W5):
-- Ingest 15-20 more nordpilates ab/core UGC clips through new pipeline
-- Operator work; agent helps script bulk ingestion
-- Unblocks library content ceiling on nordpilates abs videos
+**Content sprint** (running 2026-04-16):
+- Operator drops 50-100 nordpilates UGC clips through new W5 pipeline
+- Expected ~3-6 hours wall time for short clips (20-60s dominant)
+- Fills library with segments for first Phase 3 production video (post-W4)
 
 **Phase 3 W2/W3/W4** (after content sprint):
-- W2: Curator V2 reads aesthetic_guidance + creative_vision
-- W3: Copywriter generates per-slot overlay text
-- W4: Remotion parameterized composition (largest)
+- W2: Curator V2 reads aesthetic_guidance + creative_vision (1-2 sessions)
+- W3: Copywriter generates per-slot overlay text (1-2 sessions)
+- W4: Remotion parameterized composition (4-6 sessions, largest)
 
 **Milestone 3.3 — flag flip + first Phase 3 production video** when W2/W3/W4 done. Success criterion: 8 of 10 consecutive Phase 3 videos approved.
+
+**3.3 cleanup bundle (deferred work to group at milestone):**
+- Delete Phase 2 CD path (`generateBriefPhase2`, `creative-director-phase2.md`)
+- Delete legacy `analyzeClip` Gemini Flash call + legacy `assets` row columns nothing reads
+- Migrate `/ugc-ingest` from synchronous HTTP to BullMQ-queued async (fixes n8n timeout root cause)
+- Delete `selectVideoType()` and slim `VIDEO_TYPE_CONFIGS`
+- Delete old Remotion template variants
+- Migrate `ENABLE_CURATOR_V2` from `process.env` to `env.ts` pattern for consistency
+- Revisit `clip-analysis.ts` reading normalized parent instead of raw 4K (free speedup)
 
 ### Tier 3 (Month 2)
 
@@ -476,17 +586,21 @@ Real UGC authenticity is the product. Goal: "authentic UGC that outperforms manu
 
 | Priority | Issue | Status |
 |---|---|---|
-| Medium | Library content gap on nordpilates ab/core exercises | Content sprint (post-W5) |
+| Medium | Library content gap on nordpilates | **Content sprint in progress (2026-04-16+). 50-100 clips through new W5 pipeline.** |
 | Medium | Phase 3 brief operator visibility (throws before DB write) | Acceptable for 3.1 validation window; resolves at W2/W3/W4 ship |
 | Medium | S3 QA Decision v1 has old bugs | Pending v2 rebuild before first `delivered` |
 | Medium | All videos use same template (Phase 2 path) | Phase 3 W4 (parameterized composition) |
-| Low | Render time variance (6-17 min on clip prep) | Phase 3 W5 pre-normalization |
+| Medium | Legacy `analyzeClip` Gemini Flash runs on every ingestion populating unused assets columns | Defer to Milestone 3.3 cleanup (Phase 2 rollback path preserved until 3.3 flag flip) |
+| Medium | `/ugc-ingest` is synchronous HTTP — 3-5 min 4K clips exceed n8n timeout | Timeout raised to 30 min as workaround; async BullMQ migration deferred to Milestone 3.3 |
+| Low | Render time variance (6-17 min on clip prep) | **Resolved by Phase 3 W5** pre-normalization — clips now cut from 1080p normalized parent |
 | Low | job_events null to_status on some error paths | Minor logging fix |
 | Low | Upstash token leaked in chat history | Rotate before public production |
+| Low | Brand-content fit not enforced | Filename prefix → brand mapping; Gemini Flash classifies content but ingestion doesn't block on mismatch. Operator discipline at sprint time. |
 | Low | VPS `package-lock.json` drifts between deploys | Worked around with stash, persistent friction |
 | Low | Music tagging only has energy_level + mood, no audience suitability | Tier 3 |
 | Low | Curator V2 ENABLE_CURATOR_V2 read pattern inconsistent with Phase 3 CD env.* pattern | Cleanup at Milestone 3.3 |
 | Low | Phase 3 prompt still emits `min_quality: 6-7` defaults | Re-evaluate post-W2 (Curator does its own scoring) |
+| Low | `clip-analysis.ts` processes raw 4K for color/motion/brightness | Free speedup available post-W5 by reading normalized parent; filed to 3.3 |
 
 **Resolved in Phase 1, 2, 2.5, cleanup:** see v4.0 archive.
 
@@ -496,19 +610,26 @@ Real UGC authenticity is the product. Goal: "authentic UGC that outperforms manu
 - ✅ runPlanning was dropping video_type column (W1 fixed)
 - ✅ planJob() dead code (deleted in W1)
 
+**Resolved in Phase 3 W5:**
+- ✅ Render-time clip prep slow (6-17 min) — segments now cut from 1080p normalized parent already on R2
+- ✅ Segment analysis inconsistency on varying source formats — Gemini Pro now always sees 1080×1920 30fps H.264
+- ✅ `/ugc-ingest` 500MB cap blocking realistic 4K uploads — raised to 2GB (streaming keeps RAM flat)
+- ✅ 53 parent / 182 segment library held stale Phase 1 analysis — dropped and re-ingested through new pipeline
+
 ---
 
-## 15. File Structure (post-W1)
+## 15. File Structure (post-W1 + W5)
 
 ```
 src/
 ├── config/          — env.ts (incl. ENABLE_PHASE_3_CD), supabase.ts, redis.ts, r2.ts
-├── types/           — database.ts (incl. Phase3CreativeBrief, BriefSegment, color/transition/overlay enums), video-types.ts
+├── types/           — database.ts (incl. Phase3CreativeBrief, BriefSegment, color/transition/overlay enums, Asset.pre_normalized_r2_key — W5), video-types.ts
 ├── lib/             — ffmpeg.ts, gemini.ts (Flash legacy),
 │                      gemini-segments.ts (Phase 1, Pro),
 │                      clip-embed.ts, keyframe-extractor.ts,
 │                      segment-processor.ts (Phase 1+2.5),
 │                      segment-trimmer.ts (Phase 2),
+│                      parent-normalizer.ts (Phase 3 W5: preNormalizeParent, 1080×1920 30fps H.264 CRF 22),
 │                      retry-llm.ts (Phase 2 cleanup, used by Phase 3 CD),
 │                      format-full-brief.ts (Phase 2 cleanup),
 │                      r2-storage.ts, job-manager.ts, exec.ts,
@@ -537,10 +658,13 @@ src/
 ├── scripts/         — backfill-segments.ts, backfill-segment-clips.ts,
 │                      apply-migration.ts (Phase 2 cleanup runner),
 │                      smoke-test-cd-phase3.ts (W1),
+│                      test-pre-normalize.ts (W5 smoke harness),
+│                      test-ingestion-w5.ts (W5 end-to-end verification),
+│                      clean-slate-nordpilates.ts (W5 clean-slate script),
 │                      test-clip.ts, test-segment-analyzer.ts,
 │                      test-segment-trimmer.ts, test-curator-v2.ts,
 │                      test-agents.ts, test-agents-live.ts, test-phase5.ts,
-│                      migrations/001 through 006,
+│                      migrations/001 through 007,
 │                      seed-brand.ts, upload-brand-logos.ts
 ├── index.ts         — HTTP API + BullMQ workers
 └── brands/          — nordpilates.json, ketoway.json, carnimeat.json
@@ -572,6 +696,10 @@ git stash push -m 'vps-lock-drift' package-lock.json && git checkout <branch> &&
 
 ## Recently Shipped
 
+### Phase 3 W5 (shipped 2026-04-16)
+
+Released as squashed commit `f1b8120` on `origin/main`, tagged `phase3-w5-complete`. Four-commit feature branch (`feat/phase3-w5-ingestion`) consolidated into one release. Pre-normalization pipeline live, clean-slate drop executed, first production ingestion verified. Side fixes: `/ugc-ingest` 2GB cap (`22e977e`), n8n S8 30-min timeout (workflow-side). Full details in §11.6.
+
 ### Phase 3 W1 (shipped 2026-04-15)
 
 Released as squashed commit `df6a326` on `origin/main`, tagged `phase3-w1-complete`. Five-commit feature branch (`feat/phase3-w1-cd`) consolidated into one release. Key outcomes documented in §11.5.
@@ -584,11 +712,11 @@ Released as squashed commit `269ff99` on `origin/main`, tagged `phase2-complete`
 
 ## 17. Document Status
 
-- This file (v5.0) replaces v4.0. Delete v4.0.
-- `MVP_PROGRESS (7).md` — current
-- `PHASE_3_DESIGN.md` — current, W1 marked shipped, W2-W5 planned
-- `SUPABASE_SCHEMA.md` — current
-- `VPS-SERVERS.md` — current (no W1 changes)
+- This file (v5.1) replaces v5.0. Delete v5.0.
+- `MVP_PROGRESS (8).md` — current (supersedes (7))
+- `PHASE_3_DESIGN.md` — current, W1 + W5 marked shipped, W2-W4 planned
+- `SUPABASE_SCHEMA.md` — current (migration 007 applied)
+- `VPS-SERVERS.md` — current (no W5 changes)
 - `PHASE_2_CURATOR_BRIEF.md` — historical (fully implemented)
 - `INGESTION_OVERHAUL_AGENT_BRIEF.md` — historical (Phase 1)
 - `HANDOFF.md` — Day 4 context, historical

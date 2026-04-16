@@ -1,7 +1,7 @@
 # Phase 3 Design
 
-**Status:** W1 shipped 2026-04-15 (commit `df6a326`, tag `phase3-w1-complete`). W2-W5 planned.
-**Last updated:** 2026-04-15
+**Status:** W1 shipped 2026-04-15 (commit `df6a326`, tag `phase3-w1-complete`). W5 shipped 2026-04-16 (commit `f1b8120`, tag `phase3-w5-complete`). W2-W4 planned.
+**Last updated:** 2026-04-16
 **Supersedes:** Phase 3 sketch in MVP_PROGRESS (6).md
 **Foundation document:** All Phase 3 agent briefs reference this doc
 
@@ -237,28 +237,44 @@ Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is inde
 
 **Estimated:** 4-6 agent sessions. Largest workstream.
 
-### W5 — Clean-slate ingestion + pre-normalization ⏳ NEXT
+### W5 — Clean-slate ingestion + pre-normalization ✅ SHIPPED
 
-**Per operator decision (2026-04-15): W5 ships next, before W2/W3/W4.** Independent of the rendering critical path; unblocks content sprint with new pre-normalized pipeline.
+**Shipped:** 2026-04-16. Commit `f1b8120` on main, tag `phase3-w5-complete`. Four-step branch (`feat/phase3-w5-ingestion`) squash-merged from laptop.
 
-**Files to touch:**
-- `src/lib/segment-trimmer.ts` — extend to also output a 1080p normalized version of the parent clip
-- `src/scripts/migrations/007_pre_normalized_clips.sql` — add column for pre-normalized clip references
-- `src/workers/ingestion.ts` — call new pre-normalization step on every new ingestion
+**Files touched:**
+- `src/lib/parent-normalizer.ts` — NEW (74 lines). `preNormalizeParent()` — sibling to existing `buildNormalizeCommand` (kept for render-time use). FFmpeg: 1080×1920 30fps H.264 CRF 22 medium, AAC 128k 44.1k stereo, `scale+pad+fps` filter chain.
+- `src/scripts/migrations/007_pre_normalized_clips.sql` — NEW. Adds `pre_normalized_r2_key TEXT` nullable to `assets`. No default, no backfill.
+- `src/workers/ingestion.ts` — pre-normalization step inserted between raw R2 upload and `assets` INSERT. Downstream (Gemini Pro segment analyzer, keyframe extraction, segment trim) reads the normalized local path. Orphan raw cleanup on pre-normalize failure.
+- `src/types/database.ts` — `Asset.pre_normalized_r2_key?: string | null`
+- `src/scripts/test-pre-normalize.ts` — NEW (77 lines). Standalone smoke harness + `npm run test:pre-normalize`.
+- `src/scripts/test-ingestion-w5.ts` — NEW (129 lines). End-to-end /ugc-ingest verification harness.
+- `src/scripts/clean-slate-nordpilates.ts` — NEW (147 lines). Scripted DB + R2 wipe + `npm run clean-slate:nordpilates`.
 
-**Architecture:**
-- On ingestion, parent clip downloaded
-- ffmpeg pre-normalizes to 1080p H.264 with consistent settings (resolution, color profile, audio rate)
-- Normalized version uploaded to R2 at `parents/normalized/{brand}/{asset_id}.mp4`
-- Segment-trimmer runs against normalized version (instead of original)
-- All `clip_r2_key` references in `asset_segments` point to segments cut from normalized parents
-- Render-time clip prep (the slow 6-17 min step) becomes ~1 min because clips are already at render resolution
+**Architecture (as shipped):**
+- On ingestion, parent clip streamed to `/tmp/ugc-ingest/{uuid}.{ext}` (RAM ~64KB, 2GB cap).
+- Raw parent uploaded to R2 first (archival) at `assets/{brand}/{uuid}.{ext}`.
+- `preNormalizeParent()` runs ffmpeg to 1080×1920 30fps H.264 CRF 22 medium → uploads to R2 at `parents/normalized/{brand}/{asset_id}.mp4`.
+- `assets` INSERT populates `pre_normalized_r2_key` from start (no UPDATE dance).
+- Segment analyzer + keyframe extractor + 720p segment trim all read the normalized local path.
+- All `clip_r2_key` references in `asset_segments` now point to segments cut from 1080p normalized parents.
+- Hard-required: throw on pre-normalize failure (after best-effort cleanup of orphan raw R2 key). No soft-fallback.
 
-**Clean-slate scope:** The existing 182 nordpilates segments are dropped. Operator (or content sprint when unblocked) re-uploads new content through the new pipeline. No migration of existing content.
+**Clean-slate scope (executed 2026-04-16):**
+- 53 nordpilates assets + 182 segments (cascade) dropped from DB.
+- R2 purged: `assets/nordpilates/`, `segments/nordpilates/`, `keyframes/nordpilates/`, `parents/normalized/nordpilates/`.
+- Also: carnimeat test debris (3 test UUIDs from Step 2/3 validation runs) swept.
 
-**Risk:** ffmpeg normalization is deterministic but slow (1-3 min per parent clip). Mitigation: one-time per-clip cost paid at ingestion (not per-render), so total compute is much lower than current per-render approach.
+**First production ingestion (Step 5 verification, 2026-04-16):** 12 segments from 986MB 4K 3:36 source in ~14 min. 48s for a 22.9MB/3.9s short clip. All segment rows had `clip_r2_key` + `embedding` populated.
 
-**Estimated:** 1-2 agent sessions.
+**Side fixes delivered during W5:**
+- `/ugc-ingest` Content-Length cap raised 500MB → 2GB (commit `22e977e`). 500MB predated the streaming rewrite.
+- Upstash Redis: upgraded free → pay-as-you-go after hitting 543k/500k free tier. Diagnosis: no bug; keepAlive pings on 6 persistent connections account for ~518k/mo.
+- n8n S8 `Send to VPS` timeout raised 10 min → 30 min (workflow-side change). HTTP was closing before 3-5min 4K ingestions completed.
+
+**Deferred from W5 (filed for Milestone 3.3 cleanup):**
+- Legacy `analyzeClip` Gemini Flash call deletion (flagged dead-ish in Step 0 inspection)
+- Async ingestion via BullMQ queue (replacing synchronous HTTP; addresses timeout root cause)
+- `clip-analysis.ts` reading normalized parent instead of raw 4K (free speedup)
 
 ---
 
@@ -279,16 +295,14 @@ Phase 3 ships in three milestones.
 
 **Estimated for W2+W3:** 2-4 agent sessions.
 
-### Milestone 3.2 — Clean-slate ingestion (parallel, independent) ⏳ NEXT
+### Milestone 3.2 — Clean-slate ingestion (parallel, independent) ✅ SHIPPED
 
-**Includes:** W5
+**Includes:** W5 ✅
 **Deliverable:** New ingestion path that pre-normalizes parent clips. New uploads use new pipeline. Existing 182 segments dropped.
 
-**Per operator decision (2026-04-15), this milestone ships next** — before W2/W3 — to unblock content sprint with new pipeline.
+**Shipped 2026-04-16.** Content sprint in progress — operator dropping 50-100 nordpilates UGC clips through new pipeline.
 
-**Testable:** Upload one new clip, verify pre-normalization happens, verify segments table has new entries with `clip_r2_key` pointing at 1080p normalized sources.
-
-**Estimated:** 1-2 agent sessions.
+**Verified:** First production ingestion completed end-to-end (12 segments, `pre_normalized_r2_key` populated, segments derived from 1080p normalized parent, not raw 4K).
 
 ### Milestone 3.3 — Remotion + production flip ⏳ PLANNED
 
@@ -361,7 +375,7 @@ CD signal-mapping in Phase 3 prompt picks video_type from the brand's allowed li
 | # | Migration file | Status | Purpose |
 |---|---|---|---|
 | 006 | `006_brand_configs_color_treatments.sql` | ✅ Applied 2026-04-15 (Phase 3 W1) | Add `allowed_color_treatments TEXT[]` to brand_configs. Backfill nordpilates and carnimeat. |
-| 007 | `007_pre_normalized_clips.sql` | ⏳ Phase 3 W5 | Add `pre_normalized_r2_key TEXT` to assets table |
+| 007 | `007_pre_normalized_clips.sql` | ✅ Applied 2026-04-16 (Phase 3 W5) | Add `pre_normalized_r2_key TEXT` to assets table |
 
 Migrations 008+ as needed during W2/W3/W4. Migration runner from Phase 2 cleanup (`apply_migration_sql` RPC + `apply-migration.ts`) handles all.
 
@@ -402,15 +416,15 @@ Once W2+W3 ship and the Phase 3 path stops throwing at downstream, briefs will l
 
 ---
 
-## Estimated total effort (post-W1)
+## Estimated total effort (post-W1 + W5)
 
 - W1: ✅ DONE (took 6 agent sessions over 1 day)
+- W5: ✅ DONE (took 5 agent sessions over 1 day, including clean-slate + side fixes)
 - W2: 1-2 sessions
 - W3: 1-2 sessions
 - W4: 4-6 sessions
-- W5: 1-2 sessions
 
-**Remaining: 7-12 agent sessions across 1.5-2.5 weeks.** Plus operator validation time post-3.3 to hit the 10-video success threshold.
+**Remaining: 6-10 agent sessions across 1-2 weeks.** Plus operator validation time post-3.3 to hit the 10-video success threshold.
 
 ---
 
@@ -423,12 +437,14 @@ Once W2+W3 ship and the Phase 3 path stops throwing at downstream, briefs will l
 - **`min_quality` per-slot defaults** — Phase 3 CD anchored on 6-7 in smoke. Curator V2 has its own scoring; re-evaluate after W2 ships whether the prompt should specify defaults.
 - **`brand_configs.allowed_video_types` for ketoway/nodiet** — kept at MVP single-type defaults. Update when those brands begin Phase 3 production.
 - **`brand_configs.allowed_color_treatments` for welcomebaby/nodiet/ketoway/highdiet** — currently NULL. Backfill when those brands begin Phase 3 production.
+- **Legacy `analyzeClip` Gemini Flash cleanup** — runs on every ingestion populating legacy columns nothing reads. Defer to Milestone 3.3 (stays for Phase 2 rollback path).
+- **Async ingestion via BullMQ** — synchronous HTTP for 3-15 min work is an architecture smell. 30-min n8n timeout as interim workaround. Filed to Milestone 3.3.
 
 ---
 
 ## Document status
 
-- This doc — Phase 3 master design, source of truth. W1 marked shipped, W2-W5 planned.
-- `VIDEO_PIPELINE_ARCHITECTURE_v5_0.md` — architecture reference, current.
-- `MVP_PROGRESS (7).md` — living progress tracker, current.
-- `SUPABASE_SCHEMA.md` — DB schema reference, current (migration 006 applied).
+- This doc — Phase 3 master design, source of truth. W1 + W5 marked shipped, W2-W4 planned.
+- `VIDEO_PIPELINE_ARCHITECTURE_v5_1.md` — architecture reference, current.
+- `MVP_PROGRESS (8).md` — living progress tracker, current.
+- `SUPABASE_SCHEMA.md` — DB schema reference, current (migrations 006 + 007 applied).

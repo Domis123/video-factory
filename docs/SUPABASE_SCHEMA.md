@@ -2,11 +2,11 @@
 
 **Project:** Video Factory
 **Supabase URL:** `https://kfdfcoretoaukcoasfmu.supabase.co`
-**Last updated:** 2026-04-15
+**Last updated:** 2026-04-16
 **Status:** Mixed — some tables fully verified via SQL inspection, others inferred from code/migrations
 
 **Verification key:**
-- ✅ Verified via `information_schema.columns` query
+- ✅ Verified via `information_schema.columns` query or production query
 - ⚠️ Inferred from code/migrations, needs verification
 - 🔮 Speculative, derived from filename or single reference
 
@@ -115,14 +115,20 @@ Audit log of state transitions per job. Useful for debugging timing, retry analy
 
 ---
 
-## ⚠️ asset_segments (inferred, partially verified via Phase 1/2 work)
+## ⚠️ asset_segments (inferred, partially verified via Phase 1/2/W5 work)
 
-Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment analyzer at ingestion time. **0 rows as of 2026-04-16 (clean-slated for W5 re-ingestion; was 182 rows for nordpilates through Phase 2.5).**
+Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment analyzer at ingestion time.
+
+**Row count post-W5 clean-slate + first sprint ingestion (2026-04-16):**
+- 12 rows for nordpilates (first W5 production ingestion verified via production query 2026-04-16)
+- Additional rows accruing through 2026-04-16+ content sprint
+
+**Pre-W5:** 182 rows for nordpilates. All dropped via cascade on 2026-04-16.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid | PK |
-| `asset_id` | uuid | FK to assets.id (parent clip) |
+| `asset_id` | uuid | FK to assets.id (parent clip). **ON DELETE CASCADE verified 2026-04-16.** |
 | `brand_id` | varchar | FK to brand_configs.brand_id |
 | `start_s` | numeric | Start timestamp in parent clip |
 | `end_s` | numeric | End timestamp in parent clip |
@@ -133,20 +139,20 @@ Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment
 | `quality_score` | int | 1-10, Gemini's quality assessment |
 | `tags` | text[] | 5-10 visual tags |
 | `embedding` | vector(512) | CLIP ViT-B/32 embedding |
-| `clip_r2_key` | text | **Phase 2.5:** R2 path to pre-trimmed segment clip (~720p). Populated for all 182 rows. |
+| `clip_r2_key` | text | **Phase 2.5 + W5:** R2 path to 720p CRF 28 segment clip. Post-W5: cut from 1080p normalized parent (not raw 4K). |
 | `created_at` | timestamptz | |
 
-**Phase 3 W5 (2026-04-16):**
-- Clean-slated 182 rows (Architecture Rule 28). Re-ingestion through pre-normalized pipeline will populate new rows where `clip_r2_key` points at clips trimmed from 1080p normalized parents.
+**Post-W5 behavior:** all new `clip_r2_key` values point at clips trimmed from 1080p normalized parents. Post-W5 first production ingestion verified 12/12 rows have `clip_r2_key` + `embedding` populated (zero partial-write failures).
 
 **Indexes:**
 - `embedding` previously had ivfflat index, was DROPPED at small table size (Architecture Rule 23). Sequential scan is faster until ~1000 rows.
+- **After content sprint completes and library grows past ~1000 rows, revisit ivfflat recreation with `lists ≈ rows/1000`.**
 
 **RPC:** `match_segments(query_embedding TEXT, brand_filter TEXT, type_filter TEXT[], limit INT, candidates INT)` — see migration 005.
 
 ---
 
-## ⚠️ assets (inferred, parent UGC clips)
+## ✅ assets (partially verified 2026-04-16, post-W5)
 
 Parent UGC video files uploaded to R2.
 
@@ -154,15 +160,19 @@ Parent UGC video files uploaded to R2.
 |---|---|---|
 | `id` | uuid | PK |
 | `brand_id` | varchar | FK to brand_configs.brand_id |
-| `r2_key` | text | R2 path to original parent file |
-| `pre_normalized_r2_key` | text | ✅ **Added 2026-04-16 via migration 007 (Phase 3 W5).** R2 path to 1080p H.264 normalized version |
+| `r2_key` | text | R2 path to original raw parent file (archival). `assets/{brand_id}/{uuid}.{ext}` |
+| `pre_normalized_r2_key` | text | ✅ **Added 2026-04-16 via migration 007 (Phase 3 W5).** R2 path to 1080×1920 30fps H.264 normalized version. `parents/normalized/{brand_id}/{uuid}.mp4`. NULL on pre-W5 rows (none currently — all dropped in clean-slate). |
 | `filename` | text | Original filename |
-| `duration_s` | numeric | Total duration |
-| `analyzed_at` | timestamptz | When Gemini Flash analyzed it (legacy ingestion) |
-| `analysis` | jsonb | Legacy Gemini Flash analysis |
+| `duration_s` | numeric | Total duration (column exists but note: actual column name in production schema may be `duration_seconds` — needs verification) |
+| `analyzed_at` | timestamptz | When Gemini Flash analyzed it (legacy ingestion — scheduled for removal at Milestone 3.3) |
+| `analysis` | jsonb | Legacy Gemini Flash analysis (scheduled for removal at Milestone 3.3) |
 | `created_at` | timestamptz | |
 
-**0 rows as of 2026-04-16 (clean-slated for W5 re-ingestion; was 53 rows for nordpilates through Phase 2.5).**
+**Row count post-W5 clean-slate + first sprint ingestion:**
+- 1 nordpilates asset (`22dba651-c4a9-4a51-a97a-9fa95cf3a208`, NP_concept_17.MOV, ingested 2026-04-16)
+- Additional rows accruing through 2026-04-16+ content sprint
+
+**Pre-W5:** 53 nordpilates rows. All deleted via clean-slate script (`DELETE FROM assets WHERE brand_id='nordpilates'`; cascade dropped 182 asset_segments rows). Re-ingesting through new W5 pipeline.
 
 ---
 
@@ -277,7 +287,7 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | 004 | `004_add_full_brief_column.sql` | Applied (Phase 2 cleanup) | Add full_brief (numbering collision; touches different table — no conflict) |
 | 005 | `005_match_segments_with_clip_key.sql` | Applied | Updated RPC (DROP+CREATE per Architecture Rule 22) |
 | 006 | `006_brand_configs_color_treatments.sql` | ✅ **Applied 2026-04-15 (Phase 3 W1)** | Add allowed_color_treatments TEXT[] + backfill nordpilates and carnimeat |
-| 007 | `007_pre_normalized_clips.sql` | ✅ **Applied 2026-04-16 (Phase 3 W5)** | Add pre_normalized_r2_key TEXT to assets |
+| 007 | `007_pre_normalized_clips.sql` | ✅ **Applied 2026-04-16 (Phase 3 W5)** | Add pre_normalized_r2_key TEXT to assets. Nullable, no default, no backfill (clean-slate drop). |
 
 ---
 
@@ -286,8 +296,9 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | Date | Change | Reason |
 |---|---|---|
 | 2026-04-15 | `brand_configs.allowed_video_types` updated for nordpilates, carnimeat, highdiet to multi-type arrays | MVP single-type lock was simplicity, not strategy. Updated to enable Phase 3 video_type variety. |
-| 2026-04-15 | `jobs.brief_summary` backfilled to new `{video_type} | {template_id} | {duration}s | {N} segments` format for ~6 historical rows | Format alignment after W1 changed `runPlanning`'s output format. |
-| 2026-04-16 | Clean-slate: `DELETE FROM assets WHERE brand_id='nordpilates'` (53 rows, cascade deleted 182 asset_segments). All nordpilates + carnimeat test R2 objects deleted (434 objects across 8 prefixes). | Phase 3 W5 — Architecture Rule 28. Content sprint will re-ingest through pre-normalized pipeline. |
+| 2026-04-15 | `jobs.brief_summary` backfilled to new `{video_type} \| {template_id} \| {duration}s \| {N} segments` format for ~6 historical rows | Format alignment after W1 changed `runPlanning`'s output format. |
+| 2026-04-16 | **Clean-slate drop (W5):** `DELETE FROM assets WHERE brand_id='nordpilates'` (53 rows → 0, cascade dropped 182 `asset_segments` rows) | Pre-sprint cleanup per Architecture Rule 28. Scripted via `src/scripts/clean-slate-nordpilates.ts`. |
+| 2026-04-16 | **R2 prefix deletion (W5):** purged `assets/nordpilates/`, `segments/nordpilates/`, `keyframes/nordpilates/`, `parents/normalized/nordpilates/` + carnimeat test debris | Mirror of DB clean-slate. Same script as above. |
 
 ---
 
