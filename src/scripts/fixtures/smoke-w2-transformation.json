@@ -1,0 +1,170 @@
+{
+  "brief_id": "4511ec1a-9300-4c14-845a-dd702ecc33b4",
+  "brand_id": "nordpilates",
+  "video_type": "transformation",
+  "composition_id": "phase3-parameterized-v1",
+  "total_duration_target": 34,
+  "caption_preset": "nordpilates_default",
+  "idea_seed": "what a week of daily pilates actually felt like",
+  "vibe": "honest transformation journey, day-by-day discovery",
+  "creative_direction": {
+    "creative_vision": "An authentic day-by-day pilates journey that builds from tentative first attempts to genuine confidence. The video should feel honest rather than perfect, showing real moments of discovery and gradual ease with movement. Warm natural progression with a satisfying realization at the end.",
+    "slot_count": 5,
+    "energy_per_slot": [
+      6,
+      4,
+      5,
+      7,
+      8
+    ],
+    "color_treatment": "natural"
+  },
+  "segments": [
+    {
+      "type": "hook",
+      "label": "hook-promise",
+      "pacing": "medium",
+      "cut_duration_target_s": 4,
+      "transition_in": "hard-cut",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "bold-center",
+        "position": "center",
+        "animation": "pop-in",
+        "char_target": 38
+      },
+      "clip_requirements": {
+        "mood": "curious",
+        "has_speech": true,
+        "min_quality": 7,
+        "content_type": [
+          "talking-head"
+        ],
+        "visual_elements": [
+          "person",
+          "studio"
+        ],
+        "aesthetic_guidance": "Speaker in soft natural studio light with slight uncertainty in expression, authentic setup that suggests beginning of an experiment."
+      }
+    },
+    {
+      "type": "body",
+      "label": "day-1-awkward",
+      "pacing": "slow",
+      "cut_duration_target_s": 7,
+      "transition_in": "crossfade",
+      "internal_cut_style": "soft-cuts",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-left",
+        "animation": "fade",
+        "char_target": 16
+      },
+      "clip_requirements": {
+        "mood": "tentative",
+        "has_speech": false,
+        "min_quality": 6,
+        "content_type": [
+          "exercise",
+          "b-roll"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Raw clips of first attempts at basic pilates moves, slight wobbling, checking form, honest beginner energy in natural morning light."
+      }
+    },
+    {
+      "type": "body",
+      "label": "mid-week-building",
+      "pacing": "medium",
+      "cut_duration_target_s": 8,
+      "transition_in": "slide",
+      "internal_cut_style": "soft-cuts",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-left",
+        "animation": "slide-up",
+        "char_target": 20
+      },
+      "clip_requirements": {
+        "mood": "determined",
+        "has_speech": false,
+        "min_quality": 6,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Mid-week clips showing slightly more fluid movement, focus on controlled breathing, growing comfort with the routine."
+      }
+    },
+    {
+      "type": "body",
+      "label": "day-7-flow",
+      "pacing": "medium",
+      "cut_duration_target_s": 8,
+      "transition_in": "zoom",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "minimal",
+        "position": "bottom-center",
+        "animation": "fade",
+        "char_target": 18
+      },
+      "clip_requirements": {
+        "mood": "flowing",
+        "has_speech": false,
+        "min_quality": 7,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Single fluid sequence by day seven showing smooth transitions and natural breath rhythm, warm afternoon light."
+      }
+    },
+    {
+      "type": "cta",
+      "label": "realization-close",
+      "pacing": "slow",
+      "cut_duration_target_s": 7,
+      "transition_in": "fade-from-black",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "bold-center",
+        "position": "center",
+        "animation": "type-on",
+        "char_target": 35
+      },
+      "clip_requirements": {
+        "mood": "satisfied",
+        "has_speech": true,
+        "min_quality": 7,
+        "content_type": [
+          "talking-head",
+          "lifestyle"
+        ],
+        "visual_elements": [
+          "person"
+        ],
+        "aesthetic_guidance": "Speaker back to camera with genuine smile and relaxed posture, soft golden light, authentic moment of realization and satisfaction."
+      }
+    }
+  ],
+  "audio": {
+    "strategy": "music-primary",
+    "music": {
+      "mood": "gentle-build",
+      "tempo": "medium",
+      "energy_level": 6,
+      "volume_level": 0.28,
+      "pinned_track_id": null
+    }
+  }
+}
