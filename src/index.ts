@@ -157,8 +157,8 @@ const server = createServer(async (req, res) => {
     }
 
     // Safety net: reject oversized uploads before touching disk or the single-flight lock.
-    // 500MB allows 4K UGC (NP_concept_17.MOV was 986MB — that's too big, downscale upstream).
-    const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+    // 2GB cap — streaming keeps RAM ~64KB regardless of file size.
+    const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
     const contentLength = Number(req.headers['content-length'] ?? 0);
     if (contentLength > MAX_UPLOAD_BYTES) {
       console.warn(`[ugc-ingest] Rejected: content-length ${contentLength} exceeds ${MAX_UPLOAD_BYTES}`);
