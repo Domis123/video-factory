@@ -1,6 +1,6 @@
 # Phase 3 Design
 
-**Status:** Locked, pre-implementation
+**Status:** W1 shipped 2026-04-15 (commit `df6a326`, tag `phase3-w1-complete`). W2-W5 planned.
 **Last updated:** 2026-04-15
 **Supersedes:** Phase 3 sketch in MVP_PROGRESS (6).md
 **Foundation document:** All Phase 3 agent briefs reference this doc
@@ -11,15 +11,15 @@
 
 Eliminate the "every video feels the same" problem that surfaced after Phase 2 cleanup. The Phase 2 curator works correctly — it picks clips intentionally with reasoning. But every video still has the same structural shape, same color palette, same cut style, same vibe. That sameness comes from three sources:
 
-- The Creative Director makes the same structural decisions for every video (fixed 5 slots, single template, no creative variation)
-- The Remotion composition is hard-coded to one template with one set of visual choices
-- There's no concept of "vibe" or "creative direction" beyond mood + energy_level
+- The Creative Director makes the same structural decisions for every video (fixed 5 slots, single template, no creative variation) — **W1 SHIPPED, addresses this**
+- The Remotion composition is hard-coded to one template with one set of visual choices — W4 planned
+- There's no concept of "vibe" or "creative direction" beyond mood + energy_level — **W1 SHIPPED, addresses this (vibe param plumbing deferred to post-W1)**
 
 Phase 3 solves all three at once by giving the Creative Director open-ended creative freedom and rebuilding Remotion as a parameterized composition that renders whatever the CD describes.
 
 ## Success criterion
 
-8 of 10 consecutive Phase 3 production videos pass operator approval (`jobs.review_decision = 'approve'`). Tracked in the existing approval workflow.
+8 of 10 consecutive Phase 3 production videos pass operator approval (`jobs.review_decision = 'approve'`). Tracked in the existing approval workflow. **Cannot be measured until W4 ships and ENABLE_PHASE_3_CD + ENABLE_PHASE_3_REMOTION flip together at Milestone 3.3.**
 
 First test brand: nordpilates. Operator (Domis) will fix brand_config product/color drift before testing starts.
 
@@ -34,12 +34,12 @@ First test brand: nordpilates. Operator (Domis) will fix brand_config product/co
 
 ---
 
-## CD output schema (locked)
+## CD output schema (locked, ✅ shipped in W1)
 
-The Creative Director outputs the following structure on every brief generation. All fields required unless marked optional. Validated by Zod before downstream agents consume it.
+The Creative Director outputs the following structure on every brief generation. All fields required unless marked optional. Validated by Zod before downstream agents consume it. Implemented in `src/agents/creative-director-phase3-schema.ts`.
 
 ```typescript
-interface CreativeBrief {
+interface Phase3CreativeBrief {
   // Identifiers + metadata
   brief_id: string;
   brand_id: string;
@@ -51,6 +51,7 @@ interface CreativeBrief {
   // Operator inputs (passed through from job)
   idea_seed: string;
   vibe: string | null;                               // free-text, optional, e.g. "gentle morning energy"
+                                                     // (NOTE: vibe param plumbing deferred from W1 — currently always null)
 
   // Creative direction (top-level)
   creative_direction: {
@@ -71,7 +72,7 @@ interface CreativeBrief {
 
     transition_in:
       | "hard-cut" | "crossfade" | "slide" | "zoom"
-      | "whip-pan" | "fade-from-black";              // slot 0 defaults to fade-from-black
+      | "whip-pan" | "fade-from-black";              // slot 0 typically fade-from-black or hard-cut
 
     internal_cut_style: "hold" | "hard-cuts" | "soft-cuts";
 
@@ -83,7 +84,7 @@ interface CreativeBrief {
         | "bottom-left" | "bottom-center" | "bottom-right";
       animation: "pop-in" | "slide-up" | "fade" | "type-on" | "none";
       char_target: number;                           // 10-60, default 30
-      // text itself filled in by Copywriter, not CD
+      // text itself filled in by Copywriter (W3), not CD
     };
 
     clip_requirements: {
@@ -110,15 +111,15 @@ interface CreativeBrief {
 }
 ```
 
-### Schema design principles
+### Schema design principles (validated by W1 ship)
 
-The schema bakes in five principles from the Phase 3 design session:
+The schema bakes in five principles from the Phase 3 design session. All five held up through W1 implementation and smoke validation:
 
-1. **Hybrid structured + free-text everywhere it matters.** Structured fields for code (Remotion needs numbers, validators need enums). Free-text fields for LLM nuance (creative_vision, aesthetic_guidance). Each does what the other can't.
-2. **Open creative range over predictability.** 3-12 slot range, 8 color treatments, 6 transition_in vocabulary. Wider than strictly necessary because Phase 3 explicitly trades operational predictability for creative variety.
-3. **Vibe as guidance, not constraint.** Operator vibe input is strong direction but CD can push back when idea_seed contradicts (Field 1 decision).
-4. **Brand consistency through small surface area.** Logo, color palette restrictions, caption preset are brand-locked. Everything else is free-form per video. Brand identity protected, creative freedom preserved.
-5. **Polish features deferred.** Beat-locked music, per-slot music intensity, overlay timing — all parked. Phase 3 fixes the variety problem first, polishes second.
+1. **Hybrid structured + free-text everywhere it matters.** Structured fields for code (Remotion needs numbers, validators need enums). Free-text fields for LLM nuance (creative_vision, aesthetic_guidance). W1 smoke confirmed `aesthetic_guidance` produces specific, actionable per-slot direction.
+2. **Open creative range over predictability.** 3-12 slot range, 8 color treatments, 6 transition_in vocabulary. W1 v3 smoke produced 4 unique slot_counts (4, 5, 6, 8) and 5 unique color treatments across 6 briefs — confirming the wider range gets exercised.
+3. **Vibe as guidance, not constraint.** CD can push back when idea_seed contradicts. (Vibe param plumbing deferred from W1 — currently always null.)
+4. **Brand consistency through small surface area.** Logo, color palette restrictions, caption preset are brand-locked. Everything else is free-form per video.
+5. **Polish features deferred.** Beat-locked music, per-slot music intensity, overlay timing — all parked.
 
 ---
 
@@ -126,33 +127,39 @@ The schema bakes in five principles from the Phase 3 design session:
 
 Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is independent.
 
-### W1 — Creative Director rewrite
+### W1 — Creative Director rewrite ✅ SHIPPED
+
+**Shipped:** 2026-04-15. Commit `df6a326` on main, tag `phase3-w1-complete`. Behind `ENABLE_PHASE_3_CD` flag (default false).
 
 **Files touched:**
-- `src/agents/creative-director.ts` — output schema, Zod validation
-- `src/agents/prompts/creative-director.md` — full prompt rewrite
-- `src/agents/context-packet.ts` — minor flow updates if needed
+- `src/agents/creative-director.ts` — Phase 2 logic preserved, renamed `generateBrief` → `generateBriefPhase2`, `generateMockBrief` → `generateMockBriefPhase2`, prompt path updated to `creative-director-phase2.md`
+- `src/agents/creative-director-phase3.ts` — NEW. 362 lines. Phase 3 generator with Zod corrective retry, placeholder guard, withLLMRetry wrapping
+- `src/agents/creative-director-phase3-schema.ts` — NEW. 121 lines. Zod schema with cross-field validation (energy_per_slot length matches slot_count, segments[0].type === 'hook'), type-equality assertion to keep manual interface and Zod schema in sync
+- `src/agents/creative-director-dispatch.ts` — NEW. 31 lines. Flag-gated routing, discriminated union return
+- `src/agents/prompts/creative-director.md` — Full rewrite, 462 lines, 4 example briefs (transformation-story, high-energy-listicle, calm-instructional, workout-demo), signal-mapping rules, variety nudges
+- `src/agents/prompts/creative-director-phase2.md` — NEW. 210 lines, restored from pre-W1 history for Phase 2 rollback path
+- `src/agents/context-packet.ts` — Imports dispatcher; Phase 3 path throws "downstream not yet shipped" until W2/W3/W4 ship
+- `src/types/database.ts` — Added Phase3CreativeBrief, Phase3BriefSegment, supporting type unions, allowed_color_treatments field on BrandConfig
+- `src/config/env.ts` — Added ENABLE_PHASE_3_CD flag, default false
+- `src/scripts/migrations/006_brand_configs_color_treatments.sql` — NEW. Adds allowed_color_treatments TEXT[] + backfills nordpilates and carnimeat
+- `src/scripts/smoke-test-cd-phase3.ts` — NEW. 289 lines. 6-fixture validation harness with signal-mapping correctness tracking
+- `src/workers/pipeline.ts` — Side fix: writes video_type column (was being dropped); standardized brief_summary format
+- `src/agents/context-packet.ts` — Side cleanup: deleted dead `planJob()` (zero callers per Step 0.5 verification)
 
-**Prompt design philosophy:**
-- CD reads brand_config, idea_seed, vibe (if provided), and a library overview (which segments exist, by content_type)
-- CD writes the creative_vision paragraph FIRST, structured fields SECOND, segments THIRD. Each step builds on the prior — vision shapes the structural fields, which shape the per-slot decisions.
-- Explicit instruction: when operator vibe contradicts idea_seed, prefer idea_seed but acknowledge the tension in creative_vision
-- Provide three example briefs across the spectrum (1 cozy/calm, 1 punchy/high-energy, 1 instructional/measured) so CD has a sense of the range
-- Schema constraints expressed in natural language with concrete examples, not raw JSON
+**Smoke test results (3 iterations):**
+- v3 final: 6/6 Zod first-attempt pass, 6/6 signal-mapping correct, 4 unique slot_counts, 5 unique color treatments, 0 color violations, $0.33 cost, 121s wall.
+- See `docs/VIDEO_PIPELINE_ARCHITECTURE_v5_0.md` §11.5 for full smoke comparison v1/v2/v3.
 
-**Validation:**
-- Zod schema enforces all enums and array lengths
-- `energy_per_slot.length === slot_count` enforced
-- `color_treatment` must be in `brand_config.allowed_color_treatments`
-- Slot 0 (`type: "hook"`) defaults `transition_in: "fade-from-black"` if CD picks something else
+**Deferred from W1 (planned for follow-up):**
+- Vibe param plumbing through CreativeDirectorPhase3Input (waits for S1 sheet column + Supabase column)
+- Sheet `Vibe` column position (probably right after Idea Seed)
+- S1 workflow update to pass Vibe through to Supabase
+- VIDEO_TYPE_CONFIGS slim (still read by Phase 2 path at runtime; deletion belongs at Milestone 3.3 cleanup)
+- Phase 2 CD Zod retrofit (not worth it; path will be deleted at Milestone 3.3)
 
-**Risk:** CD might generate incoherent briefs (creative_vision says "calm" but energy_per_slot is `[8,9,10,9,8]`). Mitigation: schema-aware corrective retry pattern from Phase 2 cleanup. If validation passes but coherence is bad in operator review, tighten the prompt and add validation rules iteratively.
+### W2 — Asset Curator V2 update ⏳ PLANNED
 
-**Estimated:** 2-3 agent sessions.
-
-### W2 — Asset Curator V2 update
-
-**Files touched:**
+**Files to touch:**
 - `src/agents/asset-curator-v2.ts` — read new fields from segment object
 - `src/agents/prompts/asset-curator-v2.md` — instruct Pro to consider creative_vision globally and aesthetic_guidance per-slot
 - `src/agents/curator-v2-retrieval.ts` — possibly augment retrieval query with aesthetic_guidance terms
@@ -166,9 +173,9 @@ Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is inde
 
 **Estimated:** 1-2 agent sessions.
 
-### W3 — Copywriter agent update
+### W3 — Copywriter agent update ⏳ PLANNED
 
-**Files touched:**
+**Files to touch:**
 - `src/agents/copywriter.ts` — output overlay text per slot, in addition to existing hooks/captions/CTAs
 - `src/agents/prompts/copywriter.md` — instructed to read creative_vision + per-slot text_overlay structure (style, position, char_target) + slot context (what's happening visually)
 
@@ -177,13 +184,13 @@ Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is inde
 - Each overlay respects the `char_target` set by CD.
 - Each overlay informed by slot content (clip description), style hint (e.g. "label" → terse exercise name; "bold-center" → punchy statement), and global creative_vision (tone consistency).
 
-**Risk:** Coordination between CD's structural decisions and Copywriter's text fills. Mitigation: Copywriter prompt explicitly references CD's per-slot constraints AND creative_vision. Validate by reviewing operator-facing briefs after generation.
+**Risk:** Coordination between CD's structural decisions and Copywriter's text fills. Mitigation: Copywriter prompt explicitly references CD's per-slot constraints AND creative_vision.
 
 **Estimated:** 1-2 agent sessions.
 
-### W4 — Remotion parameterized composition
+### W4 — Remotion parameterized composition ⏳ PLANNED
 
-**Files touched:**
+**Files to touch:**
 - `src/remotion/Composition.tsx` — full rewrite
 - `src/remotion/colorTreatments.ts` — new file, defines the 8 LUTs/CSS filters
 - `src/remotion/transitions.ts` — new file, implements all transition_in and internal_cut_style behaviors
@@ -211,8 +218,6 @@ Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is inde
 - `golden-hour`: `saturate(1.15) brightness(1.05) sepia(0.15) hue-rotate(-10deg)`
 - `clean-bright`: `saturate(0.95) brightness(1.15) contrast(1.05)`
 
-These are starting points. LUT files would be more accurate but more work. CSS filters are good enough for v1 and ship faster. Operator can request adjustments after first production runs.
-
 **Cut styles:**
 - `hold` — single clip, no internal cuts, full duration
 - `hard-cuts` — split clip into N internal cuts (N derived from energy_level), no transition between
@@ -221,20 +226,22 @@ These are starting points. LUT files would be more accurate but more work. CSS f
 **Transitions:**
 - `hard-cut` — 0-frame transition, instant
 - `crossfade` — 0.3-0.5s opacity blend
-- `slide` — directional swipe (default direction; can be parameterized later)
+- `slide` — directional swipe
 - `zoom` — scale + fade combo
 - `whip-pan` — fast horizontal motion blur (Remotion plugin or hand-rolled)
-- `fade-from-black` — for slot 0 only, fade in from black
+- `fade-from-black` — for slot 0 typically, fade in from black
 
 **Plugin policy:** OK to add npm dependencies like `@remotion/transitions` where they save significant implementation time. Hand-roll only when necessary.
 
 **Risk:** Remotion is a deep system and parameterized composition is much more code than templated composition. Mitigation: ship W4 in two sub-stages — first a "minimal Remotion that handles the core (slot count, color treatment, hard-cut transitions, hold internal style)", then iterate to add the rest.
 
-**Estimated:** 4-6 agent sessions. Largest workstream and biggest unknown.
+**Estimated:** 4-6 agent sessions. Largest workstream.
 
-### W5 — Clean-slate ingestion + pre-normalization
+### W5 — Clean-slate ingestion + pre-normalization ⏳ NEXT
 
-**Files touched:**
+**Per operator decision (2026-04-15): W5 ships next, before W2/W3/W4.** Independent of the rendering critical path; unblocks content sprint with new pre-normalized pipeline.
+
+**Files to touch:**
 - `src/lib/segment-trimmer.ts` — extend to also output a 1080p normalized version of the parent clip
 - `src/scripts/migrations/007_pre_normalized_clips.sql` — add column for pre-normalized clip references
 - `src/workers/ingestion.ts` — call new pre-normalization step on every new ingestion
@@ -249,7 +256,7 @@ These are starting points. LUT files would be more accurate but more work. CSS f
 
 **Clean-slate scope:** The existing 182 nordpilates segments are dropped. Operator (or content sprint when unblocked) re-uploads new content through the new pipeline. No migration of existing content.
 
-**Risk:** ffmpeg normalization is deterministic but slow (1-3 min per parent clip). Mitigation: one-time per-clip cost paid at ingestion (not per-render), so total compute is much lower than current per-render approach. At 50-100 new clips per content sprint, total normalization time is manageable in batches.
+**Risk:** ffmpeg normalization is deterministic but slow (1-3 min per parent clip). Mitigation: one-time per-clip cost paid at ingestion (not per-render), so total compute is much lower than current per-render approach.
 
 **Estimated:** 1-2 agent sessions.
 
@@ -257,40 +264,36 @@ These are starting points. LUT files would be more accurate but more work. CSS f
 
 ## Milestones
 
-Phase 3 ships in three milestones. Each is independently deployable and testable.
+Phase 3 ships in three milestones.
 
-### Milestone 3.1 — CD + downstream agents (behind feature flag)
+### Milestone 3.1 — CD + downstream agents (behind feature flag) ⏳ PARTIAL
 
-**Includes:** W1, W2, W3
-**Deliverable:** Brief generation produces new-schema briefs. Old Remotion ignores the new schema and either renders the old way or skips rendering entirely (both behind flag).
+**Includes:** W1 ✅, W2, W3
+**W1 deliverable:** Brief generation produces new-schema briefs. Phase 3 path throws at downstream because W2/W3/W4 not shipped.
 
-**Feature flag state during 3.1:**
-- `ENABLE_PHASE_3_CD=false` in production initially
-- Flip to `true` once 3.1 stabilizes — but only in a staging-mode where briefs go through the new path while rendering is held back
-- New briefs visible via `Full Brief` sheet column (Phase 2 cleanup pipe)
-- Operator validates brief quality in the sheet WITHOUT rendering — checks creative_vision coherence, energy curve sanity, color treatment fit
+**Feature flag state:**
+- `ENABLE_PHASE_3_CD=false` in production
+- Smoke validated in dev with flag locally true. Produced 6 valid briefs, 0 Zod failures, 0 color violations, 6/6 signal-mapping correct.
 
-**Why this approach (vs. render-during-3.1-with-old-Remotion):** During the design session, we considered rendering with old Remotion using new-schema briefs. Decided against because old Remotion can't honor the new fields and the resulting "ugly Phase 2 quality with new metadata" videos contaminate the validation signal — operator can't tell whether a bad video is bad CD or bad Remotion. Cleaner to validate CD via brief reading only.
+**Why throw-before-DB-write at W1:** Phase 3 brief generation succeeds, but downstream Phase 3 consumers (W2/W3/W4) don't exist yet. Operator validation surface for W1 was the dev smoke test (not the sheet's Full Brief column). Once W2/W3 ship, briefs can land in the DB and become operator-visible via Full Brief column.
 
-**Testable:** Operator reviews 5 generated briefs in Full Brief column. Are creative_vision paragraphs coherent? Do energy_per_slot arrays make sense for the idea seed? Does color_treatment match brand?
+**Estimated for W2+W3:** 2-4 agent sessions.
 
-**Estimated:** 4-7 agent sessions for W1+W2+W3 combined.
-
-### Milestone 3.2 — Clean-slate ingestion (parallel, independent)
+### Milestone 3.2 — Clean-slate ingestion (parallel, independent) ⏳ NEXT
 
 **Includes:** W5
 **Deliverable:** New ingestion path that pre-normalizes parent clips. New uploads use new pipeline. Existing 182 segments dropped.
 
-**Why ship independently:** Doesn't block W1-W4. Operator can start uploading new content (when content sprint unblocks) using the new pipeline, building library inventory in parallel with W4 development.
+**Per operator decision (2026-04-15), this milestone ships next** — before W2/W3 — to unblock content sprint with new pipeline.
 
-**Testable:** Upload one new clip, verify pre-normalization happens, verify segments table has new entries with `clip_r2_key` pointing at 1080p normalized sources. Verify render time on a Phase 2 video using a new segment is faster than render time on a Phase 2 video using legacy segments (only relevant temporarily — once Phase 3 ships, all segments will be Phase 3 ingested).
+**Testable:** Upload one new clip, verify pre-normalization happens, verify segments table has new entries with `clip_r2_key` pointing at 1080p normalized sources.
 
 **Estimated:** 1-2 agent sessions.
 
-### Milestone 3.3 — Remotion + production flip
+### Milestone 3.3 — Remotion + production flip ⏳ PLANNED
 
 **Includes:** W4 + final feature flag flips
-**Deliverable:** Phase 3 videos rendered end-to-end. New parameterized composition replaces `hook-demo-cta` for jobs with `composition_id = "phase3-parameterized-v1"`. Old briefs with `composition_id = "hook-demo-cta"` can no longer be rendered (acceptable — Phase 3 is a clean break).
+**Deliverable:** Phase 3 videos rendered end-to-end. New parameterized composition replaces `hook-demo-cta` for jobs with `composition_id = "phase3-parameterized-v1"`.
 
 **Feature flag flip sequence:**
 1. W4 deployed to production behind `ENABLE_PHASE_3_REMOTION=false`
@@ -300,17 +303,22 @@ Phase 3 ships in three milestones. Each is independently deployable and testable
 5. Operator rates and approves/rejects via existing review_decision flow
 6. Validation against success criterion (8 of 10 approve) begins
 
-**Testable:** Render 5 production videos with different vibes, color treatments, slot counts, cut styles. Each video should look visibly different from the others. Compare side-by-side against 5 Phase 2 videos for variety improvement.
+**Cleanup at this milestone:**
+- Delete Phase 2 CD path (`generateBriefPhase2`, `creative-director-phase2.md`)
+- Delete `selectVideoType()` and slim `VIDEO_TYPE_CONFIGS`
+- Delete old Remotion template variants
+- Make `ENABLE_PHASE_3_CD` permanently true in env.ts (or remove the flag entirely)
+- Migrate ENABLE_CURATOR_V2 to env.ts pattern for consistency with Phase 3 CD pattern
 
-**Estimated:** 4-6 agent sessions for W4. Plus operator validation time (5-10 days of running production briefs to hit the 10-video threshold for success criterion).
+**Estimated:** 4-6 agent sessions for W4. Plus operator validation time post-3.3.
 
 ---
 
-## Brand color palettes (initial values)
+## Brand color palettes (initial values, ✅ shipped via migration 006)
 
-These get loaded into `brand_configs.allowed_color_treatments` when migration 006 runs. Operator can edit directly in Supabase web UI until W6 ships in Phase 3.5.
+Loaded into `brand_configs.allowed_color_treatments` via migration 006 (2026-04-15). Operator can edit directly in Supabase web UI until W6 ships in Phase 3.5.
 
-### nordpilates
+### nordpilates (✅ backfilled)
 
 ```
 allowed_color_treatments: ["warm-vibrant", "soft-pastel", "golden-hour", "natural", "cool-muted"]
@@ -318,7 +326,7 @@ allowed_color_treatments: ["warm-vibrant", "soft-pastel", "golden-hour", "natura
 
 5 treatments. Excludes `high-contrast`, `moody-dark`, `clean-bright` as off-brand for soft wellness positioning.
 
-### carnimeat
+### carnimeat (✅ backfilled)
 
 ```
 allowed_color_treatments: ["high-contrast", "warm-vibrant", "moody-dark", "natural", "clean-bright"]
@@ -326,20 +334,36 @@ allowed_color_treatments: ["high-contrast", "warm-vibrant", "moody-dark", "natur
 
 5 treatments. Excludes `cool-muted`, `soft-pastel`, `golden-hour` as too soft for the bold masculine positioning.
 
-### Other brands (welcomebaby, nodiet)
+### Other brands (welcomebaby, nodiet, ketoway, highdiet)
 
-Deferred. Will be set when those brands begin Phase 3 video production. Initial proposal in design plan above; refine based on actual brand identity at that time.
+NULL in DB. CD treats NULL as "no restriction; pick from any of 8 treatments." Backfill when those brands begin Phase 3 production.
+
+---
+
+## Brand video_type allowances (updated 2026-04-15)
+
+`brand_configs.allowed_video_types` updated via manual SQL (not migration) on 2026-04-15 to support multi-type per brand. Original single-type lock was MVP simplicity, not brand strategy.
+
+| Brand | allowed_video_types |
+|---|---|
+| nordpilates | `['workout-demo', 'tips-listicle', 'transformation']` |
+| carnimeat | `['recipe-walkthrough', 'tips-listicle', 'transformation']` |
+| highdiet | `['workout-demo', 'tips-listicle', 'transformation']` |
+| ketoway | (unchanged from MVP) |
+| nodiet | (unchanged from MVP) |
+
+CD signal-mapping in Phase 3 prompt picks video_type from the brand's allowed list based on idea_seed signals.
 
 ---
 
 ## Schema migrations
 
-| # | Migration file | Purpose |
-|---|---|---|
-| 006 | `006_brand_configs_color_treatments.sql` | Add `allowed_color_treatments TEXT[]` to brand_configs. Backfill nordpilates and carnimeat with locked values above. |
-| 007 | `007_pre_normalized_clips.sql` | Add `pre_normalized_r2_key TEXT` to assets table (W5) |
+| # | Migration file | Status | Purpose |
+|---|---|---|---|
+| 006 | `006_brand_configs_color_treatments.sql` | ✅ Applied 2026-04-15 (Phase 3 W1) | Add `allowed_color_treatments TEXT[]` to brand_configs. Backfill nordpilates and carnimeat. |
+| 007 | `007_pre_normalized_clips.sql` | ⏳ Phase 3 W5 | Add `pre_normalized_r2_key TEXT` to assets table |
 
-Migrations 008+ as needed during implementation. Migration runner from Phase 2 cleanup (`apply_migration_sql` RPC + `apply-migration.ts`) handles all without new infrastructure.
+Migrations 008+ as needed during W2/W3/W4. Migration runner from Phase 2 cleanup (`apply_migration_sql` RPC + `apply-migration.ts`) handles all.
 
 ---
 
@@ -347,8 +371,8 @@ Migrations 008+ as needed during implementation. Migration runner from Phase 2 c
 
 Phase 3 ships behind two feature flags:
 
-- `ENABLE_PHASE_3_CD`: gates the new Creative Director output schema
-- `ENABLE_PHASE_3_REMOTION`: gates the new Remotion parameterized composition
+- `ENABLE_PHASE_3_CD` ✅ added in W1 (`src/config/env.ts`). Default `false`.
+- `ENABLE_PHASE_3_REMOTION` — to be added at W4. Default `false`.
 
 Both default `false` in production until Milestone 3.3 final flip. Flipped together to avoid intermediate ugly-render state.
 
@@ -364,48 +388,47 @@ After 8 of 10 consecutive Phase 3 approvals, old code paths can be removed in a 
 
 Worker logs into Supabase web UI → Tables → `brand_configs` → finds brand row → edits `allowed_color_treatments` array directly. Saves. Effective immediately on next CD generation.
 
-This is a temporary workflow until W6 (Brand Settings sheet sync) ships in Phase 3.5. Documented here so operator knows the path during Phase 3.
+This is a temporary workflow until W6 (Brand Settings sheet sync) ships in Phase 3.5.
 
-### Setting per-video vibe
+### Setting per-video vibe (deferred from W1)
 
-Worker adds new optional `Vibe` column to the Jobs sheet. Types free-text vibe per row, e.g. "gentle morning energy" or "punchy gym hype." S1 workflow needs minor update to pass Vibe through to Supabase as part of job creation. Specifically: S1's "Validate Brand & Build Payload" code node adds `vibe: ideaSeedClean.vibe` (or similar) to the supabaseBody object.
-
-If Vibe column is empty, CD picks vibe autonomously based on idea_seed.
+**Not yet wired.** Plan: worker adds new optional `Vibe` column to the Jobs sheet. Types free-text vibe per row, e.g. "gentle morning energy" or "punchy gym hype." S1 workflow needs minor update to pass Vibe through to Supabase as part of job creation. Currently CD always receives vibe = null and invents one based on idea_seed.
 
 ### Reviewing Phase 3 briefs
 
-Same as today via the `Full Brief` sheet column. Phase 3 briefs will be richer (creative_vision paragraph, color_treatment, energy curve visible per slot). Format stays the same shape.
+**Currently dev-only.** Smoke harness `npm run test:cd-phase3` generates 6 briefs against live Claude. Operator reads them in chat or terminal output. The Full Brief sheet column is not populated for Phase 3 briefs because the flag is off in production.
+
+Once W2+W3 ship and the Phase 3 path stops throwing at downstream, briefs will land in `jobs.context_packet` and become operator-visible via Full Brief column.
 
 ---
 
-## Estimated total effort
+## Estimated total effort (post-W1)
 
-- W1: 2-3 sessions
+- W1: ✅ DONE (took 6 agent sessions over 1 day)
 - W2: 1-2 sessions
 - W3: 1-2 sessions
 - W4: 4-6 sessions
 - W5: 1-2 sessions
 
-**Total: 9-15 agent sessions across 2-3 weeks.** Plus operator validation time post-3.3 to hit the 10-video success threshold.
-
-Phase 3 is roughly 3x the size of Phase 2 cleanup.
+**Remaining: 7-12 agent sessions across 1.5-2.5 weeks.** Plus operator validation time post-3.3 to hit the 10-video success threshold.
 
 ---
 
 ## Open during Phase 3 (resolve as we go)
 
-Items that don't block design but need decision during implementation:
-
-- **Exact CSS filter values per color treatment** — initial values in W4 doc above, refine during W4 implementation based on actual rendered video appearance
+- **Exact CSS filter values per color treatment** — initial values in W4 doc above, refine during W4 implementation
 - **Whip-pan transition implementation** — Remotion plugin (`@remotion/transitions` or community package) vs hand-rolled. Decide during W4.
-- **CD prompt examples** — three example briefs (cozy, punchy, instructional) drafted during W1 implementation
-- **Sheet `Vibe` column position** — add to existing Jobs sheet, pick column letter when ready (probably new column right after `Idea Seed`)
-- **S1 workflow update** — small change to pass Vibe through to Supabase. Coordinate with W1.
+- **Sheet `Vibe` column position** — probably new column right after `Idea Seed`. Coordinate with S1 update.
+- **S1 workflow update** — small change to pass Vibe through to Supabase. Coordinate with W1 follow-up (vibe plumbing).
+- **`min_quality` per-slot defaults** — Phase 3 CD anchored on 6-7 in smoke. Curator V2 has its own scoring; re-evaluate after W2 ships whether the prompt should specify defaults.
+- **`brand_configs.allowed_video_types` for ketoway/nodiet** — kept at MVP single-type defaults. Update when those brands begin Phase 3 production.
+- **`brand_configs.allowed_color_treatments` for welcomebaby/nodiet/ketoway/highdiet** — currently NULL. Backfill when those brands begin Phase 3 production.
 
 ---
 
 ## Document status
 
-- This doc — Phase 3 master design, source of truth for all Phase 3 work
-- `VIDEO_PIPELINE_ARCHITECTURE_v4_0.md` — architecture reference, points to this doc for Phase 3 specifics
-- `MVP_PROGRESS (6).md` — living progress tracker, references this doc for current phase
+- This doc — Phase 3 master design, source of truth. W1 marked shipped, W2-W5 planned.
+- `VIDEO_PIPELINE_ARCHITECTURE_v5_0.md` — architecture reference, current.
+- `MVP_PROGRESS (7).md` — living progress tracker, current.
+- `SUPABASE_SCHEMA.md` — DB schema reference, current (migration 006 applied).
