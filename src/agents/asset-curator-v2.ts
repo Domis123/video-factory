@@ -31,6 +31,7 @@ export interface CuratorV2Result {
 export interface CuratorV2Brief {
   slots: BriefSlot[];
   brandId: string;
+  creative_vision?: string;
 }
 
 // ── Prompt + model config ──
@@ -198,6 +199,8 @@ async function curateSlot(
 
     const prompt = PROMPT_TEMPLATE
       .replace('{slot_description}', slot.description)
+      .replace('{creative_vision}', brief.creative_vision ?? '(no overall creative direction specified)')
+      .replace('{aesthetic_guidance}', slot.aesthetic_guidance ?? '(no specific aesthetic notes for this slot)')
       .replace('{valid_types}', slot.valid_segment_types.join(', '))
       .replace('{min_quality}', String(slot.min_quality))
       .replace('{slot_index}', String(slot.index + 1))
