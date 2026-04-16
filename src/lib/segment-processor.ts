@@ -8,7 +8,7 @@ import { embedImage } from './clip-embed.js';
 import { exec } from './exec.js';
 import type { SegmentAnalysis } from './gemini-segments.js';
 
-const INGESTION_MODEL = process.env['GEMINI_INGESTION_MODEL'] || 'gemini-2.5-pro-preview-05-06';
+const INGESTION_MODEL = process.env['GEMINI_INGESTION_MODEL'] || 'gemini-2.5-pro';
 
 /**
  * Process analyzed segments for an asset: extract keyframes, compute CLIP

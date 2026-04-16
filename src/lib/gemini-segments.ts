@@ -67,7 +67,7 @@ const MIME_MAP: Record<string, string> = {
 
 // ── Model config ──
 
-const MODEL_ID = process.env['GEMINI_INGESTION_MODEL'] ?? 'gemini-2.5-pro-preview-05-06';
+const MODEL_ID = process.env['GEMINI_INGESTION_MODEL'] ?? 'gemini-2.5-pro';
 
 // ── Main function ──
 
