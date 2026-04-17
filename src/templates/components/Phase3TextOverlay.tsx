@@ -11,6 +11,8 @@ interface Phase3TextOverlayProps {
   font: string;
   primaryColor: string;
   accentColor: string;
+  ctaBgColor?: string | null;
+  ctaTextColor?: string | null;
 }
 
 export const Phase3TextOverlay: React.FC<Phase3TextOverlayProps> = ({
@@ -23,6 +25,8 @@ export const Phase3TextOverlay: React.FC<Phase3TextOverlayProps> = ({
   font,
   primaryColor,
   accentColor,
+  ctaBgColor,
+  ctaTextColor,
 }) => {
   const frame = useCurrentFrame();
 
@@ -35,7 +39,7 @@ export const Phase3TextOverlay: React.FC<Phase3TextOverlayProps> = ({
 
   const anim = getAnimationValues(animation, frame, fps);
   const posStyle = getPositionStyle(position);
-  const textStyle = getTextStyle(style, font, primaryColor, accentColor);
+  const textStyle = getTextStyle(style, font, primaryColor, accentColor, ctaBgColor, ctaTextColor);
 
   return (
     <div
@@ -125,6 +129,8 @@ function getTextStyle(
   font: string,
   primaryColor: string,
   accentColor: string,
+  ctaBgColor?: string | null,
+  ctaTextColor?: string | null,
 ): TextStyles {
   switch (style) {
     case 'bold-center':
@@ -178,7 +184,7 @@ function getTextStyle(
     case 'cta':
       return {
         wrapper: {
-          backgroundColor: accentColor,
+          backgroundColor: ctaBgColor ?? primaryColor,
           borderRadius: 50,
           padding: '12px 32px',
         },
@@ -186,7 +192,7 @@ function getTextStyle(
           fontFamily: font,
           fontSize: 48,
           fontWeight: 700,
-          color: '#FFFFFF',
+          color: ctaTextColor ?? '#FFFFFF',
           textAlign: 'center',
           lineHeight: 1.2,
         },

@@ -35,6 +35,8 @@ export const Phase3Parameterized: React.FC<Phase3TemplateProps> = ({
             font={brandConfig.font_family}
             primaryColor={brandConfig.primary_color}
             accentColor={accentColor}
+            ctaBgColor={brandConfig.cta_bg_color}
+            ctaTextColor={brandConfig.cta_text_color}
           />
         </Sequence>
       ))}
@@ -79,7 +81,9 @@ const SlotRenderer: React.FC<{
   font: string;
   primaryColor: string;
   accentColor: string;
-}> = ({ seg, index, resolved, fps, font, primaryColor, accentColor }) => {
+  ctaBgColor: string | null;
+  ctaTextColor: string | null;
+}> = ({ seg, index, resolved, fps, font, primaryColor, accentColor, ctaBgColor, ctaTextColor }) => {
   const frame = useCurrentFrame();
   const isCrossfade = seg.transitionIn === 'crossfade';
   const transFrames = seg.transitionDurationFrames;
@@ -127,6 +131,8 @@ const SlotRenderer: React.FC<{
           font={font}
           primaryColor={primaryColor}
           accentColor={accentColor}
+          ctaBgColor={ctaBgColor}
+          ctaTextColor={ctaTextColor}
         />
       )}
 
