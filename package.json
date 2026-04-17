@@ -20,6 +20,7 @@
     "test:cd-phase3": "ENABLE_PHASE_3_CD=true tsx src/scripts/smoke-test-cd-phase3.ts",
     "test:pre-normalize": "tsx src/scripts/test-pre-normalize.ts",
     "clean-slate:nordpilates": "tsx src/scripts/clean-slate-nordpilates.ts",
+    "test:reanalyze": "npx tsx src/scripts/test-reanalyze.ts",
     "backfill:clips": "tsx src/scripts/backfill-segment-clips.ts",
     "start": "tsx src/index.ts",
     "start:prod": "node dist/index.js"
