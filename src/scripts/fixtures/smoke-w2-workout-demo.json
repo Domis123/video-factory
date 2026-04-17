@@ -1,0 +1,196 @@
+{
+  "brief_id": "fb9b77cb-0276-4dc9-adf4-2391642429d0",
+  "brand_id": "nordpilates",
+  "video_type": "workout-demo",
+  "composition_id": "phase3-parameterized-v1",
+  "total_duration_target": 36,
+  "caption_preset": "nordpilates_default",
+  "idea_seed": "a quick lower-body sequence for tight hips after sitting all day",
+  "vibe": "releasing, restorative flow for desk workers",
+  "creative_direction": {
+    "creative_vision": "A gentle hip-opening sequence that feels like relief after hours of sitting. Warm natural lighting creates an inviting studio atmosphere. Each movement flows into the next with deliberate pacing that lets viewers follow along and actually feel the stretch.",
+    "slot_count": 6,
+    "energy_per_slot": [
+      6,
+      5,
+      6,
+      6,
+      7,
+      5
+    ],
+    "color_treatment": "natural"
+  },
+  "segments": [
+    {
+      "type": "hook",
+      "label": "hook-tight-hips",
+      "pacing": "medium",
+      "cut_duration_target_s": 4,
+      "transition_in": "fade-from-black",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "bold-center",
+        "position": "center",
+        "animation": "fade",
+        "char_target": 35
+      },
+      "clip_requirements": {
+        "mood": "understanding",
+        "has_speech": true,
+        "min_quality": 7,
+        "content_type": [
+          "talking-head"
+        ],
+        "visual_elements": [
+          "person",
+          "studio"
+        ],
+        "aesthetic_guidance": "Instructor speaking to camera in bright studio space, warm natural light, empathetic expression acknowledging the viewer's discomfort."
+      }
+    },
+    {
+      "type": "body",
+      "label": "move-1-hip-circles",
+      "pacing": "slow",
+      "cut_duration_target_s": 7,
+      "transition_in": "crossfade",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-left",
+        "animation": "slide-up",
+        "char_target": 20
+      },
+      "clip_requirements": {
+        "mood": "releasing",
+        "has_speech": false,
+        "min_quality": 6,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Standing hip circles in slow motion, full body visible, emphasis on the circular movement opening through the hip joint."
+      }
+    },
+    {
+      "type": "body",
+      "label": "move-2-low-lunge",
+      "pacing": "slow",
+      "cut_duration_target_s": 8,
+      "transition_in": "slide",
+      "internal_cut_style": "soft-cuts",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-left",
+        "animation": "slide-up",
+        "char_target": 24
+      },
+      "clip_requirements": {
+        "mood": "focused",
+        "has_speech": false,
+        "min_quality": 6,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Side view of low lunge with gentle forward fold, showing the hip flexor stretch clearly, held position with breath."
+      }
+    },
+    {
+      "type": "body",
+      "label": "move-3-pigeon-prep",
+      "pacing": "slow",
+      "cut_duration_target_s": 8,
+      "transition_in": "crossfade",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-left",
+        "animation": "slide-up",
+        "char_target": 22
+      },
+      "clip_requirements": {
+        "mood": "releasing",
+        "has_speech": false,
+        "min_quality": 6,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Three-quarter angle of modified pigeon pose, showing the deep hip opening, peaceful sustained hold."
+      }
+    },
+    {
+      "type": "body",
+      "label": "move-4-figure-four",
+      "pacing": "medium",
+      "cut_duration_target_s": 6,
+      "transition_in": "slide",
+      "internal_cut_style": "hard-cuts",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-left",
+        "animation": "slide-up",
+        "char_target": 26
+      },
+      "clip_requirements": {
+        "mood": "releasing",
+        "has_speech": false,
+        "min_quality": 6,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat"
+        ],
+        "aesthetic_guidance": "Supine figure-four stretch with gentle pull toward chest, showing the external hip rotation and glute stretch."
+      }
+    },
+    {
+      "type": "cta",
+      "label": "cta-feel-better",
+      "pacing": "medium",
+      "cut_duration_target_s": 3,
+      "transition_in": "fade-from-black",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "cta",
+        "position": "center",
+        "animation": "type-on",
+        "char_target": 30
+      },
+      "clip_requirements": {
+        "mood": "warm",
+        "has_speech": true,
+        "min_quality": 7,
+        "content_type": [
+          "talking-head"
+        ],
+        "visual_elements": [
+          "person"
+        ],
+        "aesthetic_guidance": "Instructor with gentle smile, same studio lighting, inviting tone about feeling relief and moving better."
+      }
+    }
+  ],
+  "audio": {
+    "strategy": "music-primary",
+    "music": {
+      "mood": "meditative",
+      "tempo": "slow",
+      "energy_level": 4,
+      "volume_level": 0.25,
+      "pinned_track_id": null
+    }
+  }
+}

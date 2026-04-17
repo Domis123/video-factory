@@ -31,6 +31,7 @@ export interface CuratorV2Result {
 export interface CuratorV2Brief {
   slots: BriefSlot[];
   brandId: string;
+  creative_vision?: string;
 }
 
 // ── Prompt + model config ──
@@ -134,6 +135,16 @@ async function curateSlot(
   }
   retrieveMs = Date.now() - t0;
 
+  // Exclude segments already picked in earlier slots
+  const pickedIds = new Set(previousResults.map((r) => r.segmentId).filter(Boolean));
+  if (pickedIds.size > 0) {
+    const before = candidates.length;
+    candidates = candidates.filter((c) => !pickedIds.has(c.segmentId));
+    if (candidates.length < before) {
+      console.log(`[curator-v2] Slot ${slot.index}: filtered ${before - candidates.length} already-picked segments (${candidates.length} remaining)`);
+    }
+  }
+
   // Still empty — return placeholder
   if (candidates.length === 0) {
     console.error(`[curator-v2] Slot ${slot.index}: no candidates even after quality fallback`);
@@ -198,6 +209,8 @@ async function curateSlot(
 
     const prompt = PROMPT_TEMPLATE
       .replace('{slot_description}', slot.description)
+      .replace('{creative_vision}', brief.creative_vision ?? '(no overall creative direction specified)')
+      .replace('{aesthetic_guidance}', slot.aesthetic_guidance ?? '(no specific aesthetic notes for this slot)')
       .replace('{valid_types}', slot.valid_segment_types.join(', '))
       .replace('{min_quality}', String(slot.min_quality))
       .replace('{slot_index}', String(slot.index + 1))

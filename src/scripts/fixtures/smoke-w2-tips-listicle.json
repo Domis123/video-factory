@@ -1,0 +1,171 @@
+{
+  "brief_id": "ab4c68d8-637c-46a6-a8f5-220a01821ed0",
+  "brand_id": "nordpilates",
+  "video_type": "tips-listicle",
+  "composition_id": "phase3-parameterized-v1",
+  "total_duration_target": 38,
+  "caption_preset": "nordpilates_default",
+  "idea_seed": "three pilates cues that fix your plank form instantly",
+  "vibe": "supportive instructor teaching proper form",
+  "creative_direction": {
+    "creative_vision": "A clear, instructional video that demonstrates three specific plank form corrections. The energy is supportive and focused, building confidence through proper technique. Each cue is demonstrated clearly with visual emphasis on the correction.",
+    "slot_count": 5,
+    "energy_per_slot": [
+      7,
+      6,
+      6,
+      6,
+      5
+    ],
+    "color_treatment": "natural"
+  },
+  "segments": [
+    {
+      "type": "hook",
+      "label": "hook-promise",
+      "pacing": "medium",
+      "cut_duration_target_s": 4,
+      "transition_in": "hard-cut",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "bold-center",
+        "position": "center",
+        "animation": "pop-in",
+        "char_target": 48
+      },
+      "clip_requirements": {
+        "mood": "warm",
+        "has_speech": true,
+        "min_quality": 7,
+        "content_type": [
+          "talking-head"
+        ],
+        "visual_elements": [
+          "person",
+          "studio"
+        ],
+        "aesthetic_guidance": "Instructor speaking directly to camera in bright pilates studio, mat visible in background, warm inviting expression."
+      }
+    },
+    {
+      "type": "body",
+      "label": "cue-1-shoulders",
+      "pacing": "slow",
+      "cut_duration_target_s": 10,
+      "transition_in": "crossfade",
+      "internal_cut_style": "soft-cuts",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-center",
+        "animation": "slide-up",
+        "char_target": 28
+      },
+      "clip_requirements": {
+        "mood": "instructional",
+        "has_speech": false,
+        "min_quality": 7,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat",
+          "plank"
+        ],
+        "aesthetic_guidance": "Side angle view of plank position with focus on shoulder alignment over wrists, clear demonstration of proper positioning."
+      }
+    },
+    {
+      "type": "body",
+      "label": "cue-2-core",
+      "pacing": "slow",
+      "cut_duration_target_s": 10,
+      "transition_in": "slide",
+      "internal_cut_style": "soft-cuts",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-center",
+        "animation": "slide-up",
+        "char_target": 32
+      },
+      "clip_requirements": {
+        "mood": "instructional",
+        "has_speech": false,
+        "min_quality": 7,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat",
+          "plank"
+        ],
+        "aesthetic_guidance": "Profile view showing proper core engagement in plank, emphasis on neutral spine and belly button drawing toward spine."
+      }
+    },
+    {
+      "type": "body",
+      "label": "cue-3-breath",
+      "pacing": "slow",
+      "cut_duration_target_s": 9,
+      "transition_in": "crossfade",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "label",
+        "position": "top-center",
+        "animation": "fade",
+        "char_target": 26
+      },
+      "clip_requirements": {
+        "mood": "focused",
+        "has_speech": false,
+        "min_quality": 7,
+        "content_type": [
+          "exercise"
+        ],
+        "visual_elements": [
+          "person",
+          "mat",
+          "plank"
+        ],
+        "aesthetic_guidance": "Close-up angle showing steady breathing pattern while holding plank, visible rhythm of breath without strain."
+      }
+    },
+    {
+      "type": "cta",
+      "label": "cta-practice",
+      "pacing": "medium",
+      "cut_duration_target_s": 5,
+      "transition_in": "fade-from-black",
+      "internal_cut_style": "hold",
+      "text_overlay": {
+        "style": "cta",
+        "position": "center",
+        "animation": "type-on",
+        "char_target": 36
+      },
+      "clip_requirements": {
+        "mood": "encouraging",
+        "has_speech": true,
+        "min_quality": 7,
+        "content_type": [
+          "talking-head"
+        ],
+        "visual_elements": [
+          "person"
+        ],
+        "aesthetic_guidance": "Instructor back on camera with supportive smile, same studio lighting, encouraging closing message about practice."
+      }
+    }
+  ],
+  "audio": {
+    "strategy": "music-primary",
+    "music": {
+      "mood": "uplifting",
+      "tempo": "medium",
+      "energy_level": 5,
+      "volume_level": 0.25,
+      "pinned_track_id": null
+    }
+  }
+}

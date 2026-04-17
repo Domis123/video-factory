@@ -1,8 +1,18 @@
 import type { AssetCuratorInput } from './asset-curator.js';
 import { selectClips } from './asset-curator.js';
 import { curateWithV2, type CuratorV2Brief } from './asset-curator-v2.js';
-import type { ClipSelectionList, ClipSelection, BriefSegment } from '../types/database.js';
+import type {
+  ClipSelectionList,
+  ClipSelection,
+  BriefSegment,
+  CreativeBrief,
+  Phase3CreativeBrief,
+} from '../types/database.js';
 import type { BriefSlot } from './curator-v2-retrieval.js';
+
+export type CuratorDispatchInput =
+  | AssetCuratorInput
+  | { brief: Phase3CreativeBrief };
 
 /**
  * Flag-gated curator dispatcher. Reads ENABLE_CURATOR_V2 from process.env
@@ -10,30 +20,55 @@ import type { BriefSlot } from './curator-v2-retrieval.js';
  *
  * V2 output is reshaped to match V1's ClipSelectionList so pipeline.ts
  * doesn't need to change.
+ *
+ * Phase 3 briefs pass creative_vision (video-level) and per-slot
+ * aesthetic_guidance through to the V2 prompt. Phase 2 briefs leave
+ * those fields undefined — the V2 prompt renders fallback strings.
  */
 export async function curateAssets(
-  input: AssetCuratorInput,
+  input: CuratorDispatchInput,
   brandId: string,
 ): Promise<ClipSelectionList> {
   const useV2 = process.env['ENABLE_CURATOR_V2'] === 'true';
 
   if (!useV2) {
     console.log('[curator-dispatch] Using V1 (Sonnet text-based)');
-    return selectClips(input);
+    return selectClips(input as AssetCuratorInput);
   }
 
   console.log('[curator-dispatch] Using V2 (Gemini Pro + vector retrieval)');
 
-  // Build V2 brief from V1's CreativeBrief segments
-  const v2Brief: CuratorV2Brief = {
-    brandId,
-    slots: input.brief.segments.map((seg: BriefSegment): BriefSlot => ({
-      index: seg.segment_id,
-      description: buildSlotDescription(seg),
-      valid_segment_types: mapContentTypesToSegmentTypes(seg),
-      min_quality: seg.clip_requirements.min_quality ?? 5,
-    })),
-  };
+  const isPhase3 = 'creative_direction' in input.brief;
+  let v2Brief: CuratorV2Brief;
+  let briefId: string;
+
+  if (isPhase3) {
+    const p3 = input.brief as Phase3CreativeBrief;
+    briefId = p3.brief_id;
+    v2Brief = {
+      brandId,
+      creative_vision: p3.creative_direction.creative_vision,
+      slots: p3.segments.map((seg, i): BriefSlot => ({
+        index: i,
+        description: buildSlotDescription(seg),
+        valid_segment_types: mapContentTypesToSegmentTypes(seg),
+        min_quality: seg.clip_requirements.min_quality ?? 5,
+        aesthetic_guidance: seg.clip_requirements.aesthetic_guidance,
+      })),
+    };
+  } else {
+    const p2 = input.brief as CreativeBrief;
+    briefId = p2.brief_id;
+    v2Brief = {
+      brandId,
+      slots: p2.segments.map((seg: BriefSegment): BriefSlot => ({
+        index: seg.segment_id,
+        description: buildSlotDescription(seg),
+        valid_segment_types: mapContentTypesToSegmentTypes(seg),
+        min_quality: seg.clip_requirements.min_quality ?? 5,
+      })),
+    };
+  }
 
   const v2Results = await curateWithV2(v2Brief);
 
@@ -48,14 +83,24 @@ export async function curateAssets(
   }));
 
   return {
-    brief_id: input.brief.brief_id,
+    brief_id: briefId,
     clip_selections: clipSelections,
   };
 }
 
 // ── Helpers ──
 
-function buildSlotDescription(seg: BriefSegment): string {
+interface SegmentLike {
+  type: string;
+  label?: string;
+  clip_requirements: {
+    content_type: string[];
+    mood: string | string[];
+    visual_elements?: string[];
+  };
+}
+
+function buildSlotDescription(seg: SegmentLike): string {
   const parts: string[] = [];
   parts.push(`${seg.type} segment`);
   if (seg.label) parts.push(`(${seg.label})`);
@@ -72,9 +117,7 @@ function buildSlotDescription(seg: BriefSegment): string {
   return parts.join(', ');
 }
 
-function mapContentTypesToSegmentTypes(seg: BriefSegment): string[] {
-  // Map V1's content_type vocabulary to V2's segment_type taxonomy.
-  // V1 uses broad content descriptors; V2 has a fixed 8-type enum.
+function mapContentTypesToSegmentTypes(seg: SegmentLike): string[] {
   const typeMap: Record<string, string[]> = {
     'workout': ['exercise', 'hold'],
     'exercise': ['exercise'],

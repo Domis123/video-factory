@@ -8,6 +8,7 @@ export interface BriefSlot {
   description: string;
   valid_segment_types: string[];
   min_quality: number;
+  aesthetic_guidance?: string;
 }
 
 export interface CandidateSegment {
