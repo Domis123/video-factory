@@ -61,6 +61,16 @@ export async function transcribeClip(
       );
     }
   }
+  // Probe for audio streams — UGC clips filmed with mic off have none.
+  const probeResult = await exec({
+    command: 'ffprobe',
+    args: ['-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', clipPath],
+  });
+  if (!probeResult.stdout.trim()) {
+    console.log(`[transcriber] Segment ${segmentId}: no audio stream, skipping`);
+    return { segmentId, clipPath, srtPath: '', jsonPath: '', words: [], fullText: '' };
+  }
+
   console.log(`[transcriber] Extracting audio from segment ${segmentId}`);
   await execOrThrow(buildAudioExtractCommand(clipPath, wavPath, extractOpts));
 
