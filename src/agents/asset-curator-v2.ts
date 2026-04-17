@@ -135,6 +135,16 @@ async function curateSlot(
   }
   retrieveMs = Date.now() - t0;
 
+  // Exclude segments already picked in earlier slots
+  const pickedIds = new Set(previousResults.map((r) => r.segmentId).filter(Boolean));
+  if (pickedIds.size > 0) {
+    const before = candidates.length;
+    candidates = candidates.filter((c) => !pickedIds.has(c.segmentId));
+    if (candidates.length < before) {
+      console.log(`[curator-v2] Slot ${slot.index}: filtered ${before - candidates.length} already-picked segments (${candidates.length} remaining)`);
+    }
+  }
+
   // Still empty — return placeholder
   if (candidates.length === 0) {
     console.error(`[curator-v2] Slot ${slot.index}: no candidates even after quality fallback`);
