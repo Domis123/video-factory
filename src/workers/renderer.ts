@@ -5,16 +5,16 @@ import { mkdir, rm, readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { env } from '../config/env.js';
 import { downloadToFile, uploadFile } from '../lib/r2-storage.js';
-import type { ContextPacket, ClipSelection } from '../types/database.js';
-import type { TemplateProps } from '../templates/types.js';
+import type { ContextPacket, Phase3ContextPacket, ClipSelection, Phase3CreativeBrief } from '../types/database.js';
+import type { TemplateProps, Phase3TemplateProps } from '../templates/types.js';
+import { resolvePhase3Segments, totalPhase3Frames } from '../templates/resolve-phase3.js';
 import type { WordTimestamp } from '../templates/components/CaptionTrack.js';
 
 const REMOTION_ENTRY = join(import.meta.dirname ?? '.', '..', 'templates', 'Root.tsx');
 
 export interface RenderInput {
   jobId: string;
-  contextPacket: ContextPacket;
-  /** Word-level transcriptions per segment_id (from whisper) */
+  contextPacket: ContextPacket | Phase3ContextPacket;
   transcriptions: Record<number, WordTimestamp[]>;
 }
 
@@ -35,18 +35,17 @@ export interface RenderOutput {
  */
 export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
   const { jobId, contextPacket, transcriptions } = input;
-  const { brief, clips, brand_config: brand } = contextPacket;
-  const templateId = brief.template_id;
+  const { clips, brand_config: brand } = contextPacket;
+  const isPhase3 = 'creative_direction' in contextPacket.brief;
+  const compositionId = isPhase3
+    ? (contextPacket.brief as Phase3CreativeBrief).composition_id
+    : (contextPacket as ContextPacket).brief.template_id;
 
   const workDir = join(env.RENDER_TEMP_DIR, jobId);
-  // Remotion's bundler serves a `publicDir` over HTTP at runtime, and the
-  // template uses `staticFile(name)` to fetch files from it. We collect every
-  // asset (clips, logo, music) into a single flat directory under the job's
-  // workDir and hand bare filenames to the template.
   const publicDir = join(workDir, 'public');
-  const outputPath = join(workDir, `output-${templateId}.mp4`);
+  const outputPath = join(workDir, `output-${compositionId}.mp4`);
 
-  console.log(`[renderer] Job ${jobId}: starting render (${templateId})`);
+  console.log(`[renderer] Job ${jobId}: starting render (${compositionId}${isPhase3 ? ', Phase 3' : ''})`);
   const startTime = Date.now();
 
   try {
@@ -126,38 +125,55 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
       },
     });
 
-    // 6. Build input props
-    // clipPaths/logoPath/musicPath are bare filenames relative to publicDir.
-    // Template components wrap them with `staticFile()`, which resolves to
-    // the URL Remotion's bundle server actually serves.
-    const inputProps: TemplateProps = {
-      contextPacket,
-      clipPaths,
-      transcriptions,
-      logoPath,
-      musicPath,
-      beatMap: contextPacket.music_selection?.beat_map ?? null,
-    };
+    // 6. Build input props (Phase 2 vs Phase 3)
+    let inputProps: Record<string, unknown>;
+    let totalDurationFrames: number;
 
-    // 7. Select composition (sets duration from Context Packet)
-    const totalDurationFrames = Math.round(brief.total_duration_target * 30); // 30fps
+    if (isPhase3) {
+      const p3 = contextPacket as Phase3ContextPacket;
+      const p3Props: Phase3TemplateProps = {
+        brief: p3.brief,
+        copyPackage: p3.copy,
+        clipPaths,
+        transcriptions,
+        logoPath,
+        musicPath,
+        brandConfig: brand,
+        beatMap: p3.music_selection?.beat_map ?? null,
+      };
+      inputProps = p3Props as unknown as Record<string, unknown>;
+      const resolved = resolvePhase3Segments(p3.brief, p3.copy, clipPaths, 30);
+      totalDurationFrames = totalPhase3Frames(resolved);
+    } else {
+      const p2 = contextPacket as ContextPacket;
+      const p2Props: TemplateProps = {
+        contextPacket: p2,
+        clipPaths,
+        transcriptions,
+        logoPath,
+        musicPath,
+        beatMap: p2.music_selection?.beat_map ?? null,
+      };
+      inputProps = p2Props as unknown as Record<string, unknown>;
+      totalDurationFrames = Math.round(p2.brief.total_duration_target * 30);
+    }
+
+    // 7. Select composition
     const composition = await selectComposition({
       serveUrl: bundleLocation,
-      id: templateId,
-      inputProps: inputProps as unknown as Record<string, unknown>,
+      id: compositionId,
+      inputProps,
     });
-
-    // Override duration from Context Packet
     composition.durationInFrames = totalDurationFrames;
 
     // 8. Render
-    console.log(`[renderer] Rendering ${templateId} — ${brief.total_duration_target}s @ 30fps (${totalDurationFrames} frames)...`);
+    console.log(`[renderer] Rendering ${compositionId} — ${totalDurationFrames} frames @ 30fps...`);
     await renderMedia({
       composition,
       serveUrl: bundleLocation,
       codec: 'h264',
       outputLocation: outputPath,
-      inputProps: inputProps as unknown as Record<string, unknown>,
+      inputProps,
       onProgress: ({ renderedFrames, encodedFrames }) => {
         if (renderedFrames % 150 === 0) {
           console.log(`[renderer] Rendered: ${renderedFrames}/${totalDurationFrames} frames, Encoded: ${encodedFrames}`);
@@ -171,7 +187,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderOutput> {
     // 9. Upload to R2
     const now = new Date();
     const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const r2Key = `rendered/${brand.brand_id}/${month}/${jobId}-${templateId}.mp4`;
+    const r2Key = `rendered/${brand.brand_id}/${month}/${jobId}-${compositionId}.mp4`;
 
     console.log(`[renderer] Uploading to R2: ${r2Key}`);
     const videoBuffer = await readFile(outputPath);

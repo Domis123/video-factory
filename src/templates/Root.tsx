@@ -3,14 +3,27 @@ import { Composition, registerRoot } from 'remotion';
 import { HookDemoCTA } from './layouts/HookDemoCTA.js';
 import { HookListicleCTA } from './layouts/HookListicleCTA.js';
 import { HookTransformation } from './layouts/HookTransformation.js';
+import { Phase3Parameterized } from './layouts/Phase3Parameterized.js';
 
-/** Default props for Remotion Studio preview */
+/** Default props for Remotion Studio preview (Phase 2) */
 const defaultProps = {
   contextPacket: null,
   clipPaths: {},
   transcriptions: {},
   logoPath: null,
   musicPath: null,
+  beatMap: null,
+};
+
+/** Default props for Phase 3 composition preview */
+const defaultPhase3Props = {
+  brief: null,
+  copyPackage: null,
+  clipPaths: {},
+  transcriptions: {},
+  logoPath: null,
+  musicPath: null,
+  brandConfig: null,
   beatMap: null,
 };
 
@@ -50,6 +63,16 @@ export const RemotionRoot: React.FC = () => {
         width={1080}
         height={1920}
         defaultProps={defaultProps}
+      />
+      <Composition
+        id="phase3-parameterized-v1"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        component={Phase3Parameterized as React.FC<any>}
+        durationInFrames={30 * 45}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={defaultPhase3Props}
       />
     </>
   );
