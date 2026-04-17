@@ -37,11 +37,12 @@ CANDIDATES:
 
 EVALUATION CRITERIA — three-tier priority: hard requirements first, aesthetic second, creative vision third.
 1. Hard requirements — segment matches the slot's valid types and meets minimum quality
-2. Visual relevance — clip actually shows what the slot description asks for
-3. Editing fit — clip's energy, duration range, and motion intensity match the slot's role (hook vs demo vs transition vs closer)
-4. Aesthetic guidance alignment — flavor match with slot-level aesthetic notes; tie-breaker when above criteria are comparable
-5. Creative vision consistency — global tone match; softest signal, guides only when all else is equal
-6. Variety — prefer a candidate from a different parent clip than previously picked ones
+2. Active performance — if the slot asks for exercise content, the clip must show the exercise being ACTIVELY PERFORMED, not preparation, setup, positioning, or rest. A clip of someone adjusting their mat, fixing their hair, or getting into starting position is NOT a match for an exercise slot — reject it regardless of other scores.
+3. Visual relevance — clip actually shows what the slot description asks for
+4. Editing fit — clip's energy, duration range, and motion intensity match the slot's role (hook vs demo vs transition vs closer)
+5. Aesthetic guidance alignment — flavor match with slot-level aesthetic notes; tie-breaker when above criteria are comparable
+6. Creative vision consistency — global tone match; softest signal, guides only when all else is equal
+7. Variety — prefer a candidate from a different parent clip than previously picked ones
 
 OUTPUT FORMAT: Return ONLY a JSON object, no prose:
 {
