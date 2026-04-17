@@ -43,7 +43,7 @@ const PROMPT_TEMPLATE = readFileSync(PROMPT_PATH, 'utf-8');
 
 const MODEL_ID = process.env['GEMINI_CURATOR_MODEL']
   ?? process.env['GEMINI_INGESTION_MODEL']
-  ?? 'gemini-2.5-pro-preview-05-06';
+  ?? 'gemini-2.5-pro';
 
 const WORK_DIR = `${env.RENDER_TEMP_DIR}/curator-v2`;
 
