@@ -202,6 +202,27 @@ export interface ContextPacket {
   created_at: string;
 }
 
+export interface Phase3ContextPacket {
+  context_packet_id: string;
+  brief: Phase3CreativeBrief;
+  clips: ClipSelectionList;
+  copy: CopyPackage;
+  brand_config: BrandConfig;
+  template_config: Record<string, unknown>;
+  music_selection: {
+    track_id: string;
+    r2_key: string;
+    volume_level: number;
+    beat_map?: {
+      tempo_bpm: number;
+      first_beat_offset: number;
+      beat_positions: number[];
+      duration: number;
+    };
+  } | null;
+  created_at: string;
+}
+
 // ── Creative Brief (Agent 1: Creative Director output) ──
 
 export interface CreativeBrief {

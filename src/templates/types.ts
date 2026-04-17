@@ -1,4 +1,4 @@
-import type { ContextPacket, BriefSegment, CaptionPreset } from '../types/database.js';
+import type { ContextPacket, BriefSegment, CaptionPreset, Phase3CreativeBrief, CopyPackage, BrandConfig } from '../types/database.js';
 import type { WordTimestamp } from './components/CaptionTrack.js';
 
 /** Props passed to every layout template from the renderer */
@@ -60,4 +60,41 @@ export function resolveSegments(
 /** Total duration in frames from segments */
 export function totalFrames(segments: BriefSegment[], fps: number): number {
   return segments.reduce((sum, s) => sum + Math.round(s.duration_target * fps), 0);
+}
+
+// ── Phase 3 types ──
+
+export interface Phase3TemplateProps {
+  brief: Phase3CreativeBrief;
+  copyPackage: CopyPackage;
+  clipPaths: Record<number, string | string[]>;
+  transcriptions: Record<number, WordTimestamp[]>;
+  logoPath: string | null;
+  musicPath: string | null;
+  brandConfig: BrandConfig;
+  beatMap?: {
+    tempo_bpm: number;
+    first_beat_offset: number;
+    beat_positions: number[];
+    duration: number;
+  } | null;
+}
+
+export interface Phase3ResolvedSegment {
+  slotIndex: number;
+  type: 'hook' | 'body' | 'cta';
+  label: string;
+  pacing: 'slow' | 'medium' | 'fast';
+  durationFrames: number;
+  startFrame: number;
+  transitionIn: string;
+  transitionDurationFrames: number;
+  textOverlay: {
+    text: string;
+    style: string;
+    position: string;
+    animation: string;
+  };
+  clipPath: string | string[];
+  energy: number;
 }

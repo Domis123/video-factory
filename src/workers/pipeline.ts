@@ -30,7 +30,7 @@ import { mixAudio } from './audio-mixer.js';
 import { checkSync } from './sync-checker.js';
 import { exportPlatforms } from './exporter.js';
 import { runQAChecks, allChecksPassed } from './qa-checker.js';
-import type { Job, ContextPacket, BrandConfig } from '../types/database.js';
+import type { Job, ContextPacket, Phase3ContextPacket, Phase3CreativeBrief, BrandConfig } from '../types/database.js';
 import type { WordTimestamp } from './transcriber.js';
 
 // ── Planning Pipeline ──
@@ -69,33 +69,41 @@ export async function runPlanning(jobId: string): Promise<void> {
       brandConfig: brand as BrandConfig,
     });
 
+    const isPhase3 = 'creative_direction' in contextPacket.brief;
+
     let fullBrief: string;
     try {
-      fullBrief = formatFullBrief(contextPacket);
+      fullBrief = formatFullBrief(contextPacket as ContextPacket);
     } catch (formatErr) {
       console.error(`[pipeline] formatFullBrief failed for ${jobId}:`, formatErr);
       fullBrief = `(format failed: ${(formatErr as Error).message})`;
     }
 
-    // Store Context Packet in job
+    const templateOrComp = isPhase3
+      ? (contextPacket.brief as Phase3CreativeBrief).composition_id
+      : (contextPacket as ContextPacket).brief.template_id;
+
+    const ctaText = isPhase3
+      ? (contextPacket.copy.hook_variants[0]?.text ?? null)
+      : ((contextPacket as ContextPacket).brief.segments.find((s) => s.type === 'cta')?.text_overlay.text ?? null);
+
     await supabaseAdmin
       .from('jobs')
       .update({
         context_packet: contextPacket as unknown as Record<string, unknown>,
         video_type: contextPacket.brief.video_type,
-        template_id: contextPacket.brief.template_id,
+        template_id: templateOrComp,
         hook_text: contextPacket.copy.hook_variants[0]?.text ?? null,
-        cta_text: contextPacket.brief.segments.find((s) => s.type === 'cta')?.text_overlay.text ?? null,
-        brief_summary: `${contextPacket.brief.video_type} | ${contextPacket.brief.template_id} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
+        cta_text: ctaText,
+        brief_summary: `${contextPacket.brief.video_type} | ${templateOrComp} | ${contextPacket.brief.total_duration_target}s | ${contextPacket.brief.segments.length} segments`,
         full_brief: fullBrief,
         clip_selections: contextPacket.clips as unknown as Record<string, unknown>,
         copy_package: contextPacket.copy as unknown as Record<string, unknown>,
       })
       .eq('id', jobId);
 
-    // Transition to brief_review (worker reviews in Sheets)
     await transitionJob(jobId, 'planning', 'brief_review', {
-      template: contextPacket.brief.template_id,
+      template: templateOrComp,
       duration: contextPacket.brief.total_duration_target,
     });
 
@@ -348,8 +356,11 @@ export async function runRenderPipeline(jobId: string): Promise<void> {
 
 // ── Helpers ──
 
-function generateSlug(contextPacket: ContextPacket): string {
-  const hookText = contextPacket.copy.hook_variants[0]?.text ?? contextPacket.brief.template_id;
+function generateSlug(contextPacket: ContextPacket | Phase3ContextPacket): string {
+  const fallback = 'creative_direction' in contextPacket.brief
+    ? (contextPacket.brief as Phase3CreativeBrief).composition_id
+    : (contextPacket as ContextPacket).brief.template_id;
+  const hookText = contextPacket.copy.hook_variants[0]?.text ?? fallback;
   return hookText
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

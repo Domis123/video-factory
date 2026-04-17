@@ -1,12 +1,24 @@
 import React from 'react';
 import { useCurrentFrame, interpolate } from 'remotion';
 
+const PHASE3_TRANSITION_MAP: Record<string, string> = {
+  'hard-cut': 'cut',
+  'crossfade': 'crossfade',
+  'slide': 'slide-left',
+  'zoom': 'zoom',
+  'whip-pan': 'whip-pan',
+  'fade-from-black': 'fade-from-black',
+};
+
+export function mapTransitionName(name: string): string {
+  return PHASE3_TRANSITION_MAP[name] || name;
+}
+
 interface TransitionEffectProps {
-  type: 'cut' | 'fade' | 'slide-left' | 'slide-up' | 'zoom' | 'wipe' | 'beat-flash' | 'beat-zoom';
+  type: string;
   durationFrames?: number;
   startFrame: number;
   color?: string;
-  /** Frame aligned to a musical beat (overrides startFrame for beat-synced transitions) */
   beatAlignedFrame?: number;
 }
 
@@ -26,7 +38,7 @@ export const TransitionEffect: React.FC<TransitionEffectProps> = ({
   const effectiveStart = beatAlignedFrame ?? startFrame;
   const localFrame = frame - effectiveStart;
 
-  if (type === 'cut' || localFrame < 0 || localFrame > durationFrames) return null;
+  if (type === 'cut' || type === 'crossfade' || localFrame < 0 || localFrame > durationFrames) return null;
 
   const progress = localFrame / durationFrames;
 
@@ -128,6 +140,71 @@ function getTransitionStyle(
         }),
         transform: `scale(${interpolate(localFrame, [0, durationFrames], [1.15, 1.0])})`,
       };
+
+    case 'fade-from-black':
+      return {
+        backgroundColor: '#000000',
+        opacity: interpolate(localFrame, [0, durationFrames], [1, 0], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        }),
+      };
+
+    case 'fade-to-black':
+      return {
+        backgroundColor: '#000000',
+        opacity: interpolate(localFrame, [0, durationFrames], [0, 1], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        }),
+      };
+
+    case 'slide-down':
+      return {
+        backgroundColor: color,
+        transform: isFirstHalf
+          ? `translateY(${interpolate(halfProgress, [0, 1], [-100, 0])}%)`
+          : `translateY(${interpolate(halfProgress, [0, 1], [100, 0])}%)`,
+      };
+
+    case 'slide-right':
+      return {
+        backgroundColor: color,
+        transform: isFirstHalf
+          ? `translateX(${interpolate(halfProgress, [0, 1], [-100, 0])}%)`
+          : `translateX(${interpolate(halfProgress, [0, 1], [100, 0])}%)`,
+      };
+
+    case 'whip-pan':
+      return {
+        backgroundColor: color,
+        opacity: interpolate(localFrame, [0, durationFrames * 0.3, durationFrames], [0.6, 0.8, 0], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        }),
+        transform: `translateX(${interpolate(localFrame, [0, durationFrames], [-100, 100])}%)`,
+        filter: `blur(${interpolate(localFrame, [0, durationFrames / 2, durationFrames], [0, 8, 0])}px)`,
+      };
+
+    case 'blur-through':
+      return {
+        backdropFilter: `blur(${interpolate(localFrame, [0, durationFrames / 2, durationFrames], [0, 20, 0])}px)`,
+      };
+
+    case 'glitch': {
+      const seed = localFrame * 17;
+      const jitter1 = Math.sin(seed) * 20;
+      const jitter2 = Math.cos(seed * 1.3) * 15;
+      const flickerOpacity = localFrame % 3 === 0 ? 0.7 : localFrame % 3 === 1 ? 0.5 : 0.9;
+      return {
+        background: `linear-gradient(${jitter1}deg, ${color}88, #ff000066, #00ff0066)`,
+        opacity: flickerOpacity * interpolate(localFrame, [0, durationFrames], [1, 0], {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        }),
+        transform: `translateX(${jitter2}px)`,
+      };
+    }
 
     default:
       return {};
