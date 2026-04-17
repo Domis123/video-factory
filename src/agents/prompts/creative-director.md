@@ -86,10 +86,30 @@ For each of the `slot_count` segments, in order:
 2. **`label`** — short snake-case label you invent for this slot's role (e.g., `"hook-question"`, `"tip-2"`, `"before-shot"`, `"after-reveal"`, `"cta-bio"`). Human-readable.
 3. **`pacing`** — `slow` (>4s holds), `medium` (2–4s holds), or `fast` (<2s holds, quick cuts). Match the archetype.
 4. **`cut_duration_target_s`** — how long this slot should be on-screen, in seconds. Integer or one decimal place. Sum of all `cut_duration_target_s` should land within the video type's duration range (see Schema constraints below).
+
+   **Talking-head hooks need room to land.** If a hook slot's `content_type` includes `"talking-head"`:
+   - Pacing `slow` → `cut_duration_target_s` ≥ 7
+   - Pacing `medium` → `cut_duration_target_s` ≥ 5
+   - Pacing `fast` → 3–4s is fine for a punchy single line
+   A speaker cut off mid-sentence kills the hook. When in doubt, give an extra second.
+
 5. **`transition_in`** — how this slot arrives on screen. Pick from: `hard-cut`, `crossfade`, `slide`, `zoom`, `whip-pan`, `fade-from-black`. The hook's `transition_in` is typically `hard-cut` or `fade-from-black`.
 6. **`internal_cut_style`** — what happens WITHIN this slot: `hold` (one continuous clip), `hard-cuts` (multiple clips stitched), or `soft-cuts` (multiple clips with short blends). `hold` is the default.
 7. **`text_overlay`** — style, position, animation, and `char_target` (10–60 chars). The Copywriter will fill in the actual text targeting your char budget. You decide visual presentation only.
 8. **`clip_requirements`** — instructions for the Asset Curator. Fill in `mood`, `has_speech`, `min_quality` (1–10, usually 5–7), `content_type` (array of 1–3 short tags like `["exercise", "talking-head"]`), `visual_elements` (array of things that must be visible, e.g., `["person", "gym"]`), and `aesthetic_guidance` — 1–2 sentences of free-text for the curator to match the visual feel.
+
+   **CRITICAL — describe what the camera SEES, not the exercise name.** The Asset Curator matches clips using visual similarity search (CLIP embeddings) and text descriptions from ingestion. Exercise names don't map to visual features — CLIP doesn't know yoga or pilates terminology. Your `aesthetic_guidance` must paint what the movement LOOKS LIKE:
+
+   | ❌ Exercise name | ✅ Visual description |
+   |---|---|
+   | "cat-cow stretch" | "hands and knees on mat, alternating between rounding the spine upward with chin tucked and arching the back downward with head lifted, slow rhythmic motion" |
+   | "glute bridge" | "lying on back with knees bent and feet flat, slowly lifting hips until torso forms a straight line, holding at the top, then lowering with control" |
+   | "dead bug" | "lying face-up with arms extended straight toward ceiling and knees bent at 90°, slowly lowering opposite arm and leg toward the floor while keeping lower back pressed flat" |
+   | "thread the needle" | "starting on hands and knees, reaching one arm underneath the torso toward the opposite side while rotating the upper back, cheek lowering toward the mat" |
+
+   The same principle applies to `visual_elements` — use observable features ("mat", "wall", "foam roller", "kneeling position") not exercise taxonomy.
+
+   You MAY still mention the exercise name in the `label` (e.g., `"move-2-cat-cow"`) — labels are human-readable identifiers, not retrieval queries.
 
 Once all slots are filled, set the top-level `creative_vision` — a 2–3 sentence paragraph describing the overall feel of the video — and `color_treatment` (one of the eight options).
 
@@ -356,7 +376,7 @@ These show the variety you should produce. Study the differences — slot counts
       "transition_in": "crossfade",
       "internal_cut_style": "hold",
       "text_overlay": { "style": "label", "position": "top-left", "animation": "fade", "char_target": 22 },
-      "clip_requirements": { "mood": "focused", "has_speech": false, "min_quality": 6, "content_type": ["exercise"], "visual_elements": ["person", "wall"], "aesthetic_guidance": "Side-angle view of a person performing a controlled wall slide, full body visible, unhurried pace." }
+      "clip_requirements": { "mood": "focused", "has_speech": false, "min_quality": 6, "content_type": ["exercise"], "visual_elements": ["person", "wall"], "aesthetic_guidance": "Side-angle view of person standing with back flat against a wall, slowly bending knees to slide down into a seated position with arms raised overhead, full body visible, controlled unhurried descent." }
     },
     {
       "type": "body",
@@ -366,7 +386,7 @@ These show the variety you should produce. Study the differences — slot counts
       "transition_in": "crossfade",
       "internal_cut_style": "hold",
       "text_overlay": { "style": "label", "position": "top-left", "animation": "fade", "char_target": 22 },
-      "clip_requirements": { "mood": "focused", "has_speech": false, "min_quality": 6, "content_type": ["exercise"], "visual_elements": ["person", "mat"], "aesthetic_guidance": "Mat-level view of cat-cow flow, emphasis on spinal articulation, slow breath-synced movement." }
+      "clip_requirements": { "mood": "focused", "has_speech": false, "min_quality": 6, "content_type": ["exercise"], "visual_elements": ["person", "mat"], "aesthetic_guidance": "Mat-level view of person on hands and knees, alternating between rounding the spine upward with chin tucked and arching the back downward with head lifted, slow rhythmic motion synced with breathing." }
     },
     {
       "type": "body",
@@ -376,7 +396,7 @@ These show the variety you should produce. Study the differences — slot counts
       "transition_in": "crossfade",
       "internal_cut_style": "hold",
       "text_overlay": { "style": "label", "position": "top-left", "animation": "fade", "char_target": 22 },
-      "clip_requirements": { "mood": "focused", "has_speech": false, "min_quality": 6, "content_type": ["exercise"], "visual_elements": ["person", "mat"], "aesthetic_guidance": "Side view of a glute bridge with slow hip lift and hold, calm tempo, controlled descent." }
+      "clip_requirements": { "mood": "focused", "has_speech": false, "min_quality": 6, "content_type": ["exercise"], "visual_elements": ["person", "mat"], "aesthetic_guidance": "Side view of person lying on back with knees bent and feet flat on the floor, slowly lifting hips upward until torso forms a straight line from shoulders to knees, holding briefly, then lowering with control." }
     },
     {
       "type": "cta",
@@ -570,4 +590,5 @@ Return ONLY a JSON object (no markdown fences, no prose) matching this shape exa
 - **Don't pick a `color_treatment` outside `brand_config.allowed_color_treatments` when that field is an array.** This is the most common Zod-corrective-retry trigger — get it right the first time.
 - **Don't omit `aesthetic_guidance`.** The curator relies on it to match the visual feel. Empty strings are rejected.
 - **Don't exceed the video type's duration range** (workout-demo 30–45s, recipe-walkthrough 40–60s, tips-listicle 30–45s, transformation 25–40s). The sum of `cut_duration_target_s` must fit.
+- **Don't cut talking-head hooks short.** A slow-paced talking-head hook needs ≥ 7s. Medium needs ≥ 5s. If the speaker can't finish a sentence in the time budget, the hook fails.
 - **Don't return anything other than the JSON object.** No prose, no markdown, no commentary, no code fences.
