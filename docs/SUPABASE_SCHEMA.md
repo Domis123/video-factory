@@ -2,7 +2,7 @@
 
 **Project:** Video Factory
 **Supabase URL:** `https://kfdfcoretoaukcoasfmu.supabase.co`
-**Last updated:** 2026-04-16
+**Last updated:** 2026-04-17
 **Status:** Mixed — some tables fully verified via SQL inspection, others inferred from code/migrations
 
 **Verification key:**
@@ -299,6 +299,7 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | 2026-04-15 | `jobs.brief_summary` backfilled to new `{video_type} \| {template_id} \| {duration}s \| {N} segments` format for ~6 historical rows | Format alignment after W1 changed `runPlanning`'s output format. |
 | 2026-04-16 | **Clean-slate drop (W5):** `DELETE FROM assets WHERE brand_id='nordpilates'` (53 rows → 0, cascade dropped 182 `asset_segments` rows) | Pre-sprint cleanup per Architecture Rule 28. Scripted via `src/scripts/clean-slate-nordpilates.ts`. |
 | 2026-04-16 | **R2 prefix deletion (W5):** purged `assets/nordpilates/`, `segments/nordpilates/`, `keyframes/nordpilates/`, `parents/normalized/nordpilates/` + carnimeat test debris | Mirror of DB clean-slate. Same script as above. |
+| 2026-04-17 | `ENABLE_PHASE_3_CD` flipped to `true` on VPS `.env` | Phase 3 live. First production video rendered (job `fe34b673`). No DB schema changes — flag is in `.env`. |
 
 ---
 

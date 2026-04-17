@@ -123,11 +123,12 @@ src/index.ts (entry point)
 2. Fetch job + brand config from Supabase
 3. Select video type from brand + idea seed keywords
 4. Run Creative Director agent (Claude Sonnet API)
-   → Produces creative brief with segments, pacing, energy curve
-5. Run Asset Curator agent (Claude Sonnet API)
-   → Selects clips from Supabase assets matching brief requirements
+   → Phase 3 (production): generates parameterized brief with variable slot count, per-slot transitions, text overlay constraints, color treatment, creative_vision
+   → Phase 2 (legacy): generates fixed 3-slot brief with template_id
+5. Run Asset Curator agent (Gemini Pro API)
+   → Selects clips from Supabase asset_segments via pgvector retrieval, reads creative_vision + aesthetic_guidance (Phase 3)
 6. Run Copywriter agent (Claude Sonnet API)
-   → Generates hook text, CTA, platform captions, hashtags
+   → Generates hook text, CTA, platform captions, hashtags, per-slot overlay text (Phase 3)
 7. Merge all 3 outputs into immutable Context Packet
 8. Select music track (weighted random by mood + energy)
 9. Build template config (transition timing from energy curve)
@@ -184,6 +185,8 @@ journalctl -u video-factory -n 50 # Last 50 log lines
 ```
 
 ### Deploying updates
+
+**Note:** VPS install path is `/home/video-factory` (not `~/video-factory` when logged in as root — root's home is `/root`).
 
 ```bash
 ssh root@95.216.137.35
