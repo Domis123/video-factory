@@ -312,6 +312,7 @@ export interface Phase3BriefSegment {
     min_quality: number;
     content_type: string[];
     visual_elements: string[];
+    body_focus: string | null;
     aesthetic_guidance: string;
   };
 }
@@ -354,6 +355,7 @@ export interface ClipSelectionList {
 export interface ClipSelection {
   segment_id: number;
   asset_id?: string;
+  asset_segment_id?: string;
   r2_key?: string;
   trim?: { start_s: number; end_s: number };
   match_score?: number;

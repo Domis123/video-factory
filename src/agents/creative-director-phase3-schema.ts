@@ -52,6 +52,7 @@ const phase3BriefSegmentSchema = z.object({
     min_quality: z.number(),
     content_type: z.array(z.string()),
     visual_elements: z.array(z.string()),
+    body_focus: z.string().nullable(),
     aesthetic_guidance: z.string(),
   }),
 });

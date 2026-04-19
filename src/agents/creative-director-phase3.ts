@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import type { BrandConfig, Phase3CreativeBrief } from '../types/database.js';
 import { validatePhase3Brief } from './creative-director-phase3-schema.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
+import { getLibraryInventory } from './library-inventory.js';
 
 const PROMPT_PATH = new URL('./prompts/creative-director.md', import.meta.url);
 const MODEL_ID = 'claude-sonnet-4-20250514';
@@ -48,7 +49,7 @@ async function loadPrompt(): Promise<string> {
   return readFile(PROMPT_PATH, 'utf-8');
 }
 
-function buildUserMessage(input: CreativeDirectorPhase3Input): string {
+function buildUserMessage(input: CreativeDirectorPhase3Input, librarySummary: string): string {
   return JSON.stringify({
     idea_seed: input.ideaSeed,
     brand_config: {
@@ -60,6 +61,7 @@ function buildUserMessage(input: CreativeDirectorPhase3Input): string {
       allowed_color_treatments: input.brandConfig.allowed_color_treatments,
       caption_preset: input.brandConfig.caption_preset.preset_name,
     },
+    library_inventory: librarySummary,
   });
 }
 
@@ -152,9 +154,16 @@ export async function generateBriefPhase3(
   }
 
   const systemPrompt = await loadPrompt();
-  const userMessage = buildUserMessage(input);
 
-  console.log(`[creative-director-phase3] Generating brief for ${input.brandConfig.brand_id}...`);
+  console.log(`[creative-director-phase3] Fetching library inventory for ${input.brandConfig.brand_id}...`);
+  const inventory = await getLibraryInventory(input.brandConfig.brand_id);
+  const userMessage = buildUserMessage(input, inventory.summary);
+
+  console.log(
+    `[creative-director-phase3] Generating brief for ${input.brandConfig.brand_id}` +
+      ` (library: ${inventory.totalExerciseSegments} ex, ${inventory.totalHoldSegments} hold,` +
+      ` ${inventory.talkingHeadCount} TH, ${inventory.bRollCount} b-roll)...`,
+  );
 
   // Reset per-call instrumentation
   lastGenerationStats = {
@@ -276,6 +285,7 @@ export function generateMockBriefPhase3(
           min_quality: 7,
           content_type: ['talking-head'],
           visual_elements: ['person', 'studio'],
+          body_focus: null,
           aesthetic_guidance: 'Instructor facing camera in a bright studio, warm natural light.',
         },
       },
@@ -293,6 +303,7 @@ export function generateMockBriefPhase3(
           min_quality: 6,
           content_type: ['exercise'],
           visual_elements: ['person', 'mat'],
+          body_focus: 'core',
           aesthetic_guidance: 'Side-angle view of a controlled movement, full body visible.',
         },
       },
@@ -310,6 +321,7 @@ export function generateMockBriefPhase3(
           min_quality: 6,
           content_type: ['exercise'],
           visual_elements: ['person', 'mat'],
+          body_focus: 'glutes',
           aesthetic_guidance: 'Mat-level view with emphasis on form, slow breath-synced movement.',
         },
       },
@@ -327,6 +339,7 @@ export function generateMockBriefPhase3(
           min_quality: 6,
           content_type: ['exercise'],
           visual_elements: ['person', 'mat'],
+          body_focus: 'legs',
           aesthetic_guidance: 'Side view with calm tempo and controlled descent.',
         },
       },
@@ -344,6 +357,7 @@ export function generateMockBriefPhase3(
           min_quality: 7,
           content_type: ['talking-head', 'lifestyle'],
           visual_elements: ['person'],
+          body_focus: null,
           aesthetic_guidance: 'Instructor smiling to camera, softer lighting, closing invitation energy.',
         },
       },

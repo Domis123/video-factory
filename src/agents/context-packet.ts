@@ -41,9 +41,20 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
     clips.clip_selections = clipSelections;
     console.log(`[context-packet] Clips selected: ${clipSelections.length} segments covered`);
 
-    // Agent 3: Copywriter (W3 — authors overlay text from constraints)
+    // Architecture pivot: fetch the actual descriptions of the picked segments so
+    // the copywriter can write text that matches what is on screen.
+    const selectedClipDescriptions = await fetchSelectedClipDescriptions(clipSelections);
+    console.log(
+      `[context-packet] Loaded clip descriptions for ${selectedClipDescriptions.filter(Boolean).length}/${clipSelections.length} slots`,
+    );
+
+    // Agent 3: Copywriter (W3 — authors overlay text from constraints + actual clips)
     console.log('[context-packet] Agent 3: Copywriter (Phase 3)...');
-    const copy = await generateCopy({ brief: p3Brief, brandConfig: input.brandConfig });
+    const copy = await generateCopy({
+      brief: p3Brief,
+      brandConfig: input.brandConfig,
+      selectedClipDescriptions,
+    });
     console.log(`[context-packet] Copy generated: ${copy.overlays.length} overlays, ${copy.hook_variants.length} hook variants`);
 
     // Music selection
@@ -106,6 +117,46 @@ export async function buildContextPacket(input: PlanningInput): Promise<ContextP
 
   console.log(`[context-packet] Context Packet assembled: ${contextPacket.context_packet_id}`);
   return contextPacket;
+}
+
+/**
+ * Look up the picked segment's description by asset_segment_id, indexed by slot.
+ * Returns one entry per slot (in order); slots whose pick lacks an
+ * asset_segment_id, or whose segment row is missing, return null.
+ *
+ * The copywriter uses these to write text that matches what's on screen.
+ */
+async function fetchSelectedClipDescriptions(
+  selections: ClipSelectionList['clip_selections'],
+): Promise<(string | null)[]> {
+  const segmentIds = selections
+    .map((s) => s.asset_segment_id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+  if (segmentIds.length === 0) {
+    return selections.map(() => null);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('asset_segments')
+    .select('id, description')
+    .in('id', segmentIds);
+
+  if (error) {
+    console.warn(`[context-packet] Failed to fetch clip descriptions: ${error.message} — copywriter will run without them`);
+    return selections.map(() => null);
+  }
+
+  const descById = new Map<string, string>();
+  for (const row of data ?? []) {
+    if (row.id && typeof row.description === 'string') {
+      descById.set(row.id, row.description);
+    }
+  }
+
+  return selections.map((s) =>
+    s.asset_segment_id ? descById.get(s.asset_segment_id) ?? null : null,
+  );
 }
 
 function extractClipSelections(clips: ClipSelectionList): ClipSelectionList['clip_selections'] {

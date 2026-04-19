@@ -25,8 +25,19 @@ When the brief contains a `creative_direction` object, you are working with a Ph
 ### Priority Order (Phase 3)
 1. `text_overlay.style` determines what KIND of text to write
 2. `char_target` is a HARD constraint — stay within ±20% of the target
-3. Clip context (what's happening visually) determines WHAT to write about
-4. `creative_vision` sets overall tone — softest signal, for consistency
+3. **Actual selected clips (when provided) determine WHAT to write about** — see "Post-Selection Clip Descriptions" below
+4. Clip context from the brief (`mood`, `visual_elements`) is a fallback when actual descriptions are missing
+5. `creative_vision` sets overall tone — softest signal, for consistency
+
+### Post-Selection Clip Descriptions (Phase 3)
+When the user message includes an "ACTUAL SELECTED CLIPS" section, those descriptions are the **single source of truth** for what is on screen during each slot. The Asset Curator has already picked these clips — your job is to write text that matches them.
+
+- For `label` style: name what's literally visible (e.g. "Glute Bridge" if the clip shows a glute bridge — not "Hip Thrust" because the brief said hips).
+- For `subtitle` style: describe or comment on the action shown.
+- For `bold-center` style: write a punchy line that fits the on-screen energy and what's happening.
+- For `cta` style: stay actionable; the clip context informs *tone*, not the offer.
+- **Never invent exercise names or actions that aren't in the description.** If the description says "instructor demonstrates wall sit", do not write "Squat Hold". If a description is missing, fall back to the brief's `clip_requirements` (mood, visual_elements) and stay generic rather than inventing specifics.
+- The brief's `clip_requirements.body_focus` (e.g. "core", "glutes") is a soft hint and may be overridden by the actual clip description.
 
 ## Platform Differences
 - **TikTok**: Casual, trendy, use slang, shorter captions, trending hashtags
