@@ -151,5 +151,16 @@ function mapContentTypesToSegmentTypes(seg: SegmentLike): string[] {
     result.add('b-roll');
   }
 
+  // Hard filter (Phase 3.5f): setup segments are never valid for
+  // slots requesting exercise/workout/demo content. Setup means
+  // exercise positioning, adjusting, checking phone — not the
+  // active movement an exercise slot needs.
+  const requestsActiveExercise = seg.clip_requirements.content_type.some((ct) =>
+    ['exercise', 'workout', 'demo'].includes(ct.toLowerCase()),
+  );
+  if (requestsActiveExercise) {
+    result.delete('setup');
+  }
+
   return [...result];
 }
