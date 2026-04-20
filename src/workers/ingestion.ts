@@ -12,6 +12,8 @@ import { analyzeClip } from '../lib/gemini.js';
 import { analyzeClipMetadata } from '../lib/clip-analysis.js';
 import { analyzeClipSegments } from '../lib/gemini-segments.js';
 import { processSegmentsForAsset } from '../lib/segment-processor.js';
+import { analyzeParentEndToEndV2 } from '../agents/gemini-segments-v2-batch.js';
+import { processSegmentsV2ForAsset } from '../lib/segment-processor-v2.js';
 import type { Asset } from '../types/database.js';
 
 export interface IngestionInput {
@@ -178,17 +180,36 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
     if (error) throw new Error(`Supabase insert failed: ${error.message}`);
     console.log(`[ingestion] Asset saved: ${assetId}`);
 
-    // 6. Sub-clip segmentation (non-blocking) — reads from normalized parent
+    // 6. Sub-clip segmentation (non-blocking) — reads from normalized parent.
+    // Flag is read fresh from process.env so flips take effect without rebuild;
+    // v1 remains the fallback path.
     const segmentSourcePath = normalizedLocalPath ?? input.filePath;
     try {
       const durationSeconds = probe.duration_seconds ?? 0;
       if (durationSeconds > 0) {
         const brandContext = `Brand: ${brandId}. ${description || 'UGC content.'}`;
-        const segments = await analyzeClipSegments(segmentSourcePath, durationSeconds, brandContext);
-        console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
+        const useV2 = process.env.ENABLE_SEGMENT_V2 === 'true';
 
-        const inserted = await processSegmentsForAsset(assetId, brandId, segmentSourcePath, segments);
-        console.log(`[ingestion] ${inserted} asset_segments rows written for asset ${assetId}`);
+        if (useV2) {
+          console.log(`[ingestion] ENABLE_SEGMENT_V2=true — running v2 analyzer for asset ${assetId}`);
+          const v2Result = await analyzeParentEndToEndV2(segmentSourcePath, brandContext);
+          console.log(
+            `[ingestion] v2: ${v2Result.segments.length} segments, ${v2Result.counters.uploads} upload(s), ${v2Result.counters.deletes} delete(s), ${v2Result.timings.totalMs}ms wall`,
+          );
+          const inserted = await processSegmentsV2ForAsset(
+            assetId,
+            brandId,
+            segmentSourcePath,
+            v2Result.segments,
+          );
+          console.log(`[ingestion] ${inserted} asset_segments rows written (v2 dual-write) for asset ${assetId}`);
+        } else {
+          const segments = await analyzeClipSegments(segmentSourcePath, durationSeconds, brandContext);
+          console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
+
+          const inserted = await processSegmentsForAsset(assetId, brandId, segmentSourcePath, segments);
+          console.log(`[ingestion] ${inserted} asset_segments rows written for asset ${assetId}`);
+        }
       } else {
         console.warn(`[ingestion] Skipping segmentation: no duration for asset ${assetId}`);
       }
