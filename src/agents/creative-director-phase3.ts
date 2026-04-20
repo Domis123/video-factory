@@ -269,6 +269,7 @@ export function generateMockBriefPhase3(
       slot_count: 5,
       energy_per_slot: [7, 5, 6, 6, 5],
       color_treatment: 'warm-vibrant',
+      subject_consistency: 'prefer-same',
     },
     segments: [
       {

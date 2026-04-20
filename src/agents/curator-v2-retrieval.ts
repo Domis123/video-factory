@@ -10,6 +10,7 @@ export interface BriefSlot {
   min_quality: number;
   aesthetic_guidance?: string;
   body_focus?: string;
+  type?: 'hook' | 'body' | 'cta';
 }
 
 export interface CandidateSegment {

@@ -331,6 +331,7 @@ export interface Phase3CreativeBrief {
     slot_count: number;
     energy_per_slot: number[];
     color_treatment: Phase3ColorTreatment;
+    subject_consistency: 'single-subject' | 'prefer-same' | 'mixed';
   };
   segments: Phase3BriefSegment[];
   audio: {

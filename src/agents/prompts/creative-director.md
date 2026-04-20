@@ -128,6 +128,18 @@ For each of the `slot_count` segments, in order:
 
 Once all slots are filled, set the top-level `creative_vision` — a 2–3 sentence paragraph describing the overall feel of the video — and `color_treatment` (one of the eight options).
 
+### subject_consistency — how much subject variety the video tolerates
+
+Every Phase 3.5 brief must include `subject_consistency` in creative_direction. Pick based on the archetype you chose in Step C:
+
+- `single-subject` — ALL body slots should feature the same person. Use when: archetype is `transformation-story`, `before-after`, or `calm-instructional`. These archetypes require narrative coherence across a single person. A before-after video with two different people is nonsensical. A meditative morning flow with three different instructors reads as ad creative, not content.
+
+- `prefer-same` — same person across body slots WHERE POSSIBLE, but library constraints can override. Use when: archetype is `tip-stack` or `myth-buster`. Continuity helps but content variety can justify subject changes if the library is thin on the chosen body_focus.
+
+- `mixed` — different subjects across slots are fine, even preferred for pacing. Use when: archetype is `high-energy-listicle`. Rapid cuts between different people match the kinetic energy.
+
+Default when unsure: `prefer-same`. Never default to `mixed` — subject variety should be an intentional choice, not a fallback.
+
 Vary `transition_in` and `internal_cut_style` ACROSS the slots within one brief. A brief where every body slot is `crossfade → hold` reads as a slideshow. Mix `hard-cut`, `slide`, `crossfade` across body slots; mix `hold`, `hard-cuts`, `soft-cuts` across internal styles. Each slot's choices should serve THAT slot's energy and purpose, not match its neighbors.
 
 ---
@@ -169,6 +181,7 @@ These rules are enforced downstream. Violating them will reject the brief.
 - `energy_per_slot` — array of integers 1–10. **Its length MUST equal `slot_count`.**
 - `color_treatment` must be one of the 8 named treatments (`warm-vibrant`, `cool-muted`, `high-contrast`, `soft-pastel`, `moody-dark`, `natural`, `golden-hour`, `clean-bright`). If `brand_config.allowed_color_treatments` is an array, your pick MUST appear in that array — picking outside this list is a hard failure. If `brand_config.allowed_color_treatments` is `null`, all 8 are available.
 - Different videos for the same brand SHOULD use different treatments across the allowed set. Avoid defaulting to the same one every time.
+- `subject_consistency` MUST be one of `single-subject`, `prefer-same`, `mixed`. The curator enforces this — body slots in `single-subject` mode are filtered to the parent asset of the first body pick (with library-gap fallback); `prefer-same` boosts same-parent candidates to the top; `mixed` applies no reordering.
 
 **segments**
 - Array length MUST equal `slot_count`.
@@ -222,7 +235,8 @@ These show the variety you should produce. Study the differences — slot counts
     "creative_vision": "A quiet 30-day journey that opens in muted uncertainty and lands on a confident reveal. The video should feel earned, not showy — slow build, single dramatic payoff, golden finish.",
     "slot_count": 4,
     "energy_per_slot": [4, 5, 7, 9],
-    "color_treatment": "golden-hour"
+    "color_treatment": "golden-hour",
+    "subject_consistency": "single-subject"
   },
   "segments": [
     {
@@ -291,7 +305,8 @@ These show the variety you should produce. Study the differences — slot counts
     "creative_vision": "A rapid-fire list of morning habits that drain energy, each one revealed with a snap. Bright color grading, tight cuts, and a driving beat. The viewer should feel called out and entertained.",
     "slot_count": 7,
     "energy_per_slot": [9, 8, 7, 8, 7, 8, 6],
-    "color_treatment": "high-contrast"
+    "color_treatment": "high-contrast",
+    "subject_consistency": "mixed"
   },
   "segments": [
     {
@@ -390,7 +405,8 @@ These show the variety you should produce. Study the differences — slot counts
     "creative_vision": "A calm, approachable pilates routine for people with lower-back tension. Warm studio light, deliberate movement, one exercise at a time. The viewer should feel they can do this themselves after watching once.",
     "slot_count": 5,
     "energy_per_slot": [7, 5, 6, 6, 5],
-    "color_treatment": "warm-vibrant"
+    "color_treatment": "warm-vibrant",
+    "subject_consistency": "single-subject"
   },
   "segments": [
     {
@@ -469,7 +485,8 @@ These show the variety you should produce. Study the differences — slot counts
     "creative_vision": "A follow-along abs routine built for real-world time constraints. Warm natural light, clean framing, each exercise shown long enough that the viewer can execute it alongside. Energy ramps through the burn and softens on the closing invitation.",
     "slot_count": 7,
     "energy_per_slot": [6, 7, 8, 8, 9, 8, 6],
-    "color_treatment": "warm-vibrant"
+    "color_treatment": "warm-vibrant",
+    "subject_consistency": "prefer-same"
   },
   "segments": [
     {
@@ -570,7 +587,8 @@ Return ONLY a JSON object (no markdown fences, no prose) matching this shape exa
     "creative_vision": "<2-3 sentences>",
     "slot_count": <integer 3-12>,
     "energy_per_slot": [<integers 1-10, length === slot_count>],
-    "color_treatment": "<one of 8 options>"
+    "color_treatment": "<one of 8 options>",
+    "subject_consistency": "<single-subject|prefer-same|mixed>"
   },
   "segments": [
     {

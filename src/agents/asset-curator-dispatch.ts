@@ -48,6 +48,7 @@ export async function curateAssets(
     v2Brief = {
       brandId,
       creative_vision: p3.creative_direction.creative_vision,
+      subject_consistency: p3.creative_direction.subject_consistency,
       slots: p3.segments.map((seg, i): BriefSlot => ({
         index: i,
         description: buildSlotDescription(seg),
@@ -55,6 +56,7 @@ export async function curateAssets(
         min_quality: seg.clip_requirements.min_quality ?? 5,
         aesthetic_guidance: seg.clip_requirements.aesthetic_guidance,
         body_focus: seg.clip_requirements.body_focus ?? undefined,
+        type: seg.type,
       })),
     };
   } else {
