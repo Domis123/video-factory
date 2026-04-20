@@ -7,6 +7,12 @@ const PROMPT_PATH = new URL('./prompts/copywriter.md', import.meta.url);
 export interface CopywriterInput {
   brief: CreativeBrief | Phase3CreativeBrief;
   brandConfig: BrandConfig;
+  /**
+   * Phase 3 only. Indexed by slot. Each entry is the description of the segment
+   * the curator picked for that slot, or null if no description is available.
+   * The copywriter uses these so overlay text matches what's on screen.
+   */
+  selectedClipDescriptions?: (string | null)[];
 }
 
 /** Load system prompt from markdown file */
@@ -29,7 +35,7 @@ export async function generateCopy(input: CopywriterInput): Promise<CopyPackage>
 
   if (isPhase3) {
     const p3 = input.brief as Phase3CreativeBrief;
-    userMessage = buildPhase3UserMessage(p3, input.brandConfig);
+    userMessage = buildPhase3UserMessage(p3, input.brandConfig, input.selectedClipDescriptions);
     console.log(`[copywriter] Phase 3 brief: ${p3.segments.length} slots, vision="${p3.creative_direction.creative_vision.slice(0, 60)}..."`);
   } else {
     userMessage = JSON.stringify({
@@ -89,7 +95,11 @@ export async function generateCopy(input: CopywriterInput): Promise<CopyPackage>
   return normalizeCopy(raw, input.brief.brief_id);
 }
 
-function buildPhase3UserMessage(brief: Phase3CreativeBrief, brandConfig: BrandConfig): string {
+function buildPhase3UserMessage(
+  brief: Phase3CreativeBrief,
+  brandConfig: BrandConfig,
+  selectedClipDescriptions?: (string | null)[],
+): string {
   const lines: string[] = [];
 
   lines.push('=== PHASE 3 BRIEF ===');
@@ -110,6 +120,18 @@ function buildPhase3UserMessage(brief: Phase3CreativeBrief, brandConfig: BrandCo
       `char_target=${seg.text_overlay.char_target}, animation=${seg.text_overlay.animation}. ` +
       `Clip context: ${clipCtx}`,
     );
+  }
+
+  // Architecture pivot: post-selection clip descriptions. The copywriter MUST
+  // write text that matches what's actually shown on screen — these come from
+  // asset_segments.description for the segments the curator picked.
+  if (selectedClipDescriptions && selectedClipDescriptions.some((d) => d)) {
+    lines.push('');
+    lines.push('--- ACTUAL SELECTED CLIPS (write text that matches these) ---');
+    for (let i = 0; i < brief.segments.length; i++) {
+      const desc = selectedClipDescriptions[i];
+      lines.push(`Slot ${i}: ${desc ? desc : '(no description available — fall back to clip_requirements)'}`);
+    }
   }
 
   lines.push('');

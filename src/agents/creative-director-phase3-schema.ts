@@ -31,6 +31,8 @@ const musicTempoSchema = z.enum(['slow', 'medium', 'fast']);
 
 const segmentTypeSchema = z.enum(['hook', 'body', 'cta']);
 
+const subjectConsistencySchema = z.enum(['single-subject', 'prefer-same', 'mixed']);
+
 const pacingSchema = z.enum(['slow', 'medium', 'fast']);
 
 const phase3BriefSegmentSchema = z.object({
@@ -52,6 +54,7 @@ const phase3BriefSegmentSchema = z.object({
     min_quality: z.number(),
     content_type: z.array(z.string()),
     visual_elements: z.array(z.string()),
+    body_focus: z.string().nullable(),
     aesthetic_guidance: z.string(),
   }),
 });
@@ -71,6 +74,7 @@ export const phase3CreativeBriefSchema = z
       slot_count: z.number().int().min(3).max(12),
       energy_per_slot: z.array(z.number().int().min(1).max(10)),
       color_treatment: colorTreatmentSchema,
+      subject_consistency: subjectConsistencySchema,
     }),
     segments: z.array(phase3BriefSegmentSchema),
     audio: z.object({

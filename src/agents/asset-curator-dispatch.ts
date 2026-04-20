@@ -48,12 +48,15 @@ export async function curateAssets(
     v2Brief = {
       brandId,
       creative_vision: p3.creative_direction.creative_vision,
+      subject_consistency: p3.creative_direction.subject_consistency,
       slots: p3.segments.map((seg, i): BriefSlot => ({
         index: i,
         description: buildSlotDescription(seg),
         valid_segment_types: mapContentTypesToSegmentTypes(seg),
         min_quality: seg.clip_requirements.min_quality ?? 5,
         aesthetic_guidance: seg.clip_requirements.aesthetic_guidance,
+        body_focus: seg.clip_requirements.body_focus ?? undefined,
+        type: seg.type,
       })),
     };
   } else {
@@ -76,6 +79,7 @@ export async function curateAssets(
   const clipSelections: ClipSelection[] = v2Results.map((r) => ({
     segment_id: r.slotIndex,
     asset_id: r.parentAssetId || undefined,
+    asset_segment_id: r.segmentId || undefined,
     r2_key: r.parentR2Key || undefined,
     trim: { start_s: r.trimStartS, end_s: r.trimEndS },
     match_score: r.score / 10,
@@ -97,6 +101,7 @@ interface SegmentLike {
     content_type: string[];
     mood: string | string[];
     visual_elements?: string[];
+    body_focus?: string | null;
   };
 }
 
@@ -106,6 +111,9 @@ function buildSlotDescription(seg: SegmentLike): string {
   if (seg.label) parts.push(`(${seg.label})`);
   if (seg.clip_requirements.content_type.length > 0) {
     parts.push(`showing: ${seg.clip_requirements.content_type.join(', ')}`);
+  }
+  if (seg.clip_requirements.body_focus) {
+    parts.push(`body focus: ${seg.clip_requirements.body_focus}`);
   }
   const mood = Array.isArray(seg.clip_requirements.mood)
     ? seg.clip_requirements.mood.join('/')
@@ -143,6 +151,17 @@ function mapContentTypesToSegmentTypes(seg: SegmentLike): string[] {
     result.add('exercise');
     result.add('hold');
     result.add('b-roll');
+  }
+
+  // Hard filter (Phase 3.5f): setup segments are never valid for
+  // slots requesting exercise/workout/demo content. Setup means
+  // exercise positioning, adjusting, checking phone — not the
+  // active movement an exercise slot needs.
+  const requestsActiveExercise = seg.clip_requirements.content_type.some((ct) =>
+    ['exercise', 'workout', 'demo'].includes(ct.toLowerCase()),
+  );
+  if (requestsActiveExercise) {
+    result.delete('setup');
   }
 
   return [...result];

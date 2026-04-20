@@ -32,6 +32,7 @@ export interface CuratorV2Brief {
   slots: BriefSlot[];
   brandId: string;
   creative_vision?: string;
+  subject_consistency?: 'single-subject' | 'prefer-same' | 'mixed';
 }
 
 // ── Prompt + model config ──
@@ -142,6 +143,36 @@ async function curateSlot(
     candidates = candidates.filter((c) => !pickedIds.has(c.segmentId));
     if (candidates.length < before) {
       console.log(`[curator-v2] Slot ${slot.index}: filtered ${before - candidates.length} already-picked segments (${candidates.length} remaining)`);
+    }
+  }
+
+  // Subject consistency (Phase 3.5f): for body slots, filter or boost
+  // candidates to the parent of the first picked body clip. Keeps one
+  // subject across the video's body slots in modes that request it.
+  // Full fix lives in Phase 4 (Visual Director reads subject descriptors).
+  if (slot.type === 'body' && brief.subject_consistency && brief.subject_consistency !== 'mixed') {
+    const firstBodyResult = previousResults.find((r) => {
+      if (!r.parentAssetId) return false;
+      const s = brief.slots.find((bs) => bs.index === r.slotIndex);
+      return s?.type === 'body';
+    });
+    const firstBodyPickedParent = firstBodyResult?.parentAssetId;
+
+    if (firstBodyPickedParent) {
+      const sameSubject = candidates.filter((c) => c.parentAssetId === firstBodyPickedParent);
+      const otherSubject = candidates.filter((c) => c.parentAssetId !== firstBodyPickedParent);
+
+      if (brief.subject_consistency === 'single-subject') {
+        if (sameSubject.length >= 3) {
+          candidates = sameSubject;
+          console.log(`[curator-v2] Slot ${slot.index}: single-subject mode, filtered ${candidates.length} same-parent candidates`);
+        } else {
+          console.warn(`[curator-v2] Slot ${slot.index}: single-subject mode requested but only ${sameSubject.length} same-parent candidates — falling back to full set`);
+        }
+      } else if (brief.subject_consistency === 'prefer-same') {
+        candidates = [...sameSubject, ...otherSubject];
+        console.log(`[curator-v2] Slot ${slot.index}: prefer-same mode, boosted ${sameSubject.length} same-parent candidates to top`);
+      }
     }
   }
 

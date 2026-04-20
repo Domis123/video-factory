@@ -1,7 +1,7 @@
 # Phase 3 Design
 
-**Status:** ALL WORKSTREAMS SHIPPED. W1 (2026-04-15), W5 (2026-04-16), W2+W3+W4 (2026-04-17). Phase 3 LIVE. `ENABLE_PHASE_3_CD=true` flipped 2026-04-17.
-**Last updated:** 2026-04-17
+**Status:** ALL WORKSTREAMS SHIPPED. W1 (2026-04-15), W5 (2026-04-16), W2+W3+W4 (2026-04-17). Phase 3 LIVE — `ENABLE_PHASE_3_CD=true`. Segment analyzer rewrite + full re-segmentation complete (2026-04-18, 903 segments). **Architecture pivot needed** — CD designs for exercises it can't verify exist. See `HANDOFF_PHASE3_ARCHITECTURE_PIVOT.md`.
+**Last updated:** 2026-04-18
 **Supersedes:** Phase 3 sketch in MVP_PROGRESS (6).md
 **Foundation document:** All Phase 3 agent briefs reference this doc
 
@@ -12,14 +12,14 @@
 Eliminate the "every video feels the same" problem that surfaced after Phase 2 cleanup. The Phase 2 curator works correctly — it picks clips intentionally with reasoning. But every video still has the same structural shape, same color palette, same cut style, same vibe. That sameness comes from three sources:
 
 - The Creative Director makes the same structural decisions for every video (fixed 5 slots, single template, no creative variation) — **W1 SHIPPED, addresses this**
-- The Remotion composition is hard-coded to one template with one set of visual choices — W4 planned
+- The Remotion composition is hard-coded to one template with one set of visual choices — **W4 SHIPPED, addresses this**
 - There's no concept of "vibe" or "creative direction" beyond mood + energy_level — **W1 SHIPPED, addresses this (vibe param plumbing deferred to post-W1)**
 
 Phase 3 solves all three at once by giving the Creative Director open-ended creative freedom and rebuilding Remotion as a parameterized composition that renders whatever the CD describes.
 
 ## Success criterion
 
-8 of 10 consecutive Phase 3 production videos pass operator approval (`jobs.review_decision = 'approve'`). Tracked in the existing approval workflow. **Cannot be measured until W4 ships and ENABLE_PHASE_3_CD + ENABLE_PHASE_3_REMOTION flip together at Milestone 3.3.**
+8 of 10 consecutive Phase 3 production videos pass operator approval (`jobs.review_decision = 'approve'`). Tracked in the existing approval workflow. **Blocked by architecture pivot** — current pipeline produces videos that pass auto QA but are factually incorrect (overlay text doesn't match clips shown). Prompt-level fixes improved curator scores (4/10 → 9/10) and re-segmentation improved library quality (611→903 segments), but the fundamental problem is architectural: the CD designs for exercises it can't verify exist. Architecture pivot (Milestone 3.5) must ship before measuring against this criterion.
 
 First test brand: nordpilates. Operator (Domis) will fix brand_config product/color drift before testing starts.
 
@@ -159,52 +159,78 @@ Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is inde
 
 ### W2 — Asset Curator V2 update ✅ SHIPPED
 
-**Shipped:** 2026-04-17, commit `68441bc`.
+**Shipped:** 2026-04-17. Commit `68441bc` on main.
 
-**Files changed:**
-- `src/agents/asset-curator-v2.ts` — +49/-23. Phase 3 branch via `'creative_direction' in brief` discriminant. `SegmentLike` interface abstracts Phase 2/3 segment shapes. Dedup filter rejects same parent clip across slots.
-- `src/agents/asset-curator-dispatch.ts` — Phase 3 brief type wiring.
-- `src/agents/curator-v2-retrieval.ts` — +1 optional `aestheticGuidance` field on `BriefSlot`.
-- `src/agents/prompts/asset-curator-v2.md` — 42→52 lines. Added CREATIVE VISION + AESTHETIC GUIDANCE sections. Eval criteria expanded 4→6 (added aesthetic alignment + creative vision coherence).
+**Files touched:**
+- `src/agents/asset-curator-v2.ts` — `creative_vision?: string` on CuratorV2Brief, two new `.replace()` calls with fallbacks, duplicate segment hard-filter in `curateSlot()`
+- `src/agents/asset-curator-dispatch.ts` — Phase 3 branch via `'creative_direction' in input.brief` discriminator, `SegmentLike` interface to widen helper signatures for both segment types (+49/-23 lines)
+- `src/agents/curator-v2-retrieval.ts` — `aesthetic_guidance?: string` optional field on BriefSlot
+- `src/agents/prompts/asset-curator-v2.md` — Two new sections (CREATIVE VISION, AESTHETIC GUIDANCE), evaluation criteria expanded 4→6 items with three-tier priority preamble (42→52 lines)
+- `src/scripts/smoke-test-curator-phase3.ts` — NEW (406 lines). Dev smoke harness with cached brief fixtures, token-overlap proxy
 
-**Smoke results:** 16/16 slots filled, avg 3-5 word aesthetic overlap per slot, dedup filter activated 8 times across 3 briefs.
+**Design decisions:**
+- aesthetic_guidance as separate prompt placeholder (not folded into slot_description)
+- BriefSlot extended with optional fields (not discriminated union)
+- CLIP retrieval query unchanged — aesthetic_guidance is Pro-only context, not retrieval augmentation
+- Duplicate segment hard-filter: candidates from already-picked segment IDs removed before Pro sees them
+
+**Smoke results:** 16/16 slots across 3 video types. Aesthetic overlap avg 3-5 words/slot. Vision overlap 10/16 slots. 0 Zod failures. 1 self-critique fire (expected — library gap for figure-four stretch). Dedup filter activated 8 times.
+
+**Estimated:** 1-2 sessions → **Actual: 2 sessions.**
 
 ### W3 — Copywriter agent update ✅ SHIPPED
 
-**Shipped:** 2026-04-17, commit `7e381e4`.
+**Shipped:** 2026-04-17. Commit `7e381e4` on main.
 
-**Files changed:**
-- `src/agents/copywriter.ts` — +149/-44. Inline Phase 3 branch via `'creative_direction' in brief`. Builds structured text context block with per-slot constraints (style, position, char_target). Phase 3 mock path generates overlays using slot indices.
-- `src/agents/prompts/copywriter.md` — 74→107 lines. Added Phase 3 Briefs section, Text Overlay Style Guide (6 styles × char_target rules), Priority Order (char compliance > style match > creative vision), Phase 3 output example.
+**Files touched:**
+- `src/agents/copywriter.ts` — Inline Phase 3 branch (no separate dispatcher). Phase 3 user message prepends structured context block (creative_vision + per-slot text_overlay constraints in plain text) before the JSON brief blob. `CopywriterInput.brief` widened to `CreativeBrief | Phase3CreativeBrief`. (+149/-44 lines)
+- `src/agents/prompts/copywriter.md` — Phase 3 sections: PHASE 3 BRIEFS intro, TEXT OVERLAY STYLE GUIDE (6 styles), PRIORITY ORDER, Phase 3 output example. Overlay length rule split: Phase 2 (6-8 words) vs Phase 3 (char_target ±20%). (74→107 lines)
+- `src/scripts/smoke-test-copywriter-phase3.ts` — NEW (205 lines). Dev smoke harness using cached W2 brief fixtures.
 
-**Smoke results:** 16/16 overlays within ±20% char_target, $0.12 API cost, 37.5s runtime.
+**Design decisions:**
+- Keep JSON dump pattern (no template substitution) — Copywriter processes all slots in one LLM call
+- Style priority: text_overlay.style → char_target → clip context → creative_vision (softest signal)
+- Inline branching via same `'creative_direction' in input.brief` discriminator as W2
+- No Zod validation added (existing normalizeCopy loose coercion works for both phases)
+- CopyOverlay.segment_id (number) works for both Phase 2 IDs and Phase 3 slot indices
+
+**Smoke results:** 16/16 overlays within ±20% char_target. Style adherence confirmed (bold-center=punchy, label=terse exercise names, cta=actionable). 3 Claude calls, $0.12 total, 37.5s wall.
+
+**Estimated:** 1-2 sessions → **Actual: 1 session.**
 
 ### W4 — Remotion parameterized composition ✅ SHIPPED
 
-**Shipped:** 2026-04-17, commit `d92d601` (squash merge of 7 commits). 11 files, +791/-130 lines.
+**Shipped:** 2026-04-17. Commit `d92d601` on main. 11 files, +791/-130 lines, 5 commits on feature branch.
 
-**New files:**
-- `src/templates/layouts/Phase3Parameterized.tsx` (143 lines) — Single parameterized composition. SlotRenderer sub-component handles crossfade opacity interpolation, transition overlays, text overlays. SegmentVideo adapter for existing component reuse.
-- `src/templates/components/Phase3TextOverlay.tsx` (238 lines) — 6 styles (bold-center, subtitle, label, cta, minimal, none) × 7 positions × 5 animations (pop-in, slide-up, fade, type-on, none). Exit fade in last 6 frames.
-- `src/templates/resolve-phase3.ts` (54 lines) — Resolves Phase 3 brief segments into frame-level timing with transition overlap subtraction and copy overlay lookup.
-- `src/templates/color-treatments.ts` (14 lines) — 8 named CSS filter strings.
-- `remotion.config.ts` (13 lines) — extensionAlias webpack override for CLI (renderer passes inline).
+**Files created:**
+- `src/templates/layouts/Phase3Parameterized.tsx` — 143 lines. Single parameterized composition handling all video types via `segments.map()`. Crossfade via opacity interpolation on overlapping sequences. Color treatment via CSS filter on root AbsoluteFill.
+- `src/templates/components/Phase3TextOverlay.tsx` — 238 lines. 6 styles (bold-center, subtitle, label, cta, minimal, none) × 7 positions × 5 animations. Style-to-rendering mapping: font size, weight, background, text color per style.
+- `src/templates/resolve-phase3.ts` — 54 lines. `resolvePhase3Segments()` + `totalPhase3Frames()`. Frame-level timing with transition overlap subtraction.
+- `src/templates/color-treatments.ts` — 14 lines. `getColorTreatmentFilter()` mapping 8 treatment names to CSS filter strings.
+- `remotion.config.ts` — 13 lines. CLI webpack override (`extensionAlias .js → .tsx`). Required for `npx remotion compositions` command.
 
-**Modified files:**
-- `src/templates/components/TransitionEffect.tsx` — +83 lines. 18 transition types total (added fade-from-black, fade-to-black, slide-down, slide-right, whip-pan, blur-through, glitch). `mapTransitionName()` export for Phase 3→internal name mapping. Crossfade returns null (handled by composition opacity).
-- `src/templates/Root.tsx` — +25 lines. Phase3Parameterized composition registered as `phase3-parameterized-v1`.
-- `src/templates/types.ts` — +39 lines. Phase3TemplateProps, Phase3ResolvedSegment interfaces.
-- `src/types/database.ts` — +21 lines. Phase3ContextPacket type (separate from ContextPacket to avoid breaking Phase 2 consumers).
-- `src/workers/renderer.ts` — +84/-46. Phase 3 detection, Phase3TemplateProps build, resolvePhase3Segments for frame calculation.
-- `src/agents/context-packet.ts` — +129/-91. Phase 3 throw removed. Full Phase 3 pipeline: CD → Curator → Copywriter → music → Phase3ContextPacket. Extracted `extractClipSelections()` and `selectMusic()` helpers.
-- `src/workers/pipeline.ts` — +31/-22. Phase 3 job storage (composition_id, cta_text, brief_summary). `generateSlug` widened.
+**Files modified:**
+- `src/templates/components/TransitionEffect.tsx` — expanded to 18 transition types (+83 lines). Added `mapTransitionName()` for Phase 3 → internal name mapping. New types: crossfade (opacity overlap), whip-pan (blur+translate overlay), fade-from-black, fade-to-black, flash, slide-right, slide-down, blur-through (backdrop-filter), glitch (jitter+hue-rotate). Phase 2 types preserved.
+- `src/templates/Root.tsx` — Fourth `<Composition id="phase3-parameterized-v1">` registered alongside Phase 2 templates (+25 lines).
+- `src/types/database.ts` — `Phase3ContextPacket` type (separate from ContextPacket to avoid cascading type breaks) (+21 lines).
+- `src/workers/renderer.ts` — Phase 3 wiring: `'creative_direction' in brief` discriminator, reads `composition_id`, assembles `Phase3TemplateProps`, clipPaths keyed by slot index (+84/-46 lines).
+- `src/agents/context-packet.ts` — Phase 3 throw REMOVED. Full Phase 3 pipeline path wired: CD → Curator (W2) → Copywriter (W3) → music selection → assemble Phase3ContextPacket (+129/-91 lines).
+- `src/workers/pipeline.ts` — Phase 3 context packet assembly, `formatFullBrief` cast for Phase 3 compatibility (+31/-22 lines).
 
-**Architecture decisions:**
-- Crossfade via opacity interpolation on SegmentVideo wrappers (both clips visible in overlap window), not overlay.
-- Transition overlap = 10 frames (0.33s) for all non-hard-cut transitions.
-- Color treatment as CSS filter on root AbsoluteFill.
-- Separate Phase3ContextPacket type to avoid cascading breaks in pipeline.ts/sync-checker.ts.
-- `ENABLE_PHASE_3_REMOTION` flag was NOT used — composition is always registered and selected by `composition_id` from the brief.
+**Architecture (as shipped):**
+- One top-level `<Composition>` maps over `segments[]` (variable 3-12 count)
+- Per slot: `<Sequence>` containing `<SegmentVideo>` + `<Phase3TextOverlay>` + `<TransitionEffect>`
+- Crossfade: incoming segment's `<Sequence>` starts N frames early; outgoing fades opacity 1→0, incoming 0→1
+- SegmentVideo adapter: thin shape-matching literal (SegmentVideo only reads clipPath + durationFrames)
+- Color treatment: CSS `filter` property on root `<AbsoluteFill>`
+- Duration: `totalPhase3Frames(resolved)` = last segment's startFrame + durationFrames
+- Template selection: renderer reads `brief.composition_id` for Phase 3, `brief.template_id` for Phase 2
+
+**Hotfixes shipped alongside W4:**
+- Transcriber no-audio (`57791f6`): ffprobe checks for audio streams before extraction. Returns empty transcription for video-only clips.
+- CTA white-on-white (`9b377ea`, pending merge): `Phase3TextOverlay` CTA style used `accentColor` (#FFFFFF for nordpilates) as background + hardcoded white text. Fixed to use `brandConfig.cta_bg_color` and `cta_text_color`.
+
+**Estimated:** 4-6 sessions → **Actual: 1 session (comprehensive brief).**
 
 ### W5 — Clean-slate ingestion + pre-normalization ✅ SHIPPED
 
@@ -249,13 +275,14 @@ Phase 3 has five workstreams. W1-W4 form the rendering critical path. W5 is inde
 
 ## Milestones
 
-Phase 3 ships in three milestones.
+Phase 3 ships in five milestones.
 
 ### Milestone 3.1 — CD + downstream agents (behind feature flag) ✅ COMPLETE
 
-**Shipped:** 2026-04-17. Includes W1 ✅, W2 ✅, W3 ✅.
+**Includes:** W1 ✅, W2 ✅, W3 ✅
+**Shipped:** 2026-04-17 (W2 + W3 merged to main alongside W4).
 
-All three agents produce Phase 3 output: CD generates parameterized brief, Curator reads creative_vision + aesthetic_guidance, Copywriter generates per-slot overlay text within char_target constraints. Full pipeline flows end-to-end behind `ENABLE_PHASE_3_CD` flag.
+All three agents (Creative Director, Asset Curator, Copywriter) handle Phase 3 briefs. Phase 3 path flows end-to-end through context-packet.ts without throwing.
 
 ### Milestone 3.2 — Clean-slate ingestion (parallel, independent) ✅ SHIPPED
 
@@ -268,20 +295,42 @@ All three agents produce Phase 3 output: CD generates parameterized brief, Curat
 
 ### Milestone 3.3 — Remotion + production flip ✅ COMPLETE
 
-**Shipped:** 2026-04-17. First Phase 3 video rendered end-to-end (job `fe34b673`, nordpilates workout-demo).
+**Includes:** W4 ✅ + feature flag flip ✅
+**Shipped:** 2026-04-17.
 
-**What actually happened vs plan:**
-- `ENABLE_PHASE_3_REMOTION` flag was NOT used. The parameterized composition is always registered; the renderer selects it via `composition_id` from the brief. Only `ENABLE_PHASE_3_CD=true` was needed.
-- Flipped `ENABLE_PHASE_3_CD=true` on VPS after W4 deploy. First video rendered successfully, auto QA passed.
-- Two hotfixes deployed same day: transcriber no-audio crash (`57791f6`), CTA white-on-white color fix (`9b377ea`).
+**`ENABLE_PHASE_3_CD` flipped to true on VPS.** `ENABLE_PHASE_3_REMOTION` was NOT used — W4 shipped without a separate Remotion flag. Phase 3 composition registered alongside Phase 2 templates; renderer selects based on `brief.composition_id`.
 
-**Cleanup deferred to Phase 3.5:**
-- Delete Phase 2 CD path (`generateBriefPhase2`, `creative-director-phase2.md`)
+**First Phase 3 production video rendered:** job `fe34b673`, nordpilates workout-demo, 5 slots, golden-hour color, auto QA passed. Three platform exports (TikTok 33.6MB, Instagram 15.1MB, YouTube 41.9MB). Render time: 584.8s.
+
+**Quality issues identified (see Post-ship quality issues section below):** clip selection mismatch, hook too short, talking-head reuse, CTA white-on-white (fixed), music mismatch, Full Brief garbled.
+
+**Cleanup items (still pending):**
+- Delete Phase 2 CD path (`generateBriefPhase2`, `creative-director-phase2.md`) — defer until quality iteration proves Phase 3 stable
 - Delete `selectVideoType()` and slim `VIDEO_TYPE_CONFIGS`
-- Delete old Remotion template variants (HookDemoCTA, HookListicleCTA, HookTransformation)
-- Remove `ENABLE_PHASE_3_CD` flag (hardcode true)
+- Delete old Remotion template variants (HookDemoCTA etc.)
+- Make `ENABLE_PHASE_3_CD` permanently true in env.ts (or remove the flag entirely)
+- Migrate ENABLE_CURATOR_V2 to env.ts pattern for consistency
 
-**Quality validation:** First video revealed clip selection quality issues (see Post-ship quality issues section). 8/10 approval criterion tracking begins after quality iteration.
+### Milestone 3.4 — Deep re-segmentation ✅ COMPLETE
+
+**Shipped:** 2026-04-18.
+
+Segment analyzer prompt fully rewritten with 4 failure modes, duration caps (exercise max 12s, hold max 15s), mandatory subject appearance, exercise naming, 10-15 structured tags, movement phase tracking. Backfill reprocess mode added to `backfill-segments.ts` (`--reprocess --brand`). Full re-segmentation run: 191 assets, 611→903 segments, 0 failures, $12.32 Gemini credits, 170 minutes.
+
+**Result:** Library quality dramatically improved. Avg exercise segment dropped from ~25s to 6.2s. Subject appearance tracked in 100% of segments. CLIP embeddings regenerated from new, more specific keyframes. Curator scores improved from 4-5/10 to 9/10.
+
+**However:** prompt-level and segmentation improvements did not fix the fundamental architecture problem (see Milestone 3.5).
+
+### Milestone 3.5 — Architecture pivot (library-aware CD + post-selection copywriting) 🔲 NOT STARTED
+
+**Problem:** The CD designs videos with specific exercise names without knowing what exercises exist in the library. The curator picks the closest match, but "closest" is often a wrong exercise. The copywriter writes text for the CD's plan, not for the actual clips shown. Result: factually incorrect videos.
+
+**Solution:** Flip the pipeline flow:
+1. Query library inventory before CD runs → CD knows what content exists
+2. CD designs structure + body focus (not exercise names) → curator picks best available clips by body region + energy
+3. Copywriter runs AFTER clip selection → writes text describing what's actually on screen
+
+**Scope:** See `HANDOFF_PHASE3_ARCHITECTURE_PIVOT.md` for full design, component changes, and implementation plan.
 
 ---
 
@@ -334,18 +383,18 @@ CD signal-mapping in Phase 3 prompt picks video_type from the brand's allowed li
 | 006 | `006_brand_configs_color_treatments.sql` | ✅ Applied 2026-04-15 (Phase 3 W1) | Add `allowed_color_treatments TEXT[]` to brand_configs. Backfill nordpilates and carnimeat. |
 | 007 | `007_pre_normalized_clips.sql` | ✅ Applied 2026-04-16 (Phase 3 W5) | Add `pre_normalized_r2_key TEXT` to assets table |
 
-Migrations 008+ as needed during W2/W3/W4. Migration runner from Phase 2 cleanup (`apply_migration_sql` RPC + `apply-migration.ts`) handles all.
+Migrations 008+ as needed during quality iteration. Migration runner from Phase 2 cleanup (`apply_migration_sql` RPC + `apply-migration.ts`) handles all. **No new migrations were needed for W2/W3/W4.**
 
 ---
 
 ## Feature flag strategy
 
-Phase 3 shipped with a single feature flag:
+Phase 3 shipped with one feature flag:
 
-- `ENABLE_PHASE_3_CD=true` — flipped 2026-04-17 on VPS. Controls whether planning uses Phase 3 CD (`generateBriefPhase3`) vs Phase 2 CD (`generateBriefPhase2`). All downstream consumers (Curator, Copywriter, Renderer) detect Phase 3 via `'creative_direction' in brief` discriminant — no separate flags needed.
-- `ENABLE_PHASE_3_REMOTION` — **NOT used.** The parameterized composition is always registered; renderer selects it by `composition_id` from the brief. No flag gate needed.
+- `ENABLE_PHASE_3_CD` ✅ added in W1 (`src/config/env.ts`). **Flipped to `true` on 2026-04-17.** Phase 3 is the production path.
+- `ENABLE_PHASE_3_REMOTION` — **NOT USED.** W4 shipped without a separate Remotion flag. Phase 3 composition registered alongside Phase 2 templates; renderer selects by `composition_id` field in the brief. Simpler than a separate flag.
 
-Old code paths (Phase 2 CD prompt + `hook-demo-cta` Remotion template) preserved for rollback. To revert: set `ENABLE_PHASE_3_CD=false` and restart worker. Phase 2 path still works end-to-end.
+Phase 2 code paths (CD, Remotion templates) preserved for rollback. Once 8/10 consecutive Phase 3 approvals hit, old paths can be removed in cleanup.
 
 ---
 
@@ -363,65 +412,87 @@ This is a temporary workflow until W6 (Brand Settings sheet sync) ships in Phase
 
 ### Reviewing Phase 3 briefs
 
-**Currently dev-only.** Smoke harness `npm run test:cd-phase3` generates 6 briefs against live Claude. Operator reads them in chat or terminal output. The Full Brief sheet column is not populated for Phase 3 briefs because the flag is off in production.
+Phase 3 briefs flow through the full pipeline and land in `jobs.context_packet`. The Full Brief sheet column is populated but has display issues — `formatFullBrief()` reads Phase 2 field names (`segment_id`, `duration_target`), showing "SLOT undefined" for Phase 3 jobs. Cosmetic fix pending.
 
-Once W2+W3 ship and the Phase 3 path stops throwing at downstream, briefs will land in `jobs.context_packet` and become operator-visible via Full Brief column.
-
----
-
-## Total effort (completed)
-
-| Workstream | Sessions | Calendar |
-|---|---|---|
-| W1 — Creative Director rewrite | 6 | 2026-04-15 (1 day) |
-| W5 — Clean-slate ingestion | 5 | 2026-04-16 (1 day) |
-| W2 — Curator V2 update | 2 | 2026-04-17 |
-| W3 — Copywriter update | 1 | 2026-04-17 |
-| W4 — Remotion composition | 1 | 2026-04-17 |
-| **Total** | **15 sessions** | **3 days (2026-04-15 → 2026-04-17)** |
+Operator reviews briefs via the Full Brief column (garbled but readable for key info like video_type, slot count, color treatment) + the Brief Summary column (clean: `workout-demo | phase3-parameterized-v1 | 35s | 5 segments`). After rendering, operator reviews via Preview URL in the sheet.
 
 ---
 
-## Open during Phase 3 (resolve as we go)
+## Total effort (complete)
 
-- **Exact CSS filter values per color treatment** — initial values in W4 doc above, refine during W4 implementation
-- **Whip-pan transition implementation** — Remotion plugin (`@remotion/transitions` or community package) vs hand-rolled. Decide during W4.
-- **Sheet `Vibe` column position** — probably new column right after `Idea Seed`. Coordinate with S1 update.
-- **S1 workflow update** — small change to pass Vibe through to Supabase. Coordinate with W1 follow-up (vibe plumbing).
-- **`min_quality` per-slot defaults** — Phase 3 CD anchored on 6-7 in smoke. Curator V2 has its own scoring; re-evaluate after W2 ships whether the prompt should specify defaults.
+| Workstream | Estimated | Actual sessions | Ship date |
+|---|---|---|---|
+| W1 (Creative Director) | 4-6 | 6 | 2026-04-15 |
+| W5 (Clean-slate ingestion) | 3-5 | 5 | 2026-04-16 |
+| W2 (Curator V2) | 1-2 | 2 | 2026-04-17 |
+| W3 (Copywriter) | 1-2 | 1 | 2026-04-17 |
+| W4 (Remotion composition) | 4-6 | 1 | 2026-04-17 |
+| **Total** | **13-21** | **15 sessions** | **3 days** |
+
+W4 dramatically beat its estimate (1 session vs 4-6 estimated) because comprehensive briefing to the agent + extensive reuse of existing components eliminated the expected iteration cycles.
+
+---
+
+## Open items (resolve as we go)
+
+- ~~**Exact CSS filter values per color treatment**~~ — ✅ RESOLVED in W4. Values in `src/templates/color-treatments.ts`. Operator can tune after seeing more renders.
+- ~~**Whip-pan transition implementation**~~ — ✅ RESOLVED in W4. Hand-rolled overlay (blur + translate). No `@remotion/transitions` dependency.
+- **Sheet `Vibe` column position** — still deferred. Probably new column right after `Idea Seed`. Coordinate with S1 update.
+- **S1 workflow update** — small change to pass Vibe through to Supabase. Still pending.
+- ~~**`min_quality` per-slot defaults**~~ — Phase 3 CD anchors on 6-7. Curator V2 has its own scoring. No issue observed in production.
 - **`brand_configs.allowed_video_types` for ketoway/nodiet** — kept at MVP single-type defaults. Update when those brands begin Phase 3 production.
 - **`brand_configs.allowed_color_treatments` for welcomebaby/nodiet/ketoway/highdiet** — currently NULL. Backfill when those brands begin Phase 3 production.
-- **Legacy `analyzeClip` Gemini Flash cleanup** — runs on every ingestion populating legacy columns nothing reads. Defer to Milestone 3.3 (stays for Phase 2 rollback path).
-- **Async ingestion via BullMQ** — synchronous HTTP for 3-15 min work is an architecture smell. 30-min n8n timeout as interim workaround. Filed to Milestone 3.3.
+- **Legacy `analyzeClip` Gemini Flash cleanup** — still runs on every ingestion. Defer to cleanup phase.
+- **Async ingestion via BullMQ** — synchronous HTTP with 30-min timeout. Defer to cleanup phase.
+- **CD visual description vs exercise names** — **NEW, highest priority.** See Post-ship quality issues.
+- **Hook minimum duration for talking-head** — **NEW.** See Post-ship quality issues.
+- **formatFullBrief Phase 3 support** — **NEW.** See Post-ship quality issues.
 
 ---
 
 ## Post-ship quality issues (identified 2026-04-17)
 
-First Phase 3 video (job fe34b673) passed auto QA but revealed quality issues:
+First Phase 3 video (job `fe34b673`, nordpilates workout-demo) passed auto QA but revealed quality issues requiring iteration:
 
-1. **Clip selection mismatch:** CD generates exercise names ("cat-cow stretch"); CLIP embeddings and Gemini Pro can't match exercise terminology to visual content. Segments described generically ("woman doing exercise on mat").
-   - Fix: CD prompt describes visual appearance instead of exercise names
-   - Fix: Curator prompt rejects "preparation" clips explicitly
+### 1. Clip selection mismatch (HIGHEST PRIORITY)
+CD generates specific exercise names ("cat-cow stretch", "spinal twist"). CLIP embeddings can't map exercise terminology to visual content (CLIP trained on image captions, not fitness terminology). Gemini segment descriptions from ingestion are generic ("woman doing exercise on mat"), not exercise-specific. Pro picker matches on text similarity, not visual verification.
 
-2. **Hook duration too short:** 4s for talking-head = speaker cut off mid-sentence.
-   - Fix: CD prompt minimum 7s for talking-head hooks
+**Fix plan:** CD prompt describes visual appearance instead of exercise names ("hands and knees, alternating between arching back upward and dropping belly down" not "cat-cow stretch"). Curator prompt explicitly rejects "preparation/setup" clips. Longer-term: ingestion prompt teaches Gemini to label specific exercises.
 
-3. **Talking-head reuse:** Only ~6 talking-head segments. Hook and CTA pick from same thin pool.
-   - Fix: More talking-head content + CTA b-roll fallback in CD prompt
+### 2. Hook duration too short
+CD set `cut_duration_target_s: 4` for a talking-head hook with `pacing: slow`. 4s is too short for a complete sentence.
 
-4. **Music mismatch:** "Rock That Body" for a calm morning stretch. Library has no calm/ambient tracks.
-   - Fix: Upload calm tracks to music_tracks
+**Fix:** CD prompt minimum 7s for hooks with `content_type=talking-head`.
 
-5. **Full Brief display garbled:** "SLOT undefined" — formatFullBrief reads Phase 2 fields.
-   - Fix: Update formatFullBrief for Phase 3 segment shape
+### 3. Talking-head reuse
+~6 talking-head segments in library. Both hook and CTA request talking-head. Dedup filter prevents exact reuse but pool is too thin for visual distinctness.
 
-See HANDOFF_PHASE3_QUALITY.md for detailed 4-layer analysis and fix plan.
+**Fix:** More talking-head content uploads + CD prompt CTA b-roll fallback when pool is thin.
+
+### 4. Music mismatch
+Morning pilates stretch (calm, gentle) got "Rock That Body" by Black Eyed Peas. Music selector picks closest energy match from 15-track library but has no calm/ambient options.
+
+**Fix:** Upload calm/gentle tracks to `music_tracks`.
+
+### 5. Full Brief display garbled
+"SLOT undefined" in sheet column. `formatFullBrief()` reads Phase 2 field names (`segment_id`, `duration_target`).
+
+**Fix:** Update `formatFullBrief()` for Phase 3 segment shape.
+
+### 6. CTA white-on-white text
+Phase3TextOverlay CTA style used `accentColor` (#FFFFFF for nordpilates) as background with hardcoded white text.
+
+**Fix:** ✅ FIXED in hotfix `9b377ea` (pending merge + deploy). Uses `cta_bg_color` and `cta_text_color` from brandConfig.
+
+**See `HANDOFF_PHASE3_QUALITY.md` for the complete 4-layer analysis and suggested fix order.**
+
+---
 
 ## Document status
 
-- This doc — Phase 3 master design, source of truth. All workstreams shipped.
-- `VIDEO_PIPELINE_ARCHITECTURE_v5_1.md` — architecture reference (no W2-W4 updates needed, details here).
-- `MVP_PROGRESS (9).md` — living progress tracker. Supersedes (8).
-- `HANDOFF_PHASE3_QUALITY.md` — quality iteration handoff, 4-layer analysis.
-- `SUPABASE_SCHEMA.md` — DB schema reference, current (migrations 006 + 007 applied, no W2-W4 schema changes).
+- This doc — Phase 3 master design, source of truth. ALL WORKSTREAMS SHIPPED.
+- `VIDEO_PIPELINE_ARCHITECTURE_v5_1.md` — architecture reference, current.
+- `MVP_PROGRESS (9).md` — living progress tracker. Replaces (8).
+- `SUPABASE_SCHEMA.md` — DB schema reference, current (no schema changes in W2-W4).
+- `HANDOFF_PHASE3_QUALITY.md` — NEW. Quality iteration handoff for next session.
+- `CLAUDE.md` — project reference, updated for Phase 3 live state.
