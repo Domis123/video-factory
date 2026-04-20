@@ -104,9 +104,9 @@ async function processOneParent(parent: ParentRow): Promise<Checkpoint> {
   const t0 = Date.now();
   const cp = newCheckpoint(parent.id, parent.brand_id);
 
-  if (!dryRun) {
-    await writeCheckpoint(CHECKPOINT_DIR, cp);
-  }
+  // Always write the in-progress checkpoint, even in dry-run, so the smoke
+  // harness (Task 6) can inspect checkpoint.r2_operations / db_operations.
+  await writeCheckpoint(CHECKPOINT_DIR, cp);
 
   const r2Key = parent.pre_normalized_r2_key ?? parent.r2_key;
   const localPath = `${BACKFILL_TMP}/${parent.id}-${randomUUID()}.mp4`;
@@ -135,6 +135,7 @@ async function processOneParent(parent: ParentRow): Promise<Checkpoint> {
       cp.status = 'complete';
       cp.completed_at = new Date().toISOString();
       cp.wall_time_ms = Date.now() - t0;
+      await writeCheckpoint(CHECKPOINT_DIR, cp);
       return cp;
     }
 
@@ -261,7 +262,7 @@ async function processOneParent(parent: ParentRow): Promise<Checkpoint> {
     cp.status = 'failed';
     cp.error = (err as Error).message;
     cp.wall_time_ms = Date.now() - t0;
-    if (!dryRun) await writeCheckpoint(CHECKPOINT_DIR, cp);
+    await writeCheckpoint(CHECKPOINT_DIR, cp);
     throw err;
   } finally {
     await unlink(localPath).catch(() => {});
