@@ -1,5 +1,45 @@
 # Handoff — Video Factory, Phase 3 Architecture Pivot
 
+---
+
+## STATUS BLOCK (updated 2026-04-20)
+
+**Implementation: SHIPPED on branch `feat/architecture-pivot` (NOT yet merged to `main`, NOT yet deployed to VPS).**
+
+Two commits, both pushed to origin:
+- `fd63a35` — feat(pivot): library-aware CD + post-selection copywriter (milestone 3.5)
+- `5327188` — fix(copywriter): enforce style constraints — only `label` names visible content
+
+### What's wired (per the plan below)
+
+| Plan element | Status |
+|---|---|
+| Library inventory query | ✅ `src/agents/library-inventory.ts` (BODY_PARTS allowlist + dense exclusion lists; ~156 unique exercise names on nordpilates after filter) |
+| CD reads inventory | ✅ `creative-director-phase3.ts` calls `getLibraryInventory(brandId)` and injects `library_inventory` into the user message |
+| CD outputs body_focus per slot | ✅ `body_focus: string \| null` on `Phase3BriefSegment.clip_requirements` (TS + Zod, in lockstep via `_AssertEqual`) |
+| Curator picks freely on body focus | ✅ `asset-curator-dispatch.ts` threads body_focus into `BriefSlot` and `buildSlotDescription` |
+| Picked segment IDs threaded through | ✅ `ClipSelection.asset_segment_id`, populated from curator V2's `r.segmentId` |
+| Copywriter runs after clip selection | ✅ `context-packet.ts` `fetchSelectedClipDescriptions()` reads `asset_segments.description` for picked IDs and passes to `generateCopy({ selectedClipDescriptions })` |
+| Copywriter writes for actual clips | ✅ `copywriter.md` "Post-Selection Clip Descriptions" section + "CRITICAL STYLE RULE" — only `label` names visible content; other styles add what the viewer can't see |
+| Smoke tests | ✅ `smoke-test-inventory.ts` (Supabase only, $0) + `smoke-test-pivot.ts` (single Sonnet brief, ~$0.05–0.20) |
+| Build | ✅ `npm run build` clean |
+| Live smoke test | ✅ PASS — 3/3 body slots picked valid library regions on nordpilates |
+
+### What's NOT done (operator next)
+
+1. Merge `feat/architecture-pivot` → `main` (PR: https://github.com/Domis123/video-factory/pull/new/feat/architecture-pivot).
+2. VPS deploy: `ssh root@95.216.137.35 → cd /home/video-factory && git pull && npm install && npm run build && systemctl restart video-factory`.
+3. Submit a fresh batch (3-5 idea seeds) and rate text/clip alignment specifically.
+4. If alignment passes → mark Milestone 3.5 ✅, start measuring 8/10 success criterion.
+
+### Items from the original plan that DID NOT ship in this pivot
+
+- `formatFullBrief()` Phase 3 fix — still cosmetic, still broken.
+- n8n S1/S2 polling investigation — separate workstream.
+- Talking-head and calm-music library gaps — content uploads, not code.
+
+---
+
 ## Who you are talking to
 
 Domis (Dominykas Auglys). Lithuanian, Vilnius. Operates a multi-brand digital business spanning health/wellness/fitness apps. You're his task curator and project manager. The agent on his VPS executes code; he's the debugger/tester pushing changes through.
