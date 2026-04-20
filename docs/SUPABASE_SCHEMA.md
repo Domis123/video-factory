@@ -2,7 +2,7 @@
 
 **Project:** Video Factory
 **Supabase URL:** `https://kfdfcoretoaukcoasfmu.supabase.co`
-**Last updated:** 2026-04-17
+**Last updated:** 2026-04-20
 **Status:** Mixed — some tables fully verified via SQL inspection, others inferred from code/migrations
 
 **Verification key:**
@@ -128,7 +128,7 @@ Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment
 | Column | Type | Notes |
 |---|---|---|
 | `id` | uuid | PK |
-| `asset_id` | uuid | FK to assets.id (parent clip). **ON DELETE CASCADE verified 2026-04-16.** |
+| `parent_asset_id` | uuid | FK to assets.id (parent clip). **ON DELETE CASCADE verified 2026-04-16.** (Migration 001 line 5 — prior versions of this doc called it `asset_id`, that was stale.) |
 | `brand_id` | varchar | FK to brand_configs.brand_id |
 | `start_s` | numeric | Start timestamp in parent clip |
 | `end_s` | numeric | End timestamp in parent clip |
@@ -137,9 +137,10 @@ Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment
 | `editor_use` | text | How a video editor would use this segment |
 | `motion_intensity` | int | 1-10 |
 | `quality_score` | int | 1-10, Gemini's quality assessment |
-| `tags` | text[] | 5-10 visual tags |
+| `visual_tags` | text[] | 5-10 visual tags (column name `visual_tags`, not `tags`, per migration 001). |
 | `embedding` | vector(512) | CLIP ViT-B/32 embedding |
 | `clip_r2_key` | text | **Phase 2.5 + W5:** R2 path to 720p CRF 28 segment clip. Post-W5: cut from 1080p normalized parent (not raw 4K). |
+| `segment_v2` | jsonb \| null | ✅ **Added 2026-04-20 via migration 008 (Phase 4 Part A W0c).** Full v2.1 Zod-validated analyzer output (motion, quality, audio, on_screen_text, etc.). NULL on v1-only rows until backfilled by W0d destroy-and-rebuild. Indexed via GIN (`asset_segments_segment_v2_gin`). |
 | `created_at` | timestamptz | |
 
 **Post-W5 behavior:** all new `clip_r2_key` values point at clips trimmed from 1080p normalized parents. Post-W5 first production ingestion verified 12/12 rows have `clip_r2_key` + `embedding` populated (zero partial-write failures).
@@ -288,6 +289,7 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | 005 | `005_match_segments_with_clip_key.sql` | Applied | Updated RPC (DROP+CREATE per Architecture Rule 22) |
 | 006 | `006_brand_configs_color_treatments.sql` | ✅ **Applied 2026-04-15 (Phase 3 W1)** | Add allowed_color_treatments TEXT[] + backfill nordpilates and carnimeat |
 | 007 | `007_pre_normalized_clips.sql` | ✅ **Applied 2026-04-16 (Phase 3 W5)** | Add pre_normalized_r2_key TEXT to assets. Nullable, no default, no backfill (clean-slate drop). |
+| 008 | `008_segment_v2_sidecar.sql` | ✅ **Applied 2026-04-20 (Phase 4 Part A W0c)** | Add segment_v2 JSONB to asset_segments + GIN index. Nullable, no default. Backfilled by W0d. |
 
 ---
 
