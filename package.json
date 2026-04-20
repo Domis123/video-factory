@@ -29,6 +29,7 @@
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/lib-storage": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
+    "@google/genai": "^1.50.1",
     "@google/generative-ai": "^0.24.1",
     "@remotion/bundler": "^4.0.443",
     "@remotion/cli": "^4.0.443",
@@ -42,7 +43,8 @@
     "react-dom": "^19.2.4",
     "remotion": "^4.0.443",
     "sharp": "^0.33",
-    "zod": "^3"
+    "zod": "^3",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/node": "^20",

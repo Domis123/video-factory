@@ -14,6 +14,7 @@ const envSchema = z.object({
 
   // Gemini (Clip Analyzer)
   GEMINI_API_KEY: z.string().min(1),
+  GEMINI_INGESTION_MODEL: z.string().min(1).default('gemini-3.1-pro-preview'),
 
   // Anthropic (AI Agents — optional, mock mode if missing)
   ANTHROPIC_API_KEY: z.string().optional(),
