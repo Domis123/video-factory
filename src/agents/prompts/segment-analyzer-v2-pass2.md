@@ -92,6 +92,10 @@ FIELD-LEVEL RULES:
 
 - subject.count: one of "1", "2", "3+" (strings).
 
+HARD CONSTRAINTS:
+
+- **CRITICAL — transcript capture:** If `audio.has_speech` is true, `audio.transcript_snippet` MUST NOT be null. Extract the first 100 characters of intelligible speech verbatim. The segment analyzer is the only point in the pipeline where this transcript is captured — if you omit it, it's lost. If speech is present but entirely unintelligible, set `has_speech: false` and `transcript_snippet: null` together; do not return `has_speech: true` with `transcript_snippet: null`.
+
 BRAND CONTEXT: {brandContext}
 
 OUTPUT: JSON object matching SegmentV2 schema. No prose, no fences.
