@@ -6,15 +6,18 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 ## Key Documentation
 - **`docs/VIDEO_PIPELINE_ARCHITECTURE_v5_1.md`** — Architecture v5.1. Reference doc. Needs update once architecture pivot is merged + deployed.
 - **`docs/PHASE_3_DESIGN_3.md`** — Phase 3 master design doc (renamed from PHASE_3_DESIGN.md in pivot commit). Milestones 3.1-3.4 complete; 3.5 (architecture pivot) shipped on branch, awaiting merge/deploy.
-- **`docs/MVP_PROGRESS_10.md`** — Living progress tracker. Re-segmentation, architecture pivot plan + execution status, smoke test results. Supersedes (9).
-- **`docs/SUPABASE_SCHEMA.md`** — DB schema reference, verified columns, migration history through 007. No schema changes in the architecture pivot — `body_focus` and `asset_segment_id` live only in JSONB (`jobs.context_packet`).
-- **`docs/HANDOFF_PHASE3_ARCHITECTURE_PIVOT.md`** — Library-aware pipeline rebuild plan + STATUS BLOCK at top capturing what shipped on `feat/architecture-pivot`. Open items: merge to main, VPS deploy, end-to-end job to validate text/clip alignment.
+- **`docs/MVP_PROGRESS_12.md`** — Living progress tracker. Phase 3.5 pivot results, Phase 4 plan. Supersedes (11).
+- **`docs/SUPABASE_SCHEMA.md`** — DB schema reference, verified columns, migration history through 007. No schema changes in the architecture pivot — `body_focus` and `asset_segment_id` live only in JSONB (`jobs.context_packet`). Phase 4 will add migrations 008-012.
+- **`docs/PHASE_4_PART_A_SEGMENT_INTELLIGENCE.md`** — Phase 4 Part A design (segment intelligence: deep analyzer v2, keyframe grids, sidecar schema).
+- **`docs/PHASE_4_PART_B_PIPELINE.md`** — Phase 4 Part B design (pipeline: Planner + Visual Director + Coherence Critic, brand_persona, 5-week migration path).
+- **`docs/HANDOFF_TO_NEW_CHAT.md`** — Handoff doc for the new chat session kicking off Phase 4.
+- **`docs/HANDOFF_PHASE3_ARCHITECTURE_PIVOT.md`** — ARCHIVE. Subsumed by Phase 4 design.
 - **`docs/HANDOFF_PHASE3_QUALITY.md`** — ARCHIVE. Quality iteration analysis (superseded by architecture pivot handoff).
 - **`docs/VPS-SERVERS.md`** — Infrastructure docs: both VPS servers, deployment, costs, how they work together. VPS path: `/home/video-factory`.
 - `docs/HANDOFF_PHASE3_W2_START.md` — ARCHIVE. Handoff for W2 session (completed).
 - `env.video-factory` — All credentials (Supabase, Redis, R2). Copy to `.env` for local dev.
 
-## Architecture Rules (28 total, MUST follow)
+## Architecture Rules (38 total, MUST follow)
 1. **Google Drive is a drop zone only.** Ingestion copies to R2. The render pipeline NEVER reads from Drive. All clip references use R2 keys.
 2. **No long-lived n8n executions.** Every workflow completes immediately. State is persisted to Supabase. New workflows triggered by webhooks.
 3. **Supabase is the source of truth.** Sheets is the primary input/view layer for workers. All Sheet edits are validated by n8n before writing to Supabase. Workers never access Supabase directly.
@@ -43,6 +46,16 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 26. **Hybrid structured + free-text fields where LLMs and code both consume the data.** Structured fields for code to act on deterministically. Free-text fields for downstream LLM agents to read for nuance.
 27. **Defer polish features in favor of variety features.** Beat-locked music, music ducking, overlay timing sophistication, reference-guided generation — all parked for later phases. Quality variety improvements ship before quality polish improvements.
 28. **Clean-slate ingestion when content sprint is incoming.** Don't migrate existing segments to new pipelines when fresh content is about to land anyway. Operator effort goes into new uploads, not data migration.
+29. **Only `label` style names what's on screen.** All other overlay styles (bold-center, subtitle, minimal, none) add context the viewer can't see — motivation, benefit, cue, personality. Never describe the visible content in a non-label slot.
+30. **Gemini `responseSchema` requires string enums.** Numeric categoricals must be stringified (`z.enum(['1','2','3+'])`, `z.literal('2')`). Convert back to number at consumer if needed. Document with a comment near the schema declaration so future maintainers don't "fix" them.
+31. **Per-parent batching for video analysis.** Upload the parent clip to Gemini Files API once, reuse the URI across `generateContent` calls via `videoMetadata.startOffset/endOffset`, delete once at end. Saves ~20s/segment vs. naive per-call upload.
+32. **Prefer categorical enums over numeric scores for LLM-generated quality judgments.** LLMs cluster at 7-8 on 1-10 scales. Use `z.enum(['excellent','good','poor','unsuitable'])`. Numeric is fine only for objectively measurable fields (duration, count, boolean confidence).
+33. **Pin Gemini model IDs per use-case.** One env var per role — `GEMINI_INGESTION_MODEL`, `GEMINI_CURATOR_MODEL`, future `GEMINI_PLANNER_MODEL`/`GEMINI_CRITIC_MODEL`/`GEMINI_COPYWRITER_MODEL`. Preview aliases shift silently; explicit pinning makes model shifts visible.
+34. **Two Gemini SDKs coexist during migration; new code uses `@google/genai`.** Existing ingestion/curator stays on `@google/generative-ai` until the migration sprint. Don't mix within a file. Both packages stay in `package.json`.
+35. **Place text AFTER video in Gemini prompt `contents` array.** Google's official best practice: `parts: [fileData+videoMetadata, text]`, not the reverse. Measurable quality difference on ambiguous tasks.
+36. **Schema-version JSONB sidecar for gradual DB migrations.** For schema changes to heavily-populated tables, add a JSONB sidecar column (e.g., `segment_v2`) rather than ALTER existing columns. Existing v1 consumers keep working; backfill is interruptible/resumable; rollback is drop-column. Drop v1 columns in a later migration after 100% backfill.
+37. **Hard-constraint critical fields in prompts, not just Zod schema.** Zod enforces structure; prompt enforces conditional requirements. E.g., `has_speech: true` → `transcript_snippet` must not be null. Also applies to `exercise.name` when confidence ≥ medium, `subject.primary` when `subject.present` is true.
+38. **LLMs confabulate structure to match prompt expectations on out-of-distribution inputs.** When a prompt encodes strong structural expectations ("identify exercise segments in this Pilates clip"), older/smaller models hallucinate that structure on non-matching inputs. `responseSchema` validates shape, not truth — confabulated output is Zod-clean and only catchable by manual spot-check. **Mitigations:** include explicit escape paths in prompts ("if input does not contain [expected], return empty array / use `unusable` enum"); deliberately test on edge inputs (short clips, wrong-type clips) before shipping; spot-check at least one sample against ground truth; prefer stronger instruction-followers when the input distribution is wide. **Incident (2026-04-20, W0b.2):** `gemini-2.5-pro` invented 12 exercise segments (bird-dog, russian twists, side plank, etc.) for parent `48a5f3b7`, a 5.5s talking-head clip with zero exercise content; `gemini-3.1-pro-preview` correctly returned 1 talking-head. Discovered via manual inspection after the suspiciously high segment count was flagged.
 
 ## Tech Stack
 - **Orchestrator**: n8n (self-hosted, Hetzner) — 46.224.56.174
