@@ -17,7 +17,7 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 - `docs/HANDOFF_PHASE3_W2_START.md` — ARCHIVE. Handoff for W2 session (completed).
 - `env.video-factory` — All credentials (Supabase, Redis, R2). Copy to `.env` for local dev.
 
-## Architecture Rules (37 total, MUST follow)
+## Architecture Rules (38 total, MUST follow)
 1. **Google Drive is a drop zone only.** Ingestion copies to R2. The render pipeline NEVER reads from Drive. All clip references use R2 keys.
 2. **No long-lived n8n executions.** Every workflow completes immediately. State is persisted to Supabase. New workflows triggered by webhooks.
 3. **Supabase is the source of truth.** Sheets is the primary input/view layer for workers. All Sheet edits are validated by n8n before writing to Supabase. Workers never access Supabase directly.
@@ -55,6 +55,7 @@ Automated video production pipeline for social media brands. UGC footage → AI 
 35. **Place text AFTER video in Gemini prompt `contents` array.** Google's official best practice: `parts: [fileData+videoMetadata, text]`, not the reverse. Measurable quality difference on ambiguous tasks.
 36. **Schema-version JSONB sidecar for gradual DB migrations.** For schema changes to heavily-populated tables, add a JSONB sidecar column (e.g., `segment_v2`) rather than ALTER existing columns. Existing v1 consumers keep working; backfill is interruptible/resumable; rollback is drop-column. Drop v1 columns in a later migration after 100% backfill.
 37. **Hard-constraint critical fields in prompts, not just Zod schema.** Zod enforces structure; prompt enforces conditional requirements. E.g., `has_speech: true` → `transcript_snippet` must not be null. Also applies to `exercise.name` when confidence ≥ medium, `subject.primary` when `subject.present` is true.
+38. **LLMs confabulate structure to match prompt expectations on out-of-distribution inputs.** When a prompt encodes strong structural expectations ("identify exercise segments in this Pilates clip"), older/smaller models hallucinate that structure on non-matching inputs. `responseSchema` validates shape, not truth — confabulated output is Zod-clean and only catchable by manual spot-check. **Mitigations:** include explicit escape paths in prompts ("if input does not contain [expected], return empty array / use `unusable` enum"); deliberately test on edge inputs (short clips, wrong-type clips) before shipping; spot-check at least one sample against ground truth; prefer stronger instruction-followers when the input distribution is wide. **Incident (2026-04-20, W0b.2):** `gemini-2.5-pro` invented 12 exercise segments (bird-dog, russian twists, side plank, etc.) for parent `48a5f3b7`, a 5.5s talking-head clip with zero exercise content; `gemini-3.1-pro-preview` correctly returned 1 talking-head. Discovered via manual inspection after the suspiciously high segment count was flagged.
 
 ## Tech Stack
 - **Orchestrator**: n8n (self-hosted, Hetzner) — 46.224.56.174

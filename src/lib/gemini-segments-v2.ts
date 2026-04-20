@@ -17,11 +17,11 @@ import {
 
 // ── Prompt templates ──
 
-const PASS1_PROMPT = readFileSync(
+export const PASS1_PROMPT = readFileSync(
   resolve(new URL('.', import.meta.url).pathname, '../agents/prompts/segment-analyzer-v2-pass1.md'),
   'utf-8',
 );
-const PASS2_PROMPT = readFileSync(
+export const PASS2_PROMPT = readFileSync(
   resolve(new URL('.', import.meta.url).pathname, '../agents/prompts/segment-analyzer-v2-pass2.md'),
   'utf-8',
 );
@@ -31,12 +31,12 @@ const PASS2_PROMPT = readFileSync(
 // parses this form reliably. $refStrategy: 'none' inlines everything so the
 // schema is a single self-contained object (no $ref).
 
-const SEGMENT_V2_JSON_SCHEMA = zodToJsonSchema(SegmentV2Schema, {
+export const SEGMENT_V2_JSON_SCHEMA = zodToJsonSchema(SegmentV2Schema, {
   target: 'openApi3',
   $refStrategy: 'none',
 });
 
-const BOUNDARIES_JSON_SCHEMA = zodToJsonSchema(BoundariesPassSchema, {
+export const BOUNDARIES_JSON_SCHEMA = zodToJsonSchema(BoundariesPassSchema, {
   target: 'openApi3',
   $refStrategy: 'none',
 });

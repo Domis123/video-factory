@@ -78,6 +78,12 @@ async function runOne(segmentId: string): Promise<void> {
 
     console.log('V2 JSON:');
     console.log(JSON.stringify(v2, null, 2));
+
+    console.log('---');
+    console.log('V2.1 new fields:');
+    console.log(`  setting.on_screen_text: ${JSON.stringify(v2.setting.on_screen_text)}`);
+    console.log(`  audio.audio_clarity:    ${v2.audio.audio_clarity}`);
+    console.log(`  exercise.form_rating:   ${v2.exercise.form_rating}`);
   } catch (err) {
     console.error(`V2 ERROR: ${(err as Error).message}`);
     if ((err as Error).stack) console.error((err as Error).stack);
