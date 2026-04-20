@@ -1,3 +1,8 @@
+// CRITICAL: Gemini 3.1 Pro responseSchema only accepts STRING enums.
+// Any field that seems like it should be numeric-categorical (e.g.
+// count: 1|2|'3+', schema_version: 2) MUST be stringified:
+// z.enum(['1','2','3+']), z.literal('2'). Convert at consumer.
+
 import { z } from 'zod';
 
 export const segmentTypeV2Schema = z.enum([
@@ -32,6 +37,16 @@ const exerciseSchema = z.object({
   confidence: z.enum(['high', 'medium', 'low', 'none']),
   body_regions: z.array(z.string()).max(5),
   form_cues_visible: z.array(z.string()).max(8),
+  form_rating: z
+    .enum([
+      'excellent_controlled',
+      'beginner_modified',
+      'struggling_unsafe',
+      'not_applicable',
+    ])
+    .describe(
+      'Biomechanical assessment of movement execution. beginner_modified acknowledges legitimate modifications (postpartum, injury, beginner) as correct form for that body, not as a quality deficit.',
+    ),
 });
 
 const motionSchema = z.object({
@@ -53,6 +68,12 @@ const settingSchema = z.object({
   location: z.enum(['studio', 'home', 'gym', 'outdoor', 'other']),
   lighting_quality: z.enum(['bright-natural', 'warm-indoor', 'cool-indoor', 'mixed', 'dim']),
   equipment_visible: z.array(z.string()).max(8),
+  on_screen_text: z
+    .string()
+    .nullable()
+    .describe(
+      'Exact OCR extraction of text burned into the video (creator overlays, labels, day counters). Null if none visible.',
+    ),
 });
 
 const qualitySchema = z.object({
@@ -78,10 +99,21 @@ const editorialSchema = z.object({
   transition_suitability: z.enum(['excellent', 'good', 'poor', 'unsuitable']),
 });
 
-const speechSchema = z.object({
+const audioSchema = z.object({
   has_speech: z.boolean(),
   transcript_snippet: z.string().max(100).nullable(),
   speech_intent: z.enum(['instruction', 'inspiration', 'narration', 'ambient', 'none']),
+  audio_clarity: z
+    .enum([
+      'studio-clear',
+      'clean-indoor',
+      'echoey-room',
+      'background-noise',
+      'muted-or-unusable',
+    ])
+    .describe(
+      'Audio usability. studio-clear means raw audio is usable for hooks. echoey-room/background-noise mean clip needs music overlay. muted-or-unusable means cannot be used for talking-head slots at all.',
+    ),
 });
 
 export const SegmentV2Schema = z
@@ -96,7 +128,7 @@ export const SegmentV2Schema = z
     setting: settingSchema,
     quality: qualitySchema,
     editorial: editorialSchema,
-    speech: speechSchema,
+    audio: audioSchema,
     description: z.string().min(50).max(500),
     visual_tags: z.array(z.string()).min(8).max(15),
     recommended_duration_s: z.number().min(0),
