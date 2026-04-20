@@ -16,7 +16,7 @@ Ten rules. Breaking any of them creates the mess this doc exists to prevent.
 3. **One task = one branch.** Don't mix scopes. `fix/quick-wins` doesn't also fix unrelated bugs.
 4. **Name the branch for the scope.** `feat/` new feature, `fix/` bug, `hotfix/` urgent prod fix, `chore/` refactor or docs.
 5. **Push branch to origin when task complete.** Before reporting to Domis. So the work exists on GitHub, not just locally.
-6. **End report asks about merge.** Last line of every end-of-task report: *"Merge to main and push, or hold on branch?"*
+6. **End report asks about merge.** Last line of every end-of-task report: *"Merge to main and deploy, or hold?"*
 7. **Merge within 24h of approval.** Longer than that, something's wrong.
 8. **Push main to origin immediately after merge.** GitHub stays in sync.
 9. **Rollback via `git revert` on main, not branch-switching on VPS.** Creates clean undo commit in history.
@@ -30,39 +30,35 @@ Ten rules. Breaking any of them creates the mess this doc exists to prevent.
 |---|---|---|
 | Create branch | Agent | Agent sandbox |
 | Commit + push | Agent | Agent sandbox → origin |
-| Review | Domis | GitHub UI or laptop |
-| Merge to main | Domis | Laptop |
-| Push main | Domis | Laptop → origin |
-| Deploy to VPS | Domis | Laptop (ssh → VPS pulls) |
-| Rollback | Domis | Laptop (git revert, then deploy) |
-| Delete merged branches | Domis | Laptop (weekly) |
+| Merge to main | Agent (after Domis approval in chat) | Agent sandbox → origin |
+| Push main | Agent | Agent sandbox → origin |
+| Deploy to VPS | Agent (after merge) | Agent sandbox → VPS via SSH |
+| Rollback | Agent (after Domis approval in chat) | Agent sandbox → origin → VPS |
+| Delete merged remote branches | Agent (immediately after merge) | Agent sandbox → origin |
+| Review + approve | Domis | Chat |
 
-**The agent never merges to main.** Merging is Domis's review signal.
-**The agent never pushes main.** Only ever pushes feature branches.
+**Agent owns the full cycle.** Domis's only git action is approval in chat.
+
+**Agent merges to main ONLY after Domis gives explicit approval in chat** (e.g. "merge", "ship", "approved to merge"). Agent never merges silently. Agent never force-pushes main. Agent never rewrites main's history.
 
 ---
 
-## Standard feature workflow
+## Standard feature workflow (Option B — agent-owned)
 
-### Agent — session start
-
+**Agent session start:**
 ```bash
-# Every session, no exceptions
 git fetch origin
 git checkout main
 git pull origin main
-git status
-# If working tree is dirty, STOP and report. Do not proceed.
-
-# Verify main matches origin
-git log origin/main..main
-# Should be empty. If not, something is out of sync — STOP and report.
+git status      # must be clean
+git log origin/main..main   # must be empty
 ```
 
-### Agent — create branch
-
+**Agent creates branch and works:**
 ```bash
-git checkout -b feat/short-description-kebab-case
+git checkout -b feat/xyz-description
+# ... work, commit, push ...
+git push origin feat/xyz-description
 ```
 
 Branch naming:
@@ -70,62 +66,26 @@ Branch naming:
 - `feat/do-stuff` ✗ (meaningless)
 - `feat/phase4-and-also-fix-formatFullBrief` ✗ (two scopes)
 
-### Agent — during work
+Conventional commits. Small, focused. Don't squash during work — if Domis wants squash-on-merge, that's his call at merge time.
 
-Conventional commits. Small, focused.
+**Agent reports to Domis, ending with:** *"Merge to main and deploy, or hold?"*
 
+**If Domis says MERGE:**
 ```bash
-git add -A
-git commit -m "feat(segment-v2): add per-parent batching to analyzer"
-# Repeat as needed — one logical change per commit
-```
-
-Don't squash during work. If Domis wants squash-on-merge, that's his call at merge time.
-
-### Agent — session end
-
-```bash
-# Verify build still passes
+# Pre-merge gate: build must pass
 npm run build
 
-# Push
-git push origin feat/xyz-description
-
-# Then report to Domis. Report must include:
-# - Commit hashes
-# - Files changed (git diff --stat origin/main..HEAD)
-# - Test output or logs
-# - Known issues or flags
-# - Ask: "Merge to main and push, or hold on branch?"
-```
-
-### Domis — merge decision
-
-```bash
-# From laptop
-git fetch origin
+# Merge on agent sandbox
 git checkout main
-git pull origin main
-
-# Review
-git log main..origin/feat/xyz-description --stat
-git diff main..origin/feat/xyz-description
-# Or use GitHub UI for bigger changes
-
-# If approved:
-git merge --no-ff origin/feat/xyz-description -m "merge feat/xyz-description"
+git pull origin main   # ensure current
+git merge --no-ff feat/xyz-description -m "merge feat/xyz-description"
 git push origin main
 
-# Clean up remote branch
+# Delete feature branch
 git push origin --delete feat/xyz-description
-
-# Optional: delete local copy if you had one
 git branch -d feat/xyz-description
-```
 
-### Domis — deploy to VPS
-
-```bash
+# Deploy VPS
 ssh root@95.216.137.35 "cd /home/video-factory && \
   git fetch origin && \
   git checkout main && \
@@ -133,7 +93,14 @@ ssh root@95.216.137.35 "cd /home/video-factory && \
   npm install && \
   npm run build && \
   systemctl restart video-factory"
+
+# Verify service
+ssh root@95.216.137.35 "systemctl status video-factory --no-pager | head -10"
+
+# Report back: "Merged + deployed. Main is at <sha>. Service: <status>."
 ```
+
+**If Domis says HOLD:** agent stays on feature branch, awaits further instructions.
 
 ---
 
@@ -214,18 +181,31 @@ The agent does not guess at conflict resolution in this codebase. The cost of a 
 
 ## Rollback patterns
 
-### Rollback a single commit already on main and deployed
+### Rollback under Option B
+
+If Domis says "rollback" or "revert" after a deploy:
 
 ```bash
-# Domis laptop
+# Agent identifies the bad commit
+git log origin/main --oneline -10
+# Domis confirms which commit to revert (or agent infers from context)
+
+# On agent sandbox
 git checkout main
 git pull origin main
-git log --oneline -20   # find the bad commit
-git revert <bad-commit-sha>
+git revert --no-edit <bad-commit-sha>
 git push origin main
 
-# Redeploy VPS
-ssh root@95.216.137.35 "cd /home/video-factory && git pull origin main && npm install && npm run build && systemctl restart video-factory"
+# Redeploy VPS (same deploy sequence as the merge flow)
+ssh root@95.216.137.35 "cd /home/video-factory && \
+  git fetch origin && \
+  git checkout main && \
+  git pull origin main && \
+  npm install && \
+  npm run build && \
+  systemctl restart video-factory"
+
+# Report back: "Reverted <bad-sha>. Main is at <new-sha>. Service: <status>."
 ```
 
 `git revert` creates a new commit that inverts the bad one. History stays linear and explicit. Future `git log` shows exactly what was undone and why.
@@ -311,12 +291,10 @@ If a branch shows as merged but you don't recognize the name — investigate bef
 - [ ] `git push origin <branch-name>` succeeded
 - [ ] Final build: `npm run build` — clean
 - [ ] Report includes commit SHAs, files changed, tests/logs, flags
-- [ ] Report ends with: *"Merge to main and push, or hold on branch?"*
+- [ ] Report ends with: *"Merge to main and deploy, or hold?"*
+- [ ] If Domis says merge: run the full merge + deploy sequence, report result
+- [ ] If Domis says hold: stay on branch, await further instructions
 - [ ] If stacked: STACK NOTE included
-
-### When told to merge
-- [ ] Agent does NOT merge — merging is Domis's action on laptop
-- [ ] Agent confirms the branch is pushed and ready
 
 ---
 
@@ -330,54 +308,18 @@ If a branch shows as merged but you don't recognize the name — investigate bef
 | "Push branch on completion" | Work only exists in agent sandbox. If sandbox dies, work dies. |
 | "Merge within 24h of approval" | GitHub drifts behind VPS. If VPS dies, GitHub isn't a valid backup. |
 | "Push main after merge" | Next agent session pulls stale main, stacks inadvertently |
-| "Git revert for rollback" | History becomes a branch graveyard; prod state hard to reason about |
+| "Git revert for rollback (agent-owned)" | History becomes a branch graveyard; prod state hard to reason about. Under Option B the agent runs revert + redeploy after Domis approves in chat. |
 | "Max stack depth 1" | Literally the problem this doc exists to prevent |
 | "Weekly hygiene" | Branch list becomes unreadable, confusion about in-progress work |
 
 ---
 
-## Current backlog to flush before this workflow takes effect
+## Workflow history
 
-As of 2026-04-20, these branches are approved but unmerged:
-
-```
-main (origin) ─ behind ─ feat/architecture-pivot [approved, tested]
-                          └─ fix/quick-wins [approved, tested]
-                              └─ feat/w0a-segment-v2-prototype [approved, output reviewed]
-                                  └─ feat/w0b-segment-v2-integration [in progress]
-```
-
-**Cleanup sequence (Domis on laptop):**
-
-```bash
-# 1. Fetch everything
-git fetch origin
-
-# 2. Confirm branches are on origin (agent should have pushed these — verify)
-git branch -r | grep -E "(architecture-pivot|quick-wins|w0a-segment)"
-
-# 3. Merge in stack order
-git checkout main
-git pull origin main
-
-git merge --no-ff origin/feat/architecture-pivot -m "merge feat/architecture-pivot (Phase 3.5)"
-git merge --no-ff origin/fix/quick-wins -m "merge fix/quick-wins (prep filter + subject_consistency)"
-git merge --no-ff origin/feat/w0a-segment-v2-prototype -m "merge feat/w0a-segment-v2-prototype (Phase 4 W0a schema + analyzer)"
-
-git push origin main
-
-# 4. Delete merged remotes
-git push origin --delete feat/architecture-pivot
-git push origin --delete fix/quick-wins
-git push origin --delete feat/w0a-segment-v2-prototype
-
-# 5. Deploy (unchanged; VPS already runs these — this just aligns GitHub main)
-ssh root@95.216.137.35 "cd /home/video-factory && git fetch && git checkout main && git pull origin main && npm install && npm run build && systemctl restart video-factory"
-```
-
-After this flushes, `feat/w0b-segment-v2-integration` remains in progress. It stacks on `feat/w0a-segment-v2-prototype` (now merged into main), so the branch's base is functionally identical to current main — no rebase needed. The W0b branch will merge cleanly onto main when its work completes.
-
-**From that point forward, every new branch follows this doc.** No more pile-ups.
+- 2026-04-20 v1: initial workflow doc, Domis handled merges manually.
+- 2026-04-20 v2: Option B adopted, agent owns merges after chat approval.
+  Obsolete v1 "backlog flush" section removed — backlog was flushed in
+  commit 919ee73 (merge Phase 3.5 pivot + quick-wins + Phase 4 W0a to main).
 
 ---
 
