@@ -31,7 +31,7 @@ export async function withLLMRetry<T>(
   const maxAttempts = opts?.maxAttempts ?? 4;
   const baseDelayMs = opts?.baseDelayMs ?? 1000;
   const maxDelayMs = opts?.maxDelayMs ?? 8000;
-  const maxTotalMs = opts?.maxTotalMs ?? 30000;
+  const maxTotalMs = opts?.maxTotalMs ?? 120000;
   const label = opts?.label ?? 'llm';
 
   const start = Date.now();
@@ -63,8 +63,8 @@ export async function withLLMRetry<T>(
 
       const elapsed = Date.now() - start;
       if (elapsed + actualDelay > maxTotalMs) {
-        console.error(
-          `[retry-llm] ${label} total budget exhausted (${elapsed}ms elapsed + ${actualDelay}ms sleep > ${maxTotalMs}ms). Last error: ${messageOf(err)}`
+        console.warn(
+          `[retry-llm] ${label} budget exhausted after ${elapsed}ms (${attempt} attempts, max ${maxTotalMs}ms). Last error: ${messageOf(err)}`
         );
         throw err;
       }
