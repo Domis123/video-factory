@@ -393,6 +393,8 @@ await ai.files.delete({ name: file.name });
 
 These cover: canonical Pilates move + static hold + non-exercise code path + likely-speech clip. All 3 have parent assets with `pre_normalized_r2_key` populated.
 
+> ⚠️ **UUID drift (2026-04-21):** the three UUIDs above predate W0d's destroy-and-rebuild re-segmentation. They no longer exist in `asset_segments`. For post-W0d test runs, query the live v2 library (`SELECT id FROM asset_segments WHERE segment_v2 IS NOT NULL AND segment_type = '<type>' LIMIT 1`) and pick a current segment. See `docs/followups.md#part-a-test-segment-uuid-drift`.
+
 ---
 
 ## Cost & latency projections

@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { uploadFile } from './r2-storage.js';
+import { supabaseAdmin } from '../config/supabase.js';
 
 const CELL_W = 256;
 const CELL_H = 455;
@@ -165,6 +167,9 @@ export async function buildKeyframeGrid(
     })
       .composite(composites)
       .jpeg({ quality: 80 })
+      // ImageDescription (IFD0) intentionally used instead of UserComment (IFD2): EXIF 2.3
+      // requires UserComment to carry an 8-byte character-code prefix (ASCII\0\0\0 etc.)
+      // which sharp 0.33 does not prepend — readers would see garbled leading bytes.
       .withExif({
         IFD0: {
           ImageDescription: exifPayload,
@@ -211,6 +216,70 @@ export async function readKeyframeGridExif(
   } catch {
     return null;
   }
+}
+
+export interface GridRow {
+  id: string;
+  brand_id: string;
+  start_s: number;
+  end_s: number;
+  best_in_point_s: number | null;
+  best_out_point_s: number | null;
+}
+
+export interface GridOutcome {
+  r2Key: string;
+  sizeBytes: number;
+  warnings: string[];
+  missingTileIndices: number[];
+  fellBackToSegmentBounds: boolean;
+}
+
+/**
+ * Build a grid for a single segment, upload to R2, and write keyframe_grid_r2_key
+ * on the segment row. Shared between the backfill script and the ingestion worker
+ * so they stay in lockstep. Caller provides a local parent video path; this function
+ * does not download or delete it.
+ *
+ * Throws on DB update failure or total-extraction failure. Per-tile failures are
+ * swallowed into warnings per buildKeyframeGrid() contract.
+ */
+export async function generateAndStoreGrid(
+  parentLocalPath: string,
+  row: GridRow,
+): Promise<GridOutcome> {
+  const bestIn = row.best_in_point_s ?? row.start_s;
+  const bestOut = row.best_out_point_s ?? row.end_s;
+
+  const result = await buildKeyframeGrid({
+    parentLocalPath,
+    windowStartS: bestIn,
+    windowEndS: bestOut,
+    segmentId: row.id,
+    startS: row.start_s,
+    endS: row.end_s,
+  });
+
+  const r2Key = `keyframe-grids/${row.brand_id}/${row.id}.jpg`;
+  await uploadFile(r2Key, result.buffer, 'image/jpeg');
+
+  const { error } = await supabaseAdmin
+    .from('asset_segments')
+    .update({ keyframe_grid_r2_key: r2Key })
+    .eq('id', row.id);
+  if (error) {
+    throw new KeyframeGridError(
+      `failed to update keyframe_grid_r2_key on segment ${row.id}: ${error.message}`,
+    );
+  }
+
+  return {
+    r2Key,
+    sizeBytes: result.buffer.length,
+    warnings: result.warnings,
+    missingTileIndices: result.missingTileIndices,
+    fellBackToSegmentBounds: result.windowUsed.fellBackToSegmentBounds,
+  };
 }
 
 export const KEYFRAME_GRID_GEOMETRY = Object.freeze({

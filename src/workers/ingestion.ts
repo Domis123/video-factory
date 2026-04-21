@@ -14,6 +14,7 @@ import { analyzeClipSegments } from '../lib/gemini-segments.js';
 import { processSegmentsForAsset } from '../lib/segment-processor.js';
 import { analyzeParentEndToEndV2 } from '../agents/gemini-segments-v2-batch.js';
 import { processSegmentsV2ForAsset } from '../lib/segment-processor-v2.js';
+import { generateAndStoreGrid } from '../lib/keyframe-grid.js';
 import type { Asset } from '../types/database.js';
 
 export interface IngestionInput {
@@ -203,6 +204,46 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
             v2Result.segments,
           );
           console.log(`[ingestion] ${inserted} asset_segments rows written (v2 dual-write) for asset ${assetId}`);
+
+          // Phase 4 Part B W1 — keyframe-grid generation (flag-gated, non-fatal).
+          // Re-query freshly inserted v2 rows by parent to get their canonical ids +
+          // editorial windows, then generate one grid per segment reusing the already-
+          // local normalized parent. Per-segment failure logs and continues; it does
+          // NOT fail ingestion — the row is valid, a null grid column is recoverable
+          // via backfill-keyframe-grids.ts.
+          if (env.ENABLE_KEYFRAME_GRIDS) {
+            const { data: freshRows, error: freshErr } = await supabaseAdmin
+              .from('asset_segments')
+              .select('id, brand_id, start_s, end_s, segment_v2')
+              .eq('parent_asset_id', assetId)
+              .not('segment_v2', 'is', null)
+              .is('keyframe_grid_r2_key', null);
+            if (freshErr) {
+              console.warn(`[ingestion] grid: re-query failed for asset ${assetId}: ${freshErr.message}`);
+            } else if (freshRows) {
+              console.log(`[ingestion] grid: generating ${freshRows.length} grids for asset ${assetId}`);
+              for (const r of freshRows) {
+                const ed = (r.segment_v2 as { editorial?: { best_in_point_s?: number; best_out_point_s?: number } } | null)?.editorial;
+                try {
+                  const outcome = await generateAndStoreGrid(segmentSourcePath, {
+                    id: r.id as string,
+                    brand_id: r.brand_id as string,
+                    start_s: Number(r.start_s),
+                    end_s: Number(r.end_s),
+                    best_in_point_s: typeof ed?.best_in_point_s === 'number' ? ed.best_in_point_s : null,
+                    best_out_point_s: typeof ed?.best_out_point_s === 'number' ? ed.best_out_point_s : null,
+                  });
+                  if (outcome.warnings.length > 0) {
+                    console.warn(`[ingestion] grid: segment ${r.id} warnings: ${outcome.warnings.join('; ')}`);
+                  }
+                } catch (gridErr) {
+                  console.warn(
+                    `[ingestion] grid: generation failed for segment ${r.id}: ${(gridErr as Error).message}`,
+                  );
+                }
+              }
+            }
+          }
         } else {
           const segments = await analyzeClipSegments(segmentSourcePath, durationSeconds, brandContext);
           console.log(`[ingestion] ${segments.length} segments identified for asset ${assetId}`);
