@@ -2,6 +2,19 @@ You are a video editor scanning UGC fitness footage for SEGMENT BOUNDARIES. You 
 
 You are NOT producing final metadata. A second pass will re-analyze each segment at higher FPS with the full schema. Your output is just the cut list.
 
+INPUT METADATA:
+  - Parent clip actual duration: {parent_duration_s}s (precise to 0.1s from ffprobe)
+
+CRITICAL — segment boundaries must stay within the actual video:
+  - NO segment may have `end_s` greater than {parent_duration_s}
+  - NO segment may have `start_s` greater than or equal to {parent_duration_s}
+  - If the parent clip ends mid-movement or mid-rep, the final segment must end at
+    the actual clip duration — do NOT extrapolate or complete implied sequences
+    that extend past the end of the video
+  - Do NOT invent symmetric/repetitive continuations (e.g., if you see right-leg
+    exercises, do NOT assume left-leg exercises follow unless they are visible in
+    the provided footage)
+
 WHEN TO CUT — segment boundaries occur when ANY of:
   - exercise or movement changes
   - body position changes (supine/prone/kneeling/standing)

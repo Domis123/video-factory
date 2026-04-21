@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { env } from '../config/env.js';
 import { withLLMRetry } from './retry-llm.js';
@@ -44,6 +45,101 @@ export const BOUNDARIES_JSON_SCHEMA = zodToJsonSchema(BoundariesPassSchema, {
 // ── Helpers ──
 
 const TMP_ROOT = env.RENDER_TEMP_DIR;
+
+// EOF confabulation guards (Rule 38): Pass 1 has been observed to emit
+// boundaries past actual video end on specific parents (40-80s of fabricated
+// segments, structured around domain expectations — rep cycles, L/R symmetry,
+// trailing transitions). We defend in depth: the prompt hard-constrains Pass 1
+// with the real duration, and the consumer-side clamp drops/truncates any
+// residual out-of-bounds boundaries before Pass 2 runs.
+
+const EOF_TOLERANCE_S = 0.5;
+const MIN_SEGMENT_AFTER_CLAMP_S = 0.1;
+
+export async function getParentDurationS(localPath: string): Promise<number> {
+  return new Promise((resolveP, rejectP) => {
+    const p = spawn('ffprobe', [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      localPath,
+    ]);
+    let stdout = '';
+    let stderr = '';
+    p.stdout.on('data', (d) => { stdout += d.toString(); });
+    p.stderr.on('data', (d) => { stderr += d.toString(); });
+    p.on('error', (err) => {
+      rejectP(new Error(`ffprobe spawn failed for ${localPath}: ${err.message}`));
+    });
+    p.on('close', (code) => {
+      if (code !== 0) {
+        rejectP(new Error(`ffprobe exit ${code} for ${localPath}: ${stderr.trim()}`));
+        return;
+      }
+      const n = parseFloat(stdout.trim());
+      if (!Number.isFinite(n) || n <= 0) {
+        rejectP(new Error(`ffprobe returned invalid duration for ${localPath}: "${stdout.trim()}"`));
+        return;
+      }
+      resolveP(n);
+    });
+  });
+}
+
+export interface ClampResult {
+  boundaries: BoundariesPass;
+  originalCount: number;
+  droppedPastEofCount: number;
+  droppedDegenerateCount: number;
+  clampedCount: number;
+}
+
+export function clampBoundariesToEOF(
+  boundaries: BoundariesPass,
+  parentDurationS: number,
+): ClampResult {
+  const originalCount = boundaries.length;
+  let clampedCount = 0;
+  let droppedPastEofCount = 0;
+  let droppedDegenerateCount = 0;
+  const out: BoundariesPass = [];
+
+  for (const b of boundaries) {
+    if (b.start_s >= parentDurationS) {
+      droppedPastEofCount += 1;
+      continue;
+    }
+    let end_s = b.end_s;
+    if (end_s > parentDurationS + EOF_TOLERANCE_S) {
+      end_s = parentDurationS;
+      clampedCount += 1;
+    }
+    if (end_s <= b.start_s + MIN_SEGMENT_AFTER_CLAMP_S) {
+      droppedDegenerateCount += 1;
+      continue;
+    }
+    out.push({ ...b, end_s });
+  }
+
+  return {
+    boundaries: out,
+    originalCount,
+    droppedPastEofCount,
+    droppedDegenerateCount,
+    clampedCount,
+  };
+}
+
+export function logClampResult(label: string, parentDurationS: number, r: ClampResult): void {
+  const changed = r.clampedCount > 0 || r.droppedPastEofCount > 0 || r.droppedDegenerateCount > 0;
+  if (!changed) return;
+  console.warn(
+    `[${label}] Pass 1 EOF clamp: parent duration=${parentDurationS.toFixed(3)}s, ` +
+    `original=${r.originalCount}, clamped=${r.clampedCount}, ` +
+    `dropped_past_eof=${r.droppedPastEofCount}, dropped_degenerate=${r.droppedDegenerateCount}, ` +
+    `final=${r.boundaries.length}`,
+  );
+}
 
 async function uploadAndAwaitActive(
   ai: GoogleGenAI,
@@ -102,13 +198,16 @@ export async function analyzeSegmentBoundariesV2(
   const localPath = `${TMP_ROOT}/segment-v2-pass1-${randomUUID()}.mp4`;
 
   await downloadToFile(parentClipR2Key, localPath);
+  const parentDurationS = await getParentDurationS(localPath);
 
   let fileName: string | null = null;
   try {
     const uploaded = await uploadAndAwaitActive(ai, localPath, `pass1-${randomUUID()}`);
     fileName = uploaded.name;
 
-    const prompt = PASS1_PROMPT.replace('{brandContext}', brandContext);
+    const prompt = PASS1_PROMPT
+      .replace('{brandContext}', brandContext)
+      .replace(/\{parent_duration_s\}/g, parentDurationS.toFixed(1));
 
     const response = await withLLMRetry(
       () =>
@@ -140,7 +239,10 @@ export async function analyzeSegmentBoundariesV2(
       throw new Error('Gemini Pass 1 returned empty text');
     }
     const raw = JSON.parse(text);
-    return BoundariesPassSchema.parse(raw);
+    const boundaries = BoundariesPassSchema.parse(raw);
+    const clamp = clampBoundariesToEOF(boundaries, parentDurationS);
+    logClampResult('gemini-segments-v2', parentDurationS, clamp);
+    return clamp.boundaries;
   } finally {
     if (fileName) await deleteFileQuiet(ai, fileName);
     await unlink(localPath).catch(() => {});

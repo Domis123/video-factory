@@ -7,6 +7,9 @@ import {
   PASS2_PROMPT,
   BOUNDARIES_JSON_SCHEMA,
   SEGMENT_V2_JSON_SCHEMA,
+  getParentDurationS,
+  clampBoundariesToEOF,
+  logClampResult,
 } from '../lib/gemini-segments-v2.js';
 import {
   SegmentV2Schema,
@@ -43,6 +46,8 @@ export async function analyzeParentEndToEndV2(
   const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
   const t0 = Date.now();
   const counters: BatchCounters = { uploads: 0, deletes: 0 };
+
+  const parentDurationS = await getParentDurationS(parentLocalPath);
 
   console.log(`[segments-v2-batch] Uploading ${parentLocalPath} (one-time per parent)`);
   const uploadStart = Date.now();
@@ -82,7 +87,9 @@ export async function analyzeParentEndToEndV2(
   let deleteMs = 0;
 
   try {
-    const pass1Prompt = PASS1_PROMPT.replace('{brandContext}', brandContext);
+    const pass1Prompt = PASS1_PROMPT
+      .replace('{brandContext}', brandContext)
+      .replace(/\{parent_duration_s\}/g, parentDurationS.toFixed(1));
     const pass1Start = Date.now();
     const pass1Response = await withLLMRetry(
       () =>
@@ -111,8 +118,12 @@ export async function analyzeParentEndToEndV2(
     pass1Ms = Date.now() - pass1Start;
     const pass1Text = pass1Response.text ?? '';
     if (!pass1Text) throw new Error('Pass 1 returned empty text');
-    boundaries = BoundariesPassSchema.parse(JSON.parse(pass1Text));
-    console.log(`[segments-v2-batch] Pass 1 → ${boundaries.length} segments (${pass1Ms}ms)`);
+    const rawBoundaries = BoundariesPassSchema.parse(JSON.parse(pass1Text));
+    console.log(`[segments-v2-batch] Pass 1 → ${rawBoundaries.length} segments (${pass1Ms}ms)`);
+
+    const clamp = clampBoundariesToEOF(rawBoundaries, parentDurationS);
+    logClampResult('segments-v2-batch', parentDurationS, clamp);
+    boundaries = clamp.boundaries;
 
     for (let i = 0; i < boundaries.length; i++) {
       const b = boundaries[i];
