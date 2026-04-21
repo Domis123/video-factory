@@ -6,6 +6,25 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## part-a-classification-noise-spotcheck — W1 Gate B visual audit surfaced isolated segment_type mismatches
+
+**Status:** Active, not blocking.
+**Discovered:** 2026-04-21 (W1 Gate B, n=5 spot-check).
+
+**Pattern:** 1 of 5 smoke mosaics showed segment_type mismatch against visual ground truth (`transition` label on what looks like a hold/exercise plank-with-leg-lift). Sample too small to estimate library error rate. Not blocking — Part B is pivoting to treat segment taxonomy as fixed and solving creative variance upstream (W2/W3 redesign).
+
+**Tried:** n=5 visual spot-check via W1 grids.
+
+**Not tried:** Larger audit. Deferred — only relevant if W2/W3 ship and nordpilates output quality implicates retrieval filtering.
+
+**Revisit if:** W5 Visual Director consistently rejects candidates from a specific segment_type at abnormal rates, suggesting the type filter is mis-bucketing content.
+
+**Affected data:** up to 720 v2 segments (nordpilates). Known mismatch: segment_id 0dbfbc89-4e94-484e-9a59-9e0cba6bcc84 (labeled `transition`, visual evidence suggests `exercise` or `hold`).
+
+**Owner hint:** unowned until W5 signal.
+
+---
+
 ## w1-raw-fallback-crop — `increase,crop` will center-crop landscape source to a narrow vertical strip
 
 **Status:** Deferred
