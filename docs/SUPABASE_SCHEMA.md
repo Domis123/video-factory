@@ -141,6 +141,7 @@ Sub-clip segments extracted from parent UGC clips. Created by Gemini Pro segment
 | `embedding` | vector(512) | CLIP ViT-B/32 embedding |
 | `clip_r2_key` | text | **Phase 2.5 + W5:** R2 path to 720p CRF 28 segment clip. Post-W5: cut from 1080p normalized parent (not raw 4K). |
 | `segment_v2` | jsonb \| null | ✅ **Added 2026-04-20 via migration 008 (Phase 4 Part A W0c).** Full v2.1 Zod-validated analyzer output (motion, quality, audio, on_screen_text, etc.). NULL on v1-only rows until backfilled by W0d destroy-and-rebuild. Indexed via GIN (`asset_segments_segment_v2_gin`). |
+| `keyframe_grid_r2_key` | text \| null | ✅ **Added 2026-04-21 via migration 009 (Phase 4 Part B W1).** R2 path to a 4×3 portrait mosaic (1024×1365 JPEG q80) sampled across the segment's editorial window. `keyframe-grids/{brand_id}/{segment_id}.jpg`. EXIF ImageDescription embeds segment coordinates as JSON. NULL = not yet generated. Populated by backfill script or ingestion worker when `ENABLE_KEYFRAME_GRIDS=true`. No index — simple null-check predicate on queries that already filter by `segment_v2 IS NOT NULL`. |
 | `created_at` | timestamptz | |
 
 **Post-W5 behavior:** all new `clip_r2_key` values point at clips trimmed from 1080p normalized parents. Post-W5 first production ingestion verified 12/12 rows have `clip_r2_key` + `embedding` populated (zero partial-write failures).

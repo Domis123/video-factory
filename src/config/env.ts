@@ -47,6 +47,10 @@ const envSchema = z.object({
   // Phase 3 Creative Director — new parameterized schema (slot_count 3-12, energy_per_slot,
   // color_treatment, per-slot transitions). Off by default until downstream W2/W3/W4 ship.
   ENABLE_PHASE_3_CD: z.string().default('false').transform((v) => v === 'true'),
+  // Phase 4 Part B W1 — auto-generate 4x3 keyframe grid mosaics for new v2 segments
+  // during ingestion. Grids are consumed by the Visual Director (W5). Default OFF
+  // until W1 Gate C merges; turned on via VPS .env post-backfill.
+  ENABLE_KEYFRAME_GRIDS: z.string().default('false').transform((v) => v === 'true'),
   // Audio ducking + CRF18 are ON by default — they don't depend on data we don't have yet.
   ENABLE_AUDIO_DUCKING: z.string().default('true').transform((v) => v !== 'false'),
   ENABLE_CRF18_ENCODING: z.string().default('true').transform((v) => v !== 'false'),
