@@ -16,6 +16,8 @@ export const segmentTypeV2Schema = z.enum([
   'unusable',
 ]);
 
+export type SegmentTypeV2 = z.infer<typeof segmentTypeV2Schema>;
+
 const subjectPrimarySchema = z.object({
   hair_color: z.enum(['blonde', 'brunette', 'black', 'red', 'gray', 'other', 'unclear']),
   hair_style: z.enum(['loose', 'ponytail', 'bun', 'braid', 'short', 'other', 'unclear']),
@@ -116,6 +118,17 @@ const audioSchema = z.object({
     ),
 });
 
+const DURATION_FLOORED_TYPES = new Set<SegmentTypeV2>([
+  'exercise',
+  'hold',
+  'talking-head',
+  'b-roll',
+]);
+// setup, transition, cooldown, unusable are exempt — these can legitimately be
+// sub-1.5s. For connective segments, a 1.0s useful sub-window is valid editorial
+// data, not a bug. Enforcing a blanket 1.5s floor caused 8 parents to fail Zod
+// during W0d overnight with correct-but-rejected Gemini output.
+
 export const SegmentV2Schema = z
   .object({
     start_s: z.number().min(0),
@@ -158,11 +171,11 @@ export const SegmentV2Schema = z
         message: `best_out_point_s (${outS}) must be within [${inS}, ${seg.end_s}]`,
       });
     }
-    if (seg.segment_type !== 'unusable' && seg.recommended_duration_s < 1.5) {
+    if (DURATION_FLOORED_TYPES.has(seg.segment_type) && seg.recommended_duration_s < 1.5) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['recommended_duration_s'],
-        message: `recommended_duration_s must be >= 1.5 for usable segments (got ${seg.recommended_duration_s})`,
+        message: `recommended_duration_s must be >= 1.5 for ${seg.segment_type} segments (got ${seg.recommended_duration_s})`,
       });
     }
   });
