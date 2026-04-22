@@ -17,6 +17,14 @@
 -- W4 v1 boost weights are first-pass intuition. Tune during W9 shadow mode with observable
 -- retention data. Do NOT auto-tune.
 --
+-- Subject-hint weight calibrated 2026-04-22 against Gate A scenario 5: the original 0.10
+-- weight eclipsed cross-parent candidates (top 18 collapsed to a single parent because the
+-- hinted parent had 30 glute-matching segments and +0.10 dominated the ~0.01-0.02 similarity
+-- spread between same-parent and cross-parent rows). Lowered to 0.02 so the boost biases
+-- toward same-parent without eliminating variety. W5 Director (not W4) enforces final
+-- continuity-vs-variety mix; W4 is a pure scoring layer. Revisit at W9 shadow with real
+-- retention signal.
+--
 -- candidate_multiplier accepted for caller-signature forward-compat; not used at current
 -- scale (1116 rows, seq-scan is sub-100ms). Reintroduce as a pool LIMIT if Gate A p95 > 500ms.
 
@@ -241,7 +249,7 @@ BEGIN
           WHEN 'good'      THEN 0.5
           ELSE 0.0
         END
-        + 0.10 * CASE
+        + 0.02 * CASE
           WHEN subject_hint_parent_asset_id IS NOT NULL
             AND t._parent_asset_id = subject_hint_parent_asset_id THEN 1.0
           ELSE 0.0

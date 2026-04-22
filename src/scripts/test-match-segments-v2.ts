@@ -228,10 +228,24 @@ async function benchScenarioOne(scenario: ScenarioSpec, runs: number): Promise<v
   console.log(`  max_ms: ${sorted[sorted.length - 1]}`);
 }
 
+function parseOnlyFilter(argv: string[]): string | null {
+  const idx = argv.indexOf('--only');
+  if (idx === -1 || idx === argv.length - 1) return null;
+  return argv[idx + 1];
+}
+
 async function main(): Promise<void> {
-  console.log(`[test] brand: ${BRAND_ID}`);
+  const onlyFilter = parseOnlyFilter(process.argv);
+  console.log(`[test] brand: ${BRAND_ID}${onlyFilter ? `  filter: ${onlyFilter}` : ''}`);
   const subjectParent = await findMultiSegmentParent();
-  const scenarios = buildScenarios(subjectParent);
+  const allScenarios = buildScenarios(subjectParent);
+  const scenarios = onlyFilter
+    ? allScenarios.filter((s) => s.name.includes(onlyFilter))
+    : allScenarios;
+  if (onlyFilter && scenarios.length === 0) {
+    console.error(`[test] --only "${onlyFilter}" matched 0 scenarios`);
+    process.exit(1);
+  }
 
   const results: Array<{ name: string; ok: boolean; error?: string; result?: CandidateSet }> = [];
   for (const s of scenarios) {
@@ -245,13 +259,17 @@ async function main(): Promise<void> {
     }
   }
 
-  const benchScenario = scenarios[0];
-  try {
-    await benchScenarioOne(benchScenario, 10);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[test] bench THREW: ${msg}`);
-    process.exitCode = 1;
+  if (!onlyFilter) {
+    const benchScenario = scenarios[0];
+    try {
+      await benchScenarioOne(benchScenario, 10);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[test] bench THREW: ${msg}`);
+      process.exitCode = 1;
+    }
+  } else {
+    console.log('\n[test] --only filter active; skipping benchmark.');
   }
 
   console.log('\n=== summary ===');
