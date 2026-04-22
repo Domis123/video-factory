@@ -6,6 +6,25 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## w3-naive-singularization-es-words — text-normalize.ts drops trailing -s only
+
+**Status:** Active, not blocking.
+**Discovered:** 2026-04-22, W3 Gate A library inventory snapshot.
+
+**Pattern:** `src/lib/text-normalize.ts` `normalizeToken()` trims only a trailing `-s` (with `-ss`/`-is`/`-us` exempted). Words ending in `-es` or `-ses` get incompletely singularized: `crunches` → `crunche`, `sunglasses` → `sunglasse`, `beverage cans` is fine because space-separated. Observed in nordpilates inventory snapshot (`top_exercises: crunche 10, bicycle crunche 8`; `equipment: sunglasse 6`). Downstream it means the Planner sees `crunche` in the top-exercise list, which reads wrong but doesn't affect form/hook decisions since these are informational-only summaries.
+
+**Tried:** nothing — not blocking on W3. Decision document-trail only.
+
+**Not tried:** (1) stemmer library (e.g., `natural`), (2) a hand-coded `-es` → `-e` rule with a stop-list for false positives (`glasses` → `glass` is already exempted by `-ss`; `classes` would hit the same), (3) leaving it alone and accepting the quirk.
+
+**Revisit if:** the Director or Planner starts making bad decisions traceable to vocabulary aliasing between LLM-generated clip descriptions (plural) and Planner/Director vocabulary (singularized). Also if a brand ingests content with many `-es` plurals (veggies, cherries, berries for a food brand).
+
+**Affected data:** any aggregator output from `text-normalize.ts`. In use by `library-inventory-v2.ts` for `equipment` + `top_exercises` fields.
+
+**Owner hint:** whoever tunes Planner or Director retrieval quality.
+
+---
+
 ## v1-curator-flash-nulls-if-emergency-rollback — post-Flash-removal rows break the V1 rollback path
 
 **Status:** Active (informational)

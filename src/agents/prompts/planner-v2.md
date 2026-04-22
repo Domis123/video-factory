@@ -53,14 +53,14 @@ Each form has a natural lean (e.g., Targeted Microtutorial leans specific-pain-p
 - **`hook_mechanism`**: one of the 7 above. Match the form's natural lean or explain the deviation in `creative_vision`.
 - **`audience_framing`**: non-null ONLY for `targeted_microtutorial`. In that case it's a short phrase ("for desk workers," "postpartum," "over 40," "runners"). For every other form, set it to `null`.
 - **`subject_consistency`**: default to `single-subject` unless the form explicitly supports mixed subjects (Fast-Cut Montage can; Day-in-the-Life usually stays single).
-- **`slot_count`**: must be consistent with the chosen form's range and must fit within ~30s total. The Part B taxonomy doc (`docs/w2-content-form-taxonomy.md`) lists per-form slot ranges; stay inside them.
+- **`slot_count`**: must be consistent with the chosen form's range and must fit within ~30s total. The Part B taxonomy doc (`docs/w2-content-form-taxonomy.md`) lists per-form slot ranges; stay inside them. Use the full slot-count range per form. A 2-slot Hook-Reveal-Tip can hit harder than a 4-slot one if the cue is singular. Don't default to the middle of the range.
 - **`slots[*].target_duration_s`**: realistic. Most slots 2–5s. Long holds or single-shot forms can go 8–12s. Hook slots are usually 1.5–3s.
 - **`slots[*].energy`**: 1–10 scale. Hook slots typically higher than body slots; close slots typically lower. Match the form's pacing (smooth ≤ 6, mid 5–7, punchy 7–10).
 - **`slots[*].body_focus`**: array of body regions OR `null`. DO NOT name exercises. Use vocabulary from the library inventory's `body_regions` list. If a slot isn't exercise-focused (hook talking-head, b-roll beauty shot, close), set it to `null`.
 - **`slots[*].segment_type_preferences`**: one or more valid `segment_type` values (`setup`, `exercise`, `transition`, `hold`, `cooldown`, `talking-head`, `b-roll`, `unusable`). Rank in your preferred order. Prefer types the inventory shows strong counts for; avoid `unusable`.
 - **`slots[*].subject_role`**: `primary` means the same person as other `primary` slots. `any` means flexibility for the Director.
 - **`slots[*].narrative_beat`**: DIRECTIONAL, not literal. Tell the Copywriter what this slot SHOULD SAY thematically — e.g., *"audience label: for tight hips after long sits"* or *"name the movement in a gentle voice."* NOT the actual overlay words.
-- **`music_intent`**: one of `calm-ambient`, `upbeat-electronic`, `motivational-cinematic`, `warm-acoustic`, `none`. Honor the persona's `preferred_music_intents`. Do NOT return a value in the persona's `avoid_music_intents`.
+- **`music_intent`**: one of `calm-ambient`, `upbeat-electronic`, `motivational-cinematic`, `warm-acoustic`, `none`. Honor the persona's `preferred_music_intents`. Do NOT return a value in the persona's `avoid_music_intents`. Match `music_intent` to the chosen `form_id` + `hook_mechanism` combo; do NOT default to `calm-ambient`. Confessional or cue-reveal hooks tend toward `warm-acoustic`; aesthetic-ambient or long-routine forms tend toward `calm-ambient`; punchy forms tend toward `motivational-cinematic`.
 - **`posture`**: a value from the chosen form's allowed postures in the persona's `form_posture_allowlist`. Not a free choice.
 
 ## Inventory usage rule

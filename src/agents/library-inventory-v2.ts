@@ -37,7 +37,11 @@ const LONG_HOLD_MIN_DURATION_S = 10;
 const TOP_N_EQUIPMENT = 30;
 const TOP_N_EXERCISES = 30;
 const MIN_EXERCISE_COUNT = 2;
-const SEGMENT_FETCH_CAP = 5000;
+// PostgREST silently caps `.select()` result sets at 1000 rows regardless of
+// .limit() or .range() requests (server-side max-rows). At nordpilates scale
+// (1116+ segments) a single fetch under-counts by ~10%. Page explicitly.
+const SEGMENT_PAGE_SIZE = 1000;
+const SEGMENT_PAGE_SAFETY_CAP = 50; // 50k rows — hard bail if pagination runs away
 
 interface SegmentV2Setting {
   location?: string;
@@ -56,8 +60,9 @@ interface SegmentV2Shape {
 }
 
 interface SegmentRow {
+  start_s: number | null;
+  end_s: number | null;
   segment_type: string | null;
-  recommended_duration_s: number | null;
   keyframe_grid_r2_key: string | null;
   segment_v2: SegmentV2Shape | null;
 }
@@ -72,16 +77,35 @@ export async function getLibraryInventory(brandId: string): Promise<LibraryInven
     throw new Error(`library-inventory-v2 parents count failed: ${parentErr.message}`);
   }
 
-  // 2. One pass over this brand's asset_segments, computing everything we need.
-  const { data, error } = await supabaseAdmin
-    .from('asset_segments')
-    .select('segment_type, recommended_duration_s, keyframe_grid_r2_key, segment_v2')
-    .eq('brand_id', brandId)
-    .limit(SEGMENT_FETCH_CAP);
-  if (error) {
-    throw new Error(`library-inventory-v2 segments fetch failed: ${error.message}`);
+  // 2. Paginated fetch over this brand's asset_segments, computing everything
+  // we need in one pass post-fetch. `.order('id')` guarantees stable pagination
+  // (LIMIT/OFFSET on an unordered query is non-deterministic per PG semantics).
+  const rows: SegmentRow[] = [];
+  let from = 0;
+  let pages = 0;
+  for (;;) {
+    const { data, error } = await supabaseAdmin
+      .from('asset_segments')
+      .select('start_s, end_s, segment_type, keyframe_grid_r2_key, segment_v2')
+      .eq('brand_id', brandId)
+      .order('id', { ascending: true })
+      .range(from, from + SEGMENT_PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(
+        `library-inventory-v2 segments fetch failed at page ${pages} (from=${from}): ${error.message}`,
+      );
+    }
+    const page = (data ?? []) as SegmentRow[];
+    rows.push(...page);
+    pages++;
+    if (page.length < SEGMENT_PAGE_SIZE) break;
+    from += SEGMENT_PAGE_SIZE;
+    if (pages > SEGMENT_PAGE_SAFETY_CAP) {
+      throw new Error(
+        `library-inventory-v2 segments fetch exceeded ${SEGMENT_PAGE_SAFETY_CAP} pages; likely pagination runaway`,
+      );
+    }
   }
-  const rows: SegmentRow[] = (data ?? []) as SegmentRow[];
 
   const segmentTypeCounts: Record<string, number> = {};
   for (const key of SEGMENT_TYPE_KEYS) segmentTypeCounts[key] = 0;
@@ -155,10 +179,16 @@ export async function getLibraryInventory(brandId: string): Promise<LibraryInven
       }
     }
 
+    // Long-hold counts clip span (end_s - start_s), not recommended_duration_s.
+    // The latter is Gemini's trimmed "useful window" estimate and caps well
+    // below 10s on nordpilates (exercise ≤8s, hold ≤6s), so it would zero out
+    // this signal. The Director cares about whether a sustained shot exists
+    // on the shelf — clip span is the right measure.
     if (
       (row.segment_type === 'hold' || row.segment_type === 'exercise') &&
-      typeof row.recommended_duration_s === 'number' &&
-      row.recommended_duration_s >= LONG_HOLD_MIN_DURATION_S
+      typeof row.start_s === 'number' &&
+      typeof row.end_s === 'number' &&
+      row.end_s - row.start_s >= LONG_HOLD_MIN_DURATION_S
     ) {
       longHoldCount++;
     }

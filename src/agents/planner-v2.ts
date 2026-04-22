@@ -26,7 +26,7 @@ import type { BrandPersona } from '../types/brand-persona.js';
 import type { LibraryInventory } from '../types/library-inventory.js';
 
 const PLANNER_MODEL = process.env['GEMINI_PLANNER_MODEL'] || 'gemini-3.1-pro-preview';
-const TEMPERATURE = 0.4;
+const TEMPERATURE = 0.7;
 
 const PROMPT_TEMPLATE = readFileSync(
   resolve(new URL('.', import.meta.url).pathname, './prompts/planner-v2.md'),

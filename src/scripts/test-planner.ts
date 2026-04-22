@@ -61,6 +61,21 @@ function firstLine(s: string): string {
   return nl === -1 ? s : s.slice(0, nl);
 }
 
+function firstWord(s: string): string {
+  const trimmed = s.trim();
+  const m = trimmed.match(/^[^\s,.;:—-]+/);
+  return m ? m[0] : trimmed.slice(0, 20);
+}
+
+function countBy<T extends string | number>(xs: T[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const x of xs) {
+    const key = String(x);
+    out[key] = (out[key] ?? 0) + 1;
+  }
+  return out;
+}
+
 function printSeedReport(r: SeedResult): void {
   console.log(`--- Seed ${r.idx + 1}/${TEST_SEEDS.length} (${r.wall_ms} ms) ---`);
   console.log(`  seed: ${JSON.stringify(r.seed)}`);
@@ -114,6 +129,26 @@ async function main(): Promise<void> {
   console.log(`  passed:       ${passed}/${results.length}`);
   console.log(`  total wall:   ${totalMs} ms`);
   console.log(`  avg per seed: ${Math.round(totalMs / results.length)} ms`);
+
+  // Variance report across the soft dimensions — music_intent, slot_count,
+  // creative_vision opening word, form_id, hook_mechanism, posture.
+  const okOutputs = results.filter((r) => r.ok && r.output).map((r) => r.output!);
+  if (okOutputs.length > 0) {
+    console.log('');
+    console.log('=== variance ===');
+    console.log(`  music_intent:        ${JSON.stringify(countBy(okOutputs.map((o) => o.music_intent)))}`);
+    console.log(`  slot_count:          ${JSON.stringify(countBy(okOutputs.map((o) => o.slot_count)))}`);
+    console.log(`  creative_vision[0]:  ${JSON.stringify(countBy(okOutputs.map((o) => firstWord(o.creative_vision))))}`);
+    console.log(`  form_id:             ${JSON.stringify(countBy(okOutputs.map((o) => o.form_id)))}`);
+    console.log(`  hook_mechanism:      ${JSON.stringify(countBy(okOutputs.map((o) => o.hook_mechanism)))}`);
+    console.log(`  posture:             ${JSON.stringify(countBy(okOutputs.map((o) => o.posture)))}`);
+    console.log('');
+    console.log('  per-seed openings:');
+    for (let i = 0; i < okOutputs.length; i++) {
+      const o = okOutputs[i];
+      console.log(`    ${i + 1}: ${o.form_id} / ${o.music_intent} / ${o.slot_count} slots / "${firstWord(o.creative_vision)}..."`);
+    }
+  }
 
   if (passed < results.length) {
     process.exitCode = 1;
