@@ -215,7 +215,7 @@ const server = createServer(async (req, res) => {
       // Idempotency check BEFORE reading body — duplicates never touch disk
       const { data: existing } = await supabaseAdmin
         .from('assets')
-        .select('id, r2_key, brand_id, content_type, quality_score, duration_seconds')
+        .select('id, r2_key, brand_id, duration_seconds')
         .eq('filename', filename)
         .eq('brand_id', brandId)
         .limit(1)
@@ -230,8 +230,6 @@ const server = createServer(async (req, res) => {
           asset_id: existing.id,
           r2_key: existing.r2_key,
           brand_id: existing.brand_id,
-          content_type: existing.content_type,
-          quality_score: existing.quality_score,
           duration_seconds: existing.duration_seconds,
         }));
         req.destroy();
@@ -263,8 +261,6 @@ const server = createServer(async (req, res) => {
         asset_id: asset.id,
         r2_key: asset.r2_key,
         brand_id: asset.brand_id,
-        content_type: asset.content_type,
-        quality_score: asset.quality_score,
         duration_seconds: asset.duration_seconds,
       }));
     } catch (err) {
