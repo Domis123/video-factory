@@ -1,349 +1,359 @@
 # Phase 4 Part B — Pipeline
 
-**Status:** Not started. Blocked by Part A (Segment Intelligence) completing backfill.
-**Success criterion:** Replace the failing Phase 3.5 CD → Curator → Copywriter flow with a pipeline that produces coherent, on-library, subject-consistent short-form videos without manual review.
-**Depends on:** Part A's SegmentV2.1 schema being backfilled across all existing segments, retrieval RPCs updated to use structured fields.
+**Status:** W1 complete (2026-04-21). W1.5 in progress. W2 in design.
+**Success criterion (revised 2026-04-21):** Replace the Phase 3.5 CD → Curator → Copywriter flow with a pipeline that produces **organic-plausible, retention-optimized short-form content with form diversity**, not "just" coherent videos. Auto-QA remains a necessary gate; organic-creator-plausibility on human review is the bar. Measured on nordpilates during shadow mode + ramp.
+**Depends on:** Part A's SegmentV2.1 schema (complete) + W1 keyframe grids (complete).
 
 ---
 
 ## Why Part B exists
 
-Phase 3.5 pipeline has three structural failure modes that a better-prompted Claude can't fix:
+Phase 3.5 pipeline has three structural failure modes that better prompting can't fix:
 
-1. **Creative Director invents exercises the library doesn't have.** Partial fix via `library_inventory` module in Phase 3.5, but still relies on text-based exercise names rather than verified library structure.
+1. **Creative Director invents exercises the library doesn't have.** Partial fix via `library_inventory` in Phase 3.5, but still relies on text-based exercise names rather than verified library structure.
 2. **Curator selects clips that don't match intent.** pgvector retrieval + CLIP embedding midpoint keyframe + free-text description = blind selection. The curator sees "matching candidates" but can't see if they actually *show* what's claimed.
 3. **Copywriter writes overlay text before clips are selected.** Words say "glute bridge" over a clip of someone getting into position. Zero enforcement of text-visual coherence.
 
-Part A fixes the underlying metadata. Part B rebuilds the pipeline to exploit it:
+Part A fixed the metadata. W1 fixed the visual-grounding tool (keyframe grids). Part B rebuilds the pipeline to exploit both:
 
-- Planner sees **verified library inventory** from structured `exercise.name` + `confidence` + `body_regions`
-- Visual Director sees **actual keyframe grids** from candidates, not just text
-- Copywriter runs **after selection**, with access to what's actually on screen
-- Coherence Critic enforces **subject continuity** from structured `subject.primary` fields
+- Planner sees **verified library inventory + nordpilates form/posture playbook**, commits to form + hook_mechanism
+- Visual Director sees **actual keyframe grids** from candidates
+- Copywriter runs **after selection**, with access to what's on screen
+- Coherence Critic enforces **subject continuity + posture coherence**
 
 ---
 
-## Architecture overview
+## Architecture overview (revised 2026-04-21)
 
 ```
-                  ┌────────────────┐
-                  │  Planner       │  Gemini 3.1 Pro
-                  │  (structural   │  Input: idea seed, library_inventory
-                  │   skeleton)    │  Output: brief (slot types, body_focus, energy)
-                  └────────┬───────┘
-                           │
-                           ▼
-                  ┌────────────────┐
-                  │ Candidate      │  Supabase RPC (match_segments_v2)
-                  │ Retrieval      │  Input: brief slots
-                  │                │  Output: ~18 candidates/slot (pgvector + tag filter)
-                  └────────┬───────┘
-                           │
-                           ▼
-                  ┌────────────────┐
-                  │ Visual         │  Gemini 3.1 Pro (multimodal)
-                  │ Director       │  Input: candidates + keyframe grids
-                  │                │  Output: final clip picks
-                  └────────┬───────┘
-                           │
-                           ▼
-                  ┌────────────────┐
-                  │ Coherence      │  Gemini 3.1 Pro
-                  │ Critic         │  Input: storyboard (slot → clip)
-                  │                │  Output: approve / revise / reject
-                  └────────┬───────┘
-                           │
-                           ▼
-                  ┌────────────────┐
-                  │ Copywriter     │  Gemini 3.1 Pro
-                  │ (post-select)  │  Input: final clips + descriptions
-                  │                │  Output: overlay text per slot
-                  └────────┬───────┘
-                           │
-                           ▼
-                     Remotion render
+       Idea seed + brand_id
+              │
+              ▼
+     ┌────────────────┐
+     │  Planner       │  Gemini 3.1 Pro, text-only
+     │                │  Input: idea seed, library_inventory,
+     │                │         brand persona (incl. form×posture allowlist)
+     │                │  Output: form_id + hook_mechanism +
+     │                │         narrative_beat + slot structure
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Candidate      │  Supabase RPC (match_segments_v2)
+     │ Retrieval      │  Input: slot spec (segment_type prefs, body_focus)
+     │                │  Output: ~18 candidates per slot
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Visual         │  Gemini 3.1 Pro, multimodal
+     │ Director       │  Input: candidates + keyframe grids
+     │                │         (including posture restriction from brand)
+     │                │  Output: final clip picks + in/out points
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Coherence      │  Gemini 3.1 Pro
+     │ Critic         │  Input: storyboard + brand posture contract
+     │                │  Output: approve / revise / reject
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Copywriter     │  Gemini 3.1 Pro
+     │ (post-select)  │  Input: picks + form + hook_mechanism +
+     │                │         brand persona
+     │                │  Output: overlay text per slot
+     │                │  [W10: + voiceover_script, if posture is P6]
+     └────────┬───────┘
+              │
+              ▼
+      [W10: Voice Generator, if VO posture]
+              │
+              ▼
+        Remotion render
 ```
 
-Key architectural decision: **Planner does not name specific exercises.** It outputs a structural brief (slot count, slot types, body focus, energy curve, archetype, subject consistency mode). The Visual Director picks actual clips. This prevents the "CD invented glute-bridge-with-lifted-legs" failure mode at the design level, not just via prompt guardrails.
+Key architectural decisions:
+
+1. **Planner commits to form_id + hook_mechanism, not just archetype.** From `docs/w2-content-form-taxonomy.md`. Form is structural; hook_mechanism is load-bearing. Archetype enum (original spec) is replaced by form_id enum.
+2. **Posture is restricted per brand, not per video.** Brand persona names allowed postures; Planner doesn't pick posture. Director + Copywriter execute within posture constraint.
+3. **Planner does NOT name specific exercises.** Body focus only. Director picks actual clips — prevents CD-invented-exercise failure mode at the design level.
+
+---
+
+## Workstream sequence (revised 2026-04-21)
+
+| W# | Workstream | Status | Depends on |
+|----|------------|--------|-----------|
+| W1 | Keyframe grids | ✅ shipped 2026-04-21 | Part A |
+| W1.5 | Content Sprint 2 ingestion | 🟡 in progress | W1 |
+| W2 | Brand persona + form/posture playbook | 🔵 in design | W1.5 meaningfully complete |
+| W3 | Planner (form + hook_mechanism) | 🔴 not started | W2 |
+| W4 | match_segments_v2 RPC | 🔴 not started | W3 |
+| W5 | Visual Director (multimodal) | 🔴 not started | W1 + W4 |
+| W6 | Coherence Critic | 🔴 not started | W5 |
+| W7 | Copywriter rebuild | 🔴 not started | W5 (parallel to W6) |
+| W8 | Orchestrator | 🔴 not started | W3–W7 |
+| W9 | Shadow mode rollout | 🔴 not started | W8 |
+| **W10** | **Audio generation (NEW)** | 🔴 **not started, POST-shadow** | **W9 validation** |
+
+Estimated timeline: W1.5 through W9 in 4–6 weeks. W10 adds ~1 week post-shadow if Part B foundation is sound.
 
 ---
 
 ## Component specs
 
-### W1 — Keyframe grid extraction
+### W1 — Keyframe grid extraction ✅ SHIPPED
 
-**Purpose:** Produce 12-frame 3×4 mosaic JPEGs per segment for the Visual Director to inspect.
+See `docs/briefs/w1-keyframe-grids.md` (archived) and `src/lib/keyframe-grid.ts`. 4×3 portrait mosaic at 1024×1365, JPEG q80, EXIF metadata. R2 at `keyframe-grids/{brand_id}/{segment_id}.jpg`. Column `asset_segments.keyframe_grid_r2_key`.
 
-**Deliverable:** `src/lib/keyframe-grid.ts` with function `buildKeyframeGrid(parentAssetR2Key, segmentStartS, segmentEndS): Promise<Buffer>`.
+### W1.5 — Content Sprint 2 ingestion 🟡 IN PROGRESS
 
-**Design:**
-- FFmpeg extracts 12 evenly-spaced frames between `best_in_point_s` and `best_out_point_s` (NOT `start_s`/`end_s` — we use editorial-hint range)
-- Frames arranged in 3×4 grid, downscaled to 1024×768 total
-- JPEG quality 80, target file size ~200KB
-- Uploaded to R2 at `keyframe-grids/{segment_id}.jpg` with 30-day lifecycle
-- Cached — regenerate only if segment's editorial.best_in/out changes
+**Purpose:** ~2x nordpilates library via Drive-triggered ingestion using the live v2 path.
 
-**Cost:** ~$0.00 per grid (FFmpeg CPU on VPS, R2 storage negligible)
+**Deliverable:** populated `assets` + `asset_segments` rows with full v2 JSONB + keyframe grids.
 
-**When built:** After Part A backfill completes. Can be built in parallel with W2.
+**Mechanism:** entirely autonomous. Drive drop → S8 → VPS `/ugc-ingest` → ingestion worker (pre-normalize → Gemini v2 → keyframe grid → R2 + Supabase). No agent action; no brief needed.
 
-### W2 — Brand persona documents
+**Gate:** post-ingestion inventory audit. Specifically:
+- Row count stability (`SELECT COUNT(*) FROM assets WHERE brand_id='nordpilates'` stops climbing)
+- `segment_type` distribution updated (especially talking-head count)
+- `b-roll` lifestyle-vs-exercise-adjacent classification query
+- Long-hold segment availability for Cinematic Slow-Cinema viability
+- Same-exercise-name distribution for Single-Exercise Deep-Dive viability
 
-**Purpose:** Give the Planner and Copywriter a concrete voice/aesthetic reference per brand.
+**Unblocks:** W2 brief writing (so readiness flags in the form taxonomy are real numbers).
 
-**Deliverable:** `docs/brand-personas/{brand_id}.md` — one file per brand.
+### W2 — Brand persona + form/posture playbook
 
-**Format:** Short markdown doc (200-400 lines max) covering:
+**Purpose:** give Planner + Director + Critic + Copywriter a concrete voice/aesthetic contract per brand, backed by a form-taxonomy reference.
+
+**Deliverable:**
+- `docs/brand-personas/{brand_id}.md` — per-brand persona document (nordpilates first)
+- `docs/w2-content-form-taxonomy.md` (already drafted, v1) — canonical form/posture playbook
+- `src/agents/brand-persona.ts` — loader that reads the markdown persona + resolves form×posture allowlist into a structured schema for downstream agents
+- Zod schema for BrandPersona including `voice_config: VoiceConfig | null`
+
+**Persona doc format:**
 - Brand identity (what they sell, who for)
-- Creative references (example creators, apps, videos — "aspire toward X, avoid Y")
-- Voice tenets (warmth level, directness, humor, expertise tone)
-- Aesthetic tenets (lighting preferences, pacing, color treatment)
-- Archetypes that work for this brand
-- Content pillars (education, aesthetic, relatable, inspiration — weighted per brand)
-- Don't list
+- Creative references + anti-references
+- **Form×Posture allowlist** (from the taxonomy doc, restricted to this brand)
+- **Voice tenets** — warmth, directness, humor, expertise tone
+- **Aesthetic tenets** — lighting preferences, pacing, color treatment restrictions
+- **Content pillars** (education, aesthetic, relatable, inspiration — weighted)
+- **Don't list** — explicit exclusions (sales framing, medical claims, etc.)
+- **voice_config:** `null` at W2; populated at W10
 
-**For nordpilates (first brand):** Domis drafts the initial doc. I refine. Agent files.
+**For nordpilates (first brand):** Domis drafts the initial persona doc (narrative voice + references + aesthetic feel). Planning chat refines + structures. Agent files.
 
-**When built:** Any time before W3. Domis-authored content, so scheduled around Domis availability.
+**Voice-evaluation prep step (new):** during W2, Domis auditions 5-10 ElevenLabs voice samples reading a standardized test script. The chosen voice is recorded in persona doc as "W10 voice candidate" — NOT populated into `voice_config` at W2 (field stays `null`), just noted in persona prose. Saves evaluation time when W10 starts.
+
+**Hard constraints:**
+- Persona must NOT enable sales-pitch forms (Transformation Before/After, Client Testimonial with CTA, etc.)
+- `voice_config` must start at `null` — field exists, value is null, value populated only at W10
+- Form×Posture allowlist sourced from taxonomy doc; do not duplicate form definitions in persona doc (single source of truth)
+
+**When built:** after W1.5 meaningfully complete.
 
 ### W3 — Planner
 
-**Purpose:** Produce a structural brief (no exercise names) from an idea seed + library inventory + brand persona.
+**Purpose:** produce a structural brief with form commitment and hook mechanism, from idea seed + library inventory + brand persona.
 
 **Deliverable:** `src/agents/planner-v2.ts` + `src/agents/prompts/planner-v2.md` + Zod schema.
 
 **Input:**
-- Idea seed (e.g., "3 core exercises for back pain relief")
-- Brand persona (loaded from `docs/brand-personas/{brand_id}.md`)
-- Library inventory (aggregated from SegmentV2 fields — counts of segments per body_region, form_rating, segment_type for this brand)
+- Idea seed
+- Brand persona (from W2 loader)
+- Library inventory (aggregated from SegmentV2 fields — counts per body_region, form_rating, segment_type for this brand)
 
-**Output (Zod-validated):**
+**Output (Zod-validated, updated from original Part B spec):**
 ```typescript
 {
-  creative_vision: string,              // one sentence
-  archetype: 'transformation-story' | 'high-energy-listicle'
-           | 'calm-instructional' | 'workout-demo'
-           | 'tip-stack' | 'myth-buster' | 'before-after',
+  creative_vision: string,                  // one sentence
+  form_id: FormId,                          // from docs/w2-content-form-taxonomy.md
+  hook_mechanism:
+    'specific-pain-promise' | 'visual-pattern-interrupt'
+    | 'opening-energy' | 'authority-claim'
+    | 'confessional-vulnerability' | 'narrative-intrigue'
+    | 'trend-recognition',
+  audience_framing: string | null,          // for Targeted Microtutorial: e.g., "desk workers", "runners"
   subject_consistency: 'single-subject' | 'prefer-same' | 'mixed',
-  slot_count: number,                   // 3-12
+  slot_count: number,                       // form-specific range
   slots: Array<{
     slot_index: number,
-    slot_type: 'hook' | 'body' | 'cta',
+    slot_role: 'hook' | 'body' | 'close',   // renamed from 'slot_type' to avoid collision with segment_type
     target_duration_s: number,
-    energy: number,                     // 1-10
-    body_focus: string[] | null,        // ['core', 'glutes'] if body slot
-    segment_type_preferences: string[], // valid SegmentV2 segment_type values
+    energy: number,                          // 1-10
+    body_focus: string[] | null,
+    segment_type_preferences: string[],      // valid SegmentV2 segment_type values
     subject_role: 'primary' | 'any',
-    narrative_beat: string,             // one short line describing what this slot SAYS
+    narrative_beat: string,                  // what this slot SAYS (direction for Copywriter)
   }>,
   music_intent: 'calm-ambient' | 'upbeat-electronic'
               | 'motivational-cinematic' | 'warm-acoustic' | 'none',
+  posture: AestheticPosture,                 // passed through from brand persona, NOT chosen by Planner
 }
 ```
 
-**Key prompting rules:**
-- Prompt must NOT name specific exercises. Body focus only (e.g., "glutes", "core") — not "glute bridge" or "dead bug".
-- Archetype choice drives subject_consistency (transformation-story → single-subject, high-energy-listicle → mixed).
+**Key prompting rules (updated):**
+- Prompt must NOT name specific exercises (unchanged from original spec).
+- Prompt must name a valid `form_id` from the taxonomy doc and a valid `hook_mechanism`. These two together determine slot_count range + pacing default.
+- Prompt reads brand persona's Form×Posture allowlist; cannot emit a form the brand disallows.
+- `posture` is passed through unchanged from brand persona — Planner does NOT pick posture.
+- `narrative_beat` is a direction for Copywriter — not final text.
 - slot_count must fit within 30s total at target_duration_s.
-- narrative_beat is a direction for the Copywriter — not final text.
 
-**Why Gemini (not Claude):** Part of the Gemini-everywhere consolidation. Accept that Gemini's strict JSON behavior needs re-tuning vs. prior Claude prompts. `responseSchema` enforces structure.
+**Why Gemini:** stack unification. Accept prompt re-tuning cost. `responseSchema` enforces structure.
 
-**When built:** After Part A backfill + W1 + brand personas for at least 1 brand (nordpilates).
+**When built:** after W2.
 
-### W4 — Candidate retrieval (`match_segments_v2` RPC)
+### W4 — Candidate retrieval (`match_segments_v2` RPC) — unchanged from original spec
 
-**Purpose:** Given a slot definition from the Planner, return ~18 candidate segments from the library.
+(Spec unchanged. See earlier Part B doc for algorithm. Note: column is `parent_asset_id` not `asset_id`.)
 
-**Deliverable:** Supabase SQL function `match_segments_v2(brand_id text, slot_spec jsonb, limit int)`.
+### W5 — Visual Director — unchanged from original spec
 
-**IMPORTANT:** Column is `parent_asset_id` on `asset_segments`, NOT `asset_id`. This was incorrect in earlier design docs. Verified via Supabase query.
-
-**Algorithm:**
-1. Embed slot's narrative_beat + body_focus as query vector (use existing embedding model)
-2. pgvector similarity search against `asset_segments.description` embedding, filtered by:
-   - `brand_id = $brand_id`
-   - `segment_type IN ($slot_spec.segment_type_preferences)`
-   - `quality.overall >= 6` (JSONB query on segment_v2)
-   - `segment_type != 'unusable'`
-   - `segment_type != 'setup'` IF slot_type = 'body' AND body_focus is set (hard-filter from Phase 3.5)
-3. For body_focus slots: boost score if `segment_v2->exercise->body_regions` overlaps with slot_spec.body_focus
-4. For subject_consistency='single-subject' on subsequent body slots: filter to `parent_asset_id = {first_body_pick_parent}` if ≥3 same-parent candidates exist (Phase 3.5 pattern)
-5. Return top-N with metadata for Visual Director consumption
-
-**When built:** After backfill completes (queries rely on `segment_v2` JSONB fields).
-
-### W5 — Visual Director
-
-**Purpose:** Pick final clips from candidates using multimodal evaluation.
-
-**Deliverable:** `src/agents/visual-director.ts` + prompt + schema.
-
-**Input per slot:**
-- Slot spec from Planner
-- ~18 candidates, each with:
-  - Keyframe grid JPEG (from W1)
-  - Segment description + structured metadata (SegmentV2)
-  - Editorial hints (best_in/out_point_s, unusable_intervals)
-- Already-picked segments for earlier slots (enables subject continuity check)
-
-**Output:**
-```typescript
-{
-  picked_segment_id: string,
-  picked_parent_asset_id: string,     // for continuity tracking
-  picked_in_s: number,                 // use editorial.best_in_point_s unless override justified
-  picked_out_s: number,
-  pick_rationale: string,              // one sentence, for debugging
-  alternatives: Array<{segment_id: string, reason_rejected: string}>,
-}
-```
-
-**Key prompting rules:**
-- Reads keyframe grid PLUS description PLUS structured fields. Triangulates.
-- Prefers editorial.best_in/out_point_s unless overlay text collision or continuity issue forces shift.
-- Enforces single-subject when brief specifies.
-- Must provide rationale — debuggable selection, not a black box.
-
-**Cost:** ~$0.35/video on Gemini credits (12 slots × ~3K tokens input × $0.01/1K ≈ $0.36).
-
-**When built:** After W1 + W4 + Part A backfill.
+(Spec unchanged. Input includes keyframe grids from W1.)
 
 ### W6 — Coherence Critic
 
-**Purpose:** Review the full storyboard before render. Catches mistakes the per-slot Director missed.
+**Purpose:** review full storyboard before render. Catches mistakes the per-slot Director missed.
 
 **Deliverable:** `src/agents/coherence-critic.ts`.
 
-**Input:** Full storyboard — Planner brief + final clip picks + Copywriter overlays (if available).
+**Input:** full storyboard — Planner brief + final clip picks + Copywriter overlays.
 
-**Output:**
-```typescript
-{
-  verdict: 'approve' | 'revise' | 'reject',
-  issues: Array<{
-    severity: 'critical' | 'major' | 'minor',
-    slot_indices: number[],            // which slots are affected
-    issue_type: 'subject-discontinuity' | 'pace-mismatch'
-              | 'overlay-text-conflict' | 'on-screen-text-collision'
-              | 'energy-curve-violation' | 'archetype-drift',
-    description: string,
-    suggested_fix: string | null,
-  }>,
-}
-```
+**Output:** verdict + issues (unchanged from original spec).
 
-**Critical checks:**
-- Subject continuity (if brief specifies single-subject, all body slots must share parent_asset_id or same structured subject descriptor)
-- On-screen text collisions (if two adjacent slots have `setting.on_screen_text` populated with conflicting content)
-- Overlay ↔ clip coherence (copywriter text matches what clip shows)
-- Energy curve matches slot_by_slot energy from brief
-- Archetype consistency (single-subject mode doesn't fit a high-energy-listicle etc.)
+**New critical check (added this session):** posture coherence. If brand persona restricts posture to e.g., P1 + P5, and the storyboard's clip picks collectively read as P4 (fast-cut punchy), flag as `archetype-drift` or new `posture-drift` issue type.
 
-**When built:** After W5 ships. Can run shadow mode first (log issues without blocking render) before promoting to gate.
+**When built:** after W5. Shadow mode first.
 
-### W7 — Copywriter (post-selection)
+### W7 — Copywriter rebuild — largely unchanged, two additions
 
-**Purpose:** Write overlay text for each slot AFTER clips are picked.
+**Purpose:** write overlay text per slot after clips are picked.
 
 **Deliverable:** `src/agents/copywriter-v2.ts`.
 
-**Input:** Final slot picks from Director + brief + brand persona.
+**Input:** final slot picks from Director + brief (form, hook_mechanism, narrative_beat) + brand persona.
 
-**Output:** Per-slot overlay text + timing.
+**Output:** per-slot overlay text + timing.
 
-**Key change from Phase 3.5:** runs POST-selection, not PRE. Sees what's on screen. Doesn't invent words that contradict visuals. If a clip's `setting.on_screen_text` already has "DAY 14", copywriter adapts (e.g., doesn't add conflicting day counter).
+**Additions this session:**
+1. Copywriter receives `hook_mechanism` explicitly — delivers on it, not just writes to brief.
+2. Copywriter output schema includes `voiceover_script: string | null` field. At W7, always null. Populated at W10.
 
-**When built:** Parallel to W5 or immediately after.
+**When built:** parallel to W5/W6.
 
-### W8 — Orchestrator
+### W8 — Orchestrator — unchanged from original spec
 
-**Purpose:** Wire the above components into a job flow.
+### W9 — Shadow mode rollout — unchanged from original spec
 
-**Deliverable:** `src/workers/pipeline-v2.ts` — replaces current Phase 3.5 orchestration.
+### W10 — Audio generation (NEW, added 2026-04-21)
 
-**Job flow:**
-1. Job created in queue (idea seed + brand_id)
-2. Pipeline-v2 picks it up
-3. Load brand persona + library inventory
-4. Call Planner → brief
-5. For each slot: call retrieval RPC → Visual Director → picked clip
-6. Call Copywriter with final picks → overlays
-7. Call Coherence Critic → verdict
-8. If revise: one revision pass. If reject: fail job with diagnostic.
-9. If approve: hand to Remotion render pipeline (unchanged from Phase 3.5)
+**Purpose:** enable voiceover-led content for forms currently text-only. Unlocks ~30% of form taxonomy gated by talking-head scarcity.
 
-**Shadow mode:** New pipeline runs alongside Phase 3.5 for same job. Outputs diff report. No production traffic on v2 until diff report is clean.
+**Deliverable:**
+- `src/agents/voice-generator.ts` — ElevenLabs (or equivalent) integration
+- `src/agents/prompts/voiceover-script.md` — Copywriter extension generating audio-rhythm scripts distinct from visual overlay text
+- `src/workers/audio-mix.ts` — layered audio: UGC + music + VO with ducking
+- Posture P6 (Voice-Over-Led) promoted from "deferred" to active in taxonomy doc
+- `VoiceConfig` schema populated in brand personas
 
-**When built:** After W3-W7 all ship.
+**Scope:**
+- ElevenLabs API integration (voice-id per brand from persona's chosen voice candidate)
+- Copywriter generates parallel `voiceover_script` when form×posture = VO-compatible
+- Audio-mix worker layers VO on top of ducked music, alongside UGC audio
+- Ethical guardrails: persona can forbid VO on first-person-confessional forms (e.g., original What-I-Wish-I-Knew — would be dishonest since there's no "I")
 
-### W9 — Shadow mode rollout
+**Cost:** ElevenLabs Creator tier (~$22/mo) + overage for 150 videos/week at ~30 words/video = ~$30/mo steady state.
 
-**Purpose:** De-risk cutover.
+**Forms unlocked:**
+- Teacher-Cue Drop (#15) — VO narrates the cue over exercise demo
+- Myth-Buster (#6) — VO explains the correction
+- Single-Exercise Deep-Dive (#8) — VO gives the cue callouts
+- Hook-Rev-Tip (#13) — VO delivers the tip
+- Others tbd during W10 calibration
 
-**Plan:**
-1. For 1 week: every Phase 3.5 job also runs Pipeline v2 in shadow. Both produce context_packets; shadow v2 outputs stored but not rendered. Daily diff report: slot selections, overlay text, coherence verdicts.
-2. For 2nd week: 10% of production jobs run on v2 (rendered + shipped). A/B metrics: viewer retention, scroll-through rate.
-3. Week 3+: if v2 beats Phase 3.5 on retention, ramp to 100%.
+**Forms still NOT unlocked by W10:**
+- Reaction (#10) — requires visible reaction face
+- Progress-Montage (#11) — requires temporal metadata, separate issue
+- What-I-Wish-I-Knew — ethical concern (AI voice on confessional is dishonest framing)
 
----
-
-## Cost & latency projections (steady-state per video)
-
-| Stage | Tokens/calls | Cost (Gemini credits) | Wall time |
-|---|---|---|---|
-| Planner | 1 call, ~5K tokens | $0.05 | 8s |
-| Retrieval (×12 slots) | 12 pgvector queries | $0.00 | 3s total |
-| Visual Director (×12 slots) | 12 calls × ~4K tokens | $0.36 | 45s total (parallel-able) |
-| Copywriter | 1 call, ~3K tokens | $0.03 | 6s |
-| Coherence Critic | 1 call, ~6K tokens | $0.05 | 10s |
-| **Total LLM cost** | **~$0.50/video** | | ~75s total |
-| Remotion render | CPU only | $0.00 | ~60s |
-
-**Production target:** $0.50/video all-in during credits period. Post-credits, monitor and reassess.
+**When built:** AFTER W9 shadow mode proves W2–W7 foundation works on nordpilates. Not before.
 
 ---
 
-## Risks & open questions
+## Cost & latency projections (revised)
+
+| Stage | Cost | Wall time |
+|---|---|---|
+| Planner | $0.05 | 8s |
+| Retrieval (×N slots) | $0.00 | 3s total |
+| Visual Director (×N slots, parallel) | $0.30-0.40 | 30-45s |
+| Copywriter | $0.03 | 6s |
+| Coherence Critic | $0.05 | 10s |
+| **Total LLM cost (W2-W9)** | **~$0.50/video** | ~75s |
+| W10 voice generation (when shipped) | +$0.02 | +5s |
+| Remotion render | $0.00 | ~60s |
+
+Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video steady state with W10.
+
+---
+
+## Risks & open questions (updated)
 
 ### Risks
 
 | Risk | Mitigation |
 |---|---|
-| Gemini prompt re-tuning effort for Planner is underestimated | Allocate 1-2 iteration sessions on W3; keep Claude Planner as fallback if Gemini can't hit strictness bar |
-| Keyframe grids miss key moments | Use `best_in/out_point_s` as range, not full segment — grids are from the "money shot" window |
-| Visual Director over-indexes on grid vs description | Prompt carefully: grid for visual content, description for context/intent |
-| Coherence Critic false positives block good videos | Shadow mode first; tune thresholds before making it blocking |
-| match_segments_v2 JSONB queries are slow | Benchmark on real backfilled data; add GIN indexes on `segment_v2->exercise->body_regions` etc. if needed |
-| Subject continuity fails when library is thin per-brand | Fallback threshold (≥3 same-parent candidates) + log gaps for library expansion |
+| Gemini prompt tuning effort for Planner underestimated | Allocate 1-2 iteration sessions on W3; keep Claude fallback available if needed |
+| Keyframe grids miss key moments | Already mitigated — use `best_in/out_point_s` range |
+| Visual Director over-indexes on grid vs description | Prompt carefully: grid for visual, description for intent |
+| Coherence Critic false positives block good videos | Shadow mode first; tune thresholds |
+| match_segments_v2 JSONB queries slow | Benchmark on real backfilled data; add GIN indexes if needed |
+| Subject continuity fails when library is thin per-brand | Fallback threshold (≥3 same-parent candidates) + log gaps |
+| **Content Sprint 2 doesn't meaningfully relieve talking-head bottleneck** | Accept the current library limits through Part B; W10 provides alternative path via VO |
+| **Form×Posture allowlist encoded in persona drifts from taxonomy doc** | Single source of truth — persona references taxonomy doc by form_id, doesn't redefine |
+| **W10 voice choice for nordpilates feels wrong post-ship** | Voice-evaluation during W2 with Domis; fast rollback by flipping brand voice_config and re-rendering |
 
-### Open questions (decide during Part B planning)
+### Open questions
 
-1. **Should Planner see keyframe grids?** Currently proposed as text-only. If segment metadata alone isn't enough for narrative structuring, we could feed Planner a sample of keyframe grids from candidate segments. Cost/benefit TBD.
+1. **Should Planner see keyframe grids?** Text-only currently. Open — may test multimodal Planner in a W3 variant.
 2. **Should Copywriter see keyframe grids?** Maybe for visual-text-coherence enforcement. Same cost/benefit question.
-3. **Should Coherence Critic be multi-turn with Director?** Current design is one-shot critique. Could be "Director proposes → Critic critiques → Director revises" loop. Adds latency + cost; might not be needed.
-4. **Feature flag strategy for v2 pipeline.** `ENABLE_PIPELINE_V2_SHADOW` vs `ENABLE_PIPELINE_V2_PROD` — two flags or one with states?
+3. **Multi-turn Critic-Director loop?** Current design is one-shot. Could be "propose → critique → revise" loop. Adds latency; might not be needed.
+4. **Feature flag strategy:** `ENABLE_PIPELINE_V2_SHADOW` vs `ENABLE_PIPELINE_V2_PROD` — two flags or one with states?
+5. **NEW: W10 voice per brand or per persona?** One voice per brand (nordpilates = voice A, Nordletics = voice B), or per persona-within-brand (nordpilates P5 = teacher voice, nordpilates P1 = softer voice)? Lean toward one per brand for simplicity.
 
 ---
 
-## Prerequisites checklist (before W3 starts)
+## Prerequisites checklist
 
-- [ ] Part A complete: all segments have `segment_v2` populated
-- [ ] W1 shipped: keyframe grids generated for all backfilled segments
-- [ ] W2 shipped: nordpilates brand persona doc in repo
-- [ ] W4 prototyped: match_segments_v2 RPC returns sensible candidates on test brief
-- [ ] Phase 4 Part B doc (this doc) reviewed + approved by Domis
+- [x] Part A complete
+- [x] W1 shipped (keyframe grids)
+- [ ] W1.5 meaningfully complete (Content Sprint 2 ingested, inventory refreshed)
+- [ ] W2 shipped (persona + form/posture playbook loaded into codebase)
+- [ ] W4 prototyped
 - [ ] Feature flag plan decided
+- [ ] Voice-evaluation session held (prep for W10, non-blocking for W2-W9)
 
 ---
 
 ## What "done" looks like for Part B
 
-- [ ] Pipeline v2 running in shadow mode for ≥1 week
-- [ ] Shadow diffs show v2 picks are at least as good as Phase 3.5 on ≥80% of jobs
-- [ ] A/B test on 10% traffic shows retention delta of 0% or positive
-- [ ] v2 ramp to 100% traffic, Phase 3.5 code path deprecated
-- [ ] Phase 3.5 orchestrator + prompts deleted
-- [ ] Library_inventory + body_focus code migrated from Phase 3.5 string-tag matching to v2 structured-field matching
+- [ ] Pipeline v2 (W2-W9) running in shadow mode ≥1 week
+- [ ] Shadow diffs show v2 picks at least as good as Phase 3.5 on ≥80% of jobs
+- [ ] A/B test on 10% traffic: retention delta 0% or positive
+- [ ] Human review of 30 random v2 outputs: ≥8/10 rated "could plausibly be a real creator's organic post"
+- [ ] Form diversity across 50 outputs: ≥6 distinct form_ids used (not all Routine-Sequence slop)
+- [ ] v2 ramp to 100%, Phase 3.5 deprecated
+- [ ] Phase 3.5 code path removed
+- [ ] W10 shipped (audio generation) — post-Part-B success criterion
 
-When Part B is done: Video Factory produces retention-optimized organic short-form content across 30 brands without per-video human review. That's the whole point of the project.
+When Part B is done: Video Factory produces retention-optimized organic short-form content on nordpilates that passes both automated QA and human organic-plausibility review, with form diversity measurable across the output library. That's the whole point.
+
+---
+
+*Revised 2026-04-21 evening. Adds W1.5 + W10, updates W2 + W3 scopes for form/posture two-axis model and hook_mechanism first-class concept, updates success criterion from auto-QA-pass-rate to organic-plausibility-plus-form-diversity.*
