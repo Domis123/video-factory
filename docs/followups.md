@@ -6,6 +6,25 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## v1-curator-flash-nulls-if-emergency-rollback — post-Flash-removal rows break the V1 rollback path
+
+**Status:** Active (informational)
+**Discovered:** 2026-04-22, commit `99d661e` (Flash removal merged to main)
+
+**Pattern:** After the Flash analyzeClip removal from the ingestion hot path, fresh `assets` rows get NULL for `content_type`, `mood`, `quality_score`, `has_speech`, `transcript_summary`, `visual_elements`, `usable_segments` (plus empty `tags` when filename has no description suffix). V1 asset-curator (`src/agents/asset-curator.ts`) reads all of those fields directly. It is unreachable in production because `ENABLE_CURATOR_V2=true` (live since 2026-04-13) routes every call to V2 in `asset-curator-dispatch.ts`. Old rows (pre-2026-04-22) still carry Flash-written values and would still work.
+
+**Tried:** nothing — intentional. Flash was blocking v2 on 429; removal was the right fix. V1 was already on the emergency-only rollback path, not the production path.
+
+**Not tried:** (1) restoring Flash temporarily in a retry-wrapped codepath, (2) teaching V1 to tolerate NULL Flash fields, (3) dropping the V1 codepath entirely (would close the rollback door). Declined — all three are work that only matters if the rollback button actually gets pressed.
+
+**Revisit if:** anyone flips `ENABLE_CURATOR_V2=false` for emergency rollback. At that moment the decision is (a) restore Flash temporarily (quickest), (b) harden V1 against NULLs (correct but slower), or (c) accept that only pre-2026-04-22 assets are curatable until v2 is re-enabled.
+
+**Affected data:** all `assets` rows inserted on/after 2026-04-22 on main. Old rows unaffected.
+
+**Owner hint:** anyone touching the `ENABLE_CURATOR_V2` flag.
+
+---
+
 ## part-a-classification-noise-spotcheck — W1 Gate B visual audit surfaced isolated segment_type mismatches
 
 **Status:** Active, not blocking.
