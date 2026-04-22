@@ -8,7 +8,6 @@ import { uploadFile, deleteFile } from '../lib/r2-storage.js';
 import { preNormalizeParent } from '../lib/parent-normalizer.js';
 import { buildProbeCommand } from '../lib/ffmpeg.js';
 import { execOrThrow } from '../lib/exec.js';
-import { analyzeClip } from '../lib/gemini.js';
 import { analyzeClipMetadata } from '../lib/clip-analysis.js';
 import { analyzeClipSegments } from '../lib/gemini-segments.js';
 import { processSegmentsForAsset } from '../lib/segment-processor.js';
@@ -102,16 +101,11 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
   const probe = await probeFile(input.filePath);
   console.log(`[ingestion] Probed: ${probe.resolution}, ${probe.duration_seconds}s, ${probe.file_size_mb}MB`);
 
-  // 2. Gemini clip analysis
-  console.log(`[ingestion] Analyzing clip with Gemini...`);
-  const analysis = await analyzeClip(input.filePath);
-  console.log(`[ingestion] Analyzed: ${analysis.content_type}, mood=${analysis.mood}, quality=${analysis.quality_score}`);
-  console.log(`[ingestion] Description: ${analysis.detailed_description}`);
-  if (analysis.usable_segments.length > 0) {
-    console.log(`[ingestion] Found ${analysis.usable_segments.length} usable segments`);
-  }
-
-  // 2b. FFmpeg clip metadata (color, motion, brightness)
+  // 2. FFmpeg clip metadata (color, motion, brightness) — pure local ffmpeg, no network.
+  //    The legacy Gemini Flash analyzeClip() call that used to run here was removed
+  //    in fix/remove-legacy-flash-ingest: its output was not consumed by the
+  //    Phase 3.5 production path (V2 curator + segment_v2 sidecar own retrieval),
+  //    and it was hot-path blocking ingestion on 429 before v2 could run.
   console.log(`[ingestion] Extracting visual metadata with FFmpeg...`);
   const clipMeta = await analyzeClipMetadata(input.filePath);
   console.log(`[ingestion] Color: ${clipMeta.dominant_color_hex}, Motion: ${clipMeta.motion_intensity}, Brightness: ${clipMeta.avg_brightness}, Cuts: ${clipMeta.scene_cuts}`);
@@ -142,10 +136,12 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
   }
 
   try {
-    // 5. Insert into Supabase
-    const allTags = [...analysis.tags];
-    if (description) allTags.push(description);
-
+    // 5. Insert into Supabase. Flash-populated columns (content_type, mood,
+    //    quality_score, has_speech, transcript_summary, visual_elements,
+    //    usable_segments) are no longer written — retrieval owns these via
+    //    segment_v2. Column drop deferred to a later migration so old rows stay
+    //    readable for the V1 asset-curator legacy path (currently unreachable
+    //    with ENABLE_CURATOR_V2=true, kept for emergency rollback only).
     const row = {
       id: assetId,
       brand_id: brandId,
@@ -158,18 +154,11 @@ export async function ingestAsset(input: IngestionInput): Promise<Asset> {
       resolution: probe.resolution,
       aspect_ratio: probe.aspect_ratio,
       file_size_mb: probe.file_size_mb,
-      content_type: analysis.content_type,
-      mood: analysis.mood,
-      quality_score: analysis.quality_score,
-      has_speech: analysis.has_speech,
-      transcript_summary: analysis.transcript_summary,
-      visual_elements: analysis.visual_elements,
-      usable_segments: analysis.usable_segments,
       dominant_color_hex: clipMeta.dominant_color_hex,
       motion_intensity: clipMeta.motion_intensity,
       avg_brightness: clipMeta.avg_brightness,
       scene_cuts: clipMeta.scene_cuts,
-      tags: allTags,
+      tags: description ? [description] : [],
     };
 
     const { data, error } = await supabaseAdmin
