@@ -51,7 +51,7 @@ import type { SlotPick, StoryboardPicks } from '../types/slot-pick.js';
 const COPYWRITER_MODEL =
   process.env['GEMINI_COPYWRITER_MODEL'] || 'gemini-3.1-pro-preview';
 const TEMPERATURE = 0.5;
-const MAX_OUTPUT_TOKENS = 4000;
+const MAX_OUTPUT_TOKENS = 8000;
 
 const PROMPT_TEMPLATE = readFileSync(
   resolve(new URL('.', import.meta.url).pathname, './prompts/copywriter-v2.md'),
@@ -113,8 +113,72 @@ function omitVoiceoverScriptForGemini(schema: unknown): unknown {
   return out;
 }
 
-const COPY_JSON_SCHEMA = omitVoiceoverScriptForGemini(
-  stripSchemaBounds(RAW_COPY_JSON_SCHEMA),
+// Path-targeted belt-and-suspenders strip for the specific fields where
+// Gate A first + second smokes saw malformed JSON pressure: hashtags item
+// regex, and min/max on the free-text fields the model has to fill
+// (reasoning per slot, all four captions, hook.text, hook.mechanism_tie).
+// Redundant with `stripSchemaBounds` at some keys; kept distinct so future
+// edits to the global strip don't silently un-relax these specific fields.
+// Zod still enforces every bound on the returned JSON — post-parse is the
+// single enforcement point.
+function stripAggressiveBounds(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object') return schema;
+  const root = schema as Record<string, unknown>;
+  const props = (root['properties'] ?? {}) as Record<string, unknown>;
+
+  const hashtags = props['hashtags'] as Record<string, unknown> | undefined;
+  const hashtagItems = hashtags?.['items'] as Record<string, unknown> | undefined;
+  if (hashtagItems) {
+    delete hashtagItems['pattern'];
+    delete (hashtagItems as Record<string, unknown>)['regex'];
+  }
+
+  const perSlot = props['per_slot'] as Record<string, unknown> | undefined;
+  const perSlotItems = perSlot?.['items'] as Record<string, unknown> | undefined;
+  const perSlotItemProps = perSlotItems?.['properties'] as
+    | Record<string, unknown>
+    | undefined;
+  const reasoning = perSlotItemProps?.['reasoning'] as
+    | Record<string, unknown>
+    | undefined;
+  if (reasoning) {
+    delete reasoning['minLength'];
+    delete reasoning['maxLength'];
+    delete reasoning['minimum'];
+    delete reasoning['maximum'];
+  }
+
+  const captions = props['captions'] as Record<string, unknown> | undefined;
+  const captionsProps = captions?.['properties'] as
+    | Record<string, unknown>
+    | undefined;
+  for (const key of ['canonical', 'tiktok', 'instagram', 'youtube'] as const) {
+    const field = captionsProps?.[key] as Record<string, unknown> | undefined;
+    if (field) {
+      delete field['minLength'];
+      delete field['maxLength'];
+      delete field['minimum'];
+      delete field['maximum'];
+    }
+  }
+
+  const hook = props['hook'] as Record<string, unknown> | undefined;
+  const hookProps = hook?.['properties'] as Record<string, unknown> | undefined;
+  for (const key of ['text', 'mechanism_tie'] as const) {
+    const field = hookProps?.[key] as Record<string, unknown> | undefined;
+    if (field) {
+      delete field['minLength'];
+      delete field['maxLength'];
+      delete field['minimum'];
+      delete field['maximum'];
+    }
+  }
+
+  return root;
+}
+
+const COPY_JSON_SCHEMA = stripAggressiveBounds(
+  omitVoiceoverScriptForGemini(stripSchemaBounds(RAW_COPY_JSON_SCHEMA)),
 ) as Record<string, unknown>;
 
 // ─────────────────────────────────────────────────────────────────────────────
