@@ -1,0 +1,411 @@
+=== text-normalize self-check ===
+  all text-normalize checks passed.
+
+=== library inventory snapshot ===
+{
+  "brand_id": "nordpilates",
+  "generated_at": "2026-04-23T08:32:43.482Z",
+  "totals": {
+    "parents": 298,
+    "segments": 1173,
+    "v2_segments": 1172,
+    "gridded_segments": 1172
+  },
+  "segment_type_counts": {
+    "setup": 136,
+    "exercise": 591,
+    "transition": 147,
+    "hold": 116,
+    "cooldown": 33,
+    "talking-head": 8,
+    "b-roll": 131,
+    "unusable": 11
+  },
+  "body_regions": [
+    {
+      "region": "core",
+      "count": 614
+    },
+    {
+      "region": "glutes",
+      "count": 394
+    },
+    {
+      "region": "legs",
+      "count": 339
+    },
+    {
+      "region": "shoulders",
+      "count": 275
+    },
+    {
+      "region": "hips",
+      "count": 206
+    },
+    {
+      "region": "hamstrings",
+      "count": 157
+    },
+    {
+      "region": "arms",
+      "count": 150
+    },
+    {
+      "region": "obliques",
+      "count": 110
+    },
+    {
+      "region": "full-body",
+      "count": 105
+    },
+    {
+      "region": "back",
+      "count": 91
+    },
+    {
+      "region": "quads",
+      "count": 90
+    },
+    {
+      "region": "spine",
+      "count": 81
+    },
+    {
+      "region": "chest",
+      "count": 46
+    }
+  ],
+  "equipment": [
+    {
+      "equipment": "mat",
+      "count": 732
+    },
+    {
+      "equipment": "yoga mat",
+      "count": 248
+    },
+    {
+      "equipment": "mirror",
+      "count": 60
+    },
+    {
+      "equipment": "smartwatch",
+      "count": 56
+    },
+    {
+      "equipment": "wall",
+      "count": 47
+    },
+    {
+      "equipment": "phone",
+      "count": 39
+    },
+    {
+      "equipment": "laptop",
+      "count": 30
+    },
+    {
+      "equipment": "glass",
+      "count": 15
+    },
+    {
+      "equipment": "pilates ring",
+      "count": 14
+    },
+    {
+      "equipment": "dumbbell",
+      "count": 13
+    },
+    {
+      "equipment": "bed",
+      "count": 12
+    },
+    {
+      "equipment": "tablet",
+      "count": 9
+    },
+    {
+      "equipment": "wrist weight",
+      "count": 9
+    },
+    {
+      "equipment": "pillow",
+      "count": 7
+    },
+    {
+      "equipment": "plate",
+      "count": 7
+    },
+    {
+      "equipment": "water glass",
+      "count": 7
+    },
+    {
+      "equipment": "reformer",
+      "count": 6
+    },
+    {
+      "equipment": "rug",
+      "count": 6
+    },
+    {
+      "equipment": "sunglasse",
+      "count": 6
+    },
+    {
+      "equipment": "bench",
+      "count": 5
+    },
+    {
+      "equipment": "headphone",
+      "count": 5
+    },
+    {
+      "equipment": "mug",
+      "count": 5
+    },
+    {
+      "equipment": "couch",
+      "count": 4
+    },
+    {
+      "equipment": "smartphone",
+      "count": 4
+    },
+    {
+      "equipment": "stroller",
+      "count": 4
+    },
+    {
+      "equipment": "beverage can",
+      "count": 3
+    },
+    {
+      "equipment": "food",
+      "count": 3
+    },
+    {
+      "equipment": "jean",
+      "count": 3
+    },
+    {
+      "equipment": "plant",
+      "count": 3
+    },
+    {
+      "equipment": "weight rack",
+      "count": 3
+    }
+  ],
+  "top_exercises": [
+    {
+      "name": "donkey kick",
+      "count": 34
+    },
+    {
+      "name": "glute bridge",
+      "count": 25
+    },
+    {
+      "name": "side lying leg lift",
+      "count": 24
+    },
+    {
+      "name": "bird dog",
+      "count": 15
+    },
+    {
+      "name": "standing open gate",
+      "count": 13
+    },
+    {
+      "name": "wall chest stretch",
+      "count": 13
+    },
+    {
+      "name": "bicycle crunche",
+      "count": 12
+    },
+    {
+      "name": "modified jumping jack",
+      "count": 12
+    },
+    {
+      "name": "crunche",
+      "count": 10
+    },
+    {
+      "name": "wall glute bridge",
+      "count": 9
+    },
+    {
+      "name": "bodyweight squat",
+      "count": 8
+    },
+    {
+      "name": "plank to downward dog",
+      "count": 8
+    },
+    {
+      "name": "plank to downward dog flow",
+      "count": 8
+    },
+    {
+      "name": "side plank dip",
+      "count": 8
+    },
+    {
+      "name": "wall supported side lunge",
+      "count": 8
+    },
+    {
+      "name": "alternating toe tap",
+      "count": 7
+    },
+    {
+      "name": "cat cow stretch",
+      "count": 7
+    },
+    {
+      "name": "forearm plank",
+      "count": 7
+    },
+    {
+      "name": "side step punche",
+      "count": 7
+    },
+    {
+      "name": "squat to side leg lift",
+      "count": 7
+    },
+    {
+      "name": "alternating reverse lunge",
+      "count": 6
+    },
+    {
+      "name": "alternating side lunge",
+      "count": 6
+    },
+    {
+      "name": "alternating side lunges with floor touch",
+      "count": 6
+    },
+    {
+      "name": "reverse lunge to single leg deadlift",
+      "count": 6
+    },
+    {
+      "name": "side plank",
+      "count": 6
+    },
+    {
+      "name": "single leg glute bridge",
+      "count": 6
+    },
+    {
+      "name": "standing torso twist",
+      "count": 6
+    },
+    {
+      "name": "alternate heel touche",
+      "count": 5
+    },
+    {
+      "name": "arm circles backward",
+      "count": 5
+    },
+    {
+      "name": "high knee",
+      "count": 5
+    }
+  ],
+  "b_roll_mix": {
+    "lifestyle_likely": 60,
+    "exercise_adjacent_likely": 71,
+    "ambiguous": 0
+  },
+  "long_hold_count": 291,
+  "talking_head_count": 8
+}
+
+=== per-seed planner results ===
+--- Seed 1/5 (22100 ms) ---
+  seed: "morning pilates routine for hip mobility"
+  STATUS: PASS
+  form_id:        routine_sequence
+  hook_mechanism: narrative-intrigue
+  posture:        P1
+  slot_count:     4
+  music_intent:   calm-ambient
+  audience_framing: null
+  subject_consistency: single-subject
+  slot_roles:     [hook, body, body, close]
+  creative_vision: Quiet morning hip mobility routine, single subject, soft natural light, drawing the viewer into a calming daily practice.
+--- Seed 2/5 (24562 ms) ---
+  seed: "3 glute exercises that feel better than they should"
+  STATUS: PASS
+  form_id:        targeted_microtutorial
+  hook_mechanism: specific-pain-promise
+  posture:        P1
+  slot_count:     5
+  music_intent:   warm-acoustic
+  audience_framing: "for tight hips and glutes"
+  subject_consistency: single-subject
+  slot_roles:     [hook, body, body, body, close]
+  creative_vision: A warm, invitational sequence of three glute movements focused on pleasure and release, shot in soft morning light with a single subject.
+--- Seed 3/5 (27709 ms) ---
+  seed: "soft golden-hour pilates aesthetic, no teaching"
+  STATUS: PASS
+  form_id:        aesthetic_ambient
+  hook_mechanism: visual-pattern-interrupt
+  posture:        P1
+  slot_count:     5
+  music_intent:   calm-ambient
+  audience_framing: null
+  subject_consistency: mixed
+  slot_roles:     [hook, body, body, body, close]
+  creative_vision: A mixed-subject compilation of soft, golden-hour Pilates moments, using a visual pattern interrupt to focus on quiet aesthetic and fluid movement without explicit instruction.
+--- Seed 4/5 (21897 ms) ---
+  seed: "the one cue that changed my plank"
+  STATUS: PASS
+  form_id:        hook_rev_tip
+  hook_mechanism: confessional-vulnerability
+  posture:        P1
+  slot_count:     4
+  music_intent:   warm-acoustic
+  audience_framing: null
+  subject_consistency: single-subject
+  slot_roles:     [hook, body, body, close]
+  creative_vision: Single teacher demonstrating a soft plank form correction in warm light, using confessional overlay text to deliver the cue.
+--- Seed 5/5 (29346 ms) ---
+  seed: "day in the life of a pilates teacher"
+  STATUS: PASS
+  form_id:        day_in_the_life
+  hook_mechanism: narrative-intrigue
+  posture:        P1
+  slot_count:     6
+  music_intent:   calm-ambient
+  audience_framing: null
+  subject_consistency: single-subject
+  slot_roles:     [hook, body, body, body, body, close]
+  creative_vision: A quiet, narrative-driven look into a teacher's daily practice and lifestyle, anchored by a single subject and calm pacing.
+
+=== summary ===
+  passed:       5/5
+  total wall:   125614 ms
+  avg per seed: 25123 ms
+
+=== variance ===
+  music_intent:        {"calm-ambient":3,"warm-acoustic":2}
+  slot_count:          {"4":2,"5":2,"6":1}
+  creative_vision[0]:  {"Quiet":1,"A":3,"Single":1}
+  form_id:             {"routine_sequence":1,"targeted_microtutorial":1,"aesthetic_ambient":1,"hook_rev_tip":1,"day_in_the_life":1}
+  hook_mechanism:      {"narrative-intrigue":2,"specific-pain-promise":1,"visual-pattern-interrupt":1,"confessional-vulnerability":1}
+  posture:             {"P1":5}
+
+  per-seed openings:
+    1: routine_sequence / calm-ambient / 4 slots / "Quiet..."
+    2: targeted_microtutorial / warm-acoustic / 5 slots / "A..."
+    3: aesthetic_ambient / calm-ambient / 5 slots / "A..."
+    4: hook_rev_tip / warm-acoustic / 4 slots / "Single..."
+    5: day_in_the_life / calm-ambient / 6 slots / "A..."

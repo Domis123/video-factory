@@ -14,7 +14,10 @@ You do NOT fix the storyboard. The orchestrator (downstream) uses your verdict t
 
 - `duplicate_segment_across_slots` — same `segment_id` appears in 2+ picks. Almost always severity `high` (viewer sees the same clip twice). Verdict: `revise`.
 - `near_duplicate_segment` — different `segment_id` but same `parent_asset_id` with overlapping or near-identical timestamps (e.g., in_points within 0.5s). Severity usually `medium`.
-- `subject_discontinuity` — primary-role slots jump between parent_asset_ids without narrative justification (e.g., subject identity flips mid-routine). Severity `high` if the jump happens on consecutive primary slots; `medium` if hook→body crossover with brand justification; often OK on `any`-role slots.
+- `subject_discontinuity` — **conditional on `planner.subject_consistency`.** Evaluate ONLY as follows:
+  - If `subject_consistency = single-subject`: fires normally. Severity `high` if primary-role slots jump parents on consecutive slots; `medium` if scattered but present; often OK on `any`-role slots.
+  - If `subject_consistency = prefer-same`: fires at severity `low` ONLY when primary-role slots span ≥3 different parents (genuine scatter, not a single defensible deviation). Do NOT fire on 1–2 cross-parent picks — those are acceptable under prefer-same.
+  - If `subject_consistency = mixed`: **DO NOT fire.** Mixed subjects are intended by the Planner. Cross-parent picks on `any` or `primary` slots are correct behavior for mixed storyboards, not a continuity break.
 - `posture_drift` — storyboard picks clips whose aesthetic drifts from the brand persona's allowed postures (e.g., cool-muted industrial frame in a warm-lived-practice brand). Severity `medium`.
 - `energy_arc_broken` — slot energy sequence contradicts the form's expected arc. E.g., `transformation` form with energy [6,5,5,5,5] instead of a build. Severity `medium`.
 - `narrative_incoherence` — narrative_beats don't tell a coherent story given form_id + hook_mechanism. E.g., `narrative-intrigue` hook followed by body slots that never follow through on the intrigue. Severity `medium` or `high`.
@@ -56,12 +59,17 @@ The following mechanical signals were computed by the wrapper BEFORE this prompt
 form_id:           {form_id}
 hook_mechanism:    {hook_mechanism}
 posture:           {posture}
-subject_consistency: {subject_consistency}
+subject_consistency: {subject_consistency}   ← gates the `subject_discontinuity` check (see taxonomy entry for the conditional rule)
 slot_count:        {slot_count}
 music_intent:      {music_intent}
 creative_vision:   {creative_vision}
 audience_framing:  {audience_framing}
 ```
+
+**Subject-stance reminder.** The Planner committed to `subject_consistency: {subject_consistency}`. Your evaluation of subject continuity depends on this value:
+- `single-subject` → consecutive primary slots SHOULD share a parent; flag `subject_discontinuity` if they don't.
+- `prefer-same` → primary slots SHOULD cluster; flag at severity `low` only if they span ≥3 parents.
+- `mixed` → cross-parent picks are **intended**; DO NOT flag `subject_discontinuity`.
 
 ### Per-slot plan + picks
 
@@ -85,7 +93,10 @@ Work through these before returning your verdict. For each, decide: is this a pr
 
 1. **Duplicates.** Any `picked_segment_id` appearing in 2+ slots? → `duplicate_segment_across_slots`.
 2. **Near-duplicates.** Different `segment_id` but same `parent_asset_id` with overlapping in/out points? → `near_duplicate_segment`.
-3. **Subject continuity.** Primary-role slots — do consecutive primaries use the same `parent_asset_id`? If not, is the jump narratively justified in the slot reasoning? → `subject_discontinuity`.
+3. **Subject continuity (CONDITIONAL on `subject_consistency` above).** Read the planner's `subject_consistency` value first, then apply the matching rule:
+   - `single-subject`: do consecutive primary-role slots use the same `parent_asset_id`? If not, is the jump narratively justified in the slot reasoning? → `subject_discontinuity`.
+   - `prefer-same`: do primary-role slots cluster around 1–2 parents? Only fire if they span ≥3 parents — otherwise the deviation is acceptable. → `subject_discontinuity` at `low` severity.
+   - `mixed`: treat any cross-parent picks as **intended behavior**. Do NOT fire `subject_discontinuity`. Multi-subject variety is the point of this storyboard.
 4. **Energy arc.** Read the `energy_sequence`. Does it match the form's expected shape? `routine_sequence` wants steady; `transformation` wants a build; `day_in_the_life` wants gentle variance.
 5. **Narrative coherence.** Do the `narrative_beat` fields across slots tell a coherent story given the `hook_mechanism`? Does the hook promise something the body pays off and the close closes?
 6. **Posture drift.** Do the picked clips' descriptions / settings match the brand's posture vocabulary? A warm-lived-practice brand shouldn't have a clinical-studio frame.
@@ -101,8 +112,11 @@ Work through these before returning your verdict. For each, decide: is this a pr
 - **Inventing issues unsupported by the inputs.** Don't claim `posture_drift` without reading the persona's allowed_postures. Don't claim `body_focus_mismatch` without checking the slot's `body_focus` array.
 - **Severity inflation.** Don't mark every issue `high`. Reserve `high` for render-breaks. Most issues are `medium` or `low`.
 - **Vague notes.** "This seems off" is not a note. Name the slot index, the observed value, the expected value. Example: "Slot 3 body_focus=[hips] but picked clip body_regions=[core,shoulders] — no hip representation."
+- **Over-long notes.** Each issue's `note` MUST be ≤ 300 characters. Cite slot indices + the one observed mismatch — do not narrate every subject/outfit/setting detail across every slot. If you need more than 300 chars to make the point, you are padding. Trim to the essential observation and let `suggested_fix` carry the rest.
 - **Approving everything.** If the storyboard has a real problem, flag it. The orchestrator relies on your calls.
 - **Rejecting everything.** `reject` is for structural failures only. If a slot-level fix could repair the storyboard, it's `revise`, not `reject`.
+- **Flagging `subject_discontinuity` on a `mixed` storyboard.** Mixed subjects are intended by the Planner; cross-parent picks are correct behavior. Read `subject_consistency` before firing this issue type.
+- **Failing to flag `subject_discontinuity` on a `single-subject` storyboard that genuinely broke continuity.** The conditional rule relaxes the check on `mixed`, not on `single-subject`. If the Planner committed to single-subject and the picks span parents, the flag is mandatory.
 
 ## Output format
 

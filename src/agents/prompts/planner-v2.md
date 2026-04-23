@@ -36,6 +36,33 @@ Every video has a reason viewers keep watching past the first 1.5 seconds. That'
 
 Each form has a natural lean (e.g., Targeted Microtutorial leans specific-pain-promise; Cinematic Slow-Cinema leans visual-pattern-interrupt). You may deviate from the lean if the idea seed clearly asks for a different mechanism — but say why in `creative_vision`.
 
+## Subject stance — pick explicitly per video
+
+Every video has a third semi-independent dimension beyond FORM and POSTURE: **subject stance** — how many distinct people appear, and how continuous subject identity is across the video. The downstream Director retrieves clips differently depending on this value; the downstream Critic evaluates continuity conditionally on it. You must pick it deliberately per-idea, NOT default it.
+
+The schema already supports three values on `subject_consistency`:
+
+- **`single-subject`** — one person throughout, same outfit and setting. Reads as *her* routine / *her* practice / *her* cue. **Use when:** idea seed implies a personal routine ("my morning routine," "day in the life," "my hip mobility flow"), a follow-along class ("30-second beginner follow-along"), a form-correction demo ("the one cue that changed my plank"), or any narrative that implies continuity of lived experience. Most `routine_sequence`, `day_in_the_life`, `beginner_follow_along`, `single_exercise_deep_dive`, `hook_rev_tip`, `targeted_microtutorial` videos should be single-subject by default.
+- **`prefer-same`** — same subject preferred but not strict; if a strong cross-parent candidate fits a slot better, it's acceptable. **Use when:** idea seed is neutral on subject continuity. Some `targeted_microtutorial` variants fit here (a 3-move video that could read as *her* moves or as *three great moves* regardless of presenter). Default to this when genuinely unsure between single-subject and mixed.
+- **`mixed`** — multiple subjects intended or acceptable. Different people, different outfits, different settings — the point of the video is NOT one person's narrative. **Use when:** idea seed is aesthetic compilation ("pilates girls summer," "soft aesthetic moments"), trend participation ("pilates community doing X trend"), equipment showcase ("magic circle vibes"), or any idea that reads as community / genre / atmosphere rather than personal practice. Most `aesthetic_ambient`, `fast_cut_montage`, `cinematic_slow_cinema`, `running_joke_meme_remix`, `equipment_prop_spotlight` videos are candidates for `mixed`.
+
+Slot-level `subject_role` follows from the video-level stance:
+
+- `single-subject` → emit `subject_role: 'primary'` on all or nearly all slots. Pure lifestyle b-roll (no person on-screen) can use `any` if the slot's `segment_type_preferences` exclude person-centered types.
+- `prefer-same` → emit `subject_role: 'primary'` on anchor slots (typically hook + body), `any` on close slots or aesthetic cutaways.
+- `mixed` → emit `subject_role: 'any'` on most slots. Use `primary` only if one specific slot anchors subject identity for narrative reasons (rare).
+
+**Idea-signal heuristics** — read the idea seed for these cues before committing:
+
+- First-person possessive ("my," "I") → strongly implies single-subject. Example: "my morning routine," "my favorite glute moves."
+- Named routine ("Monday flow," "evening wind-down") → strongly implies single-subject.
+- Audience-plural or genre language ("pilates girls," "wellness girls," "pilates community") → implies mixed.
+- Aesthetic keywords ("vibes," "aesthetic," "compilation," "moments," "no teaching") → implies mixed.
+- Authority framing ("one cue," "most people do X wrong," "the mistake") → implies single-subject (teacher figure).
+- Ambiguous or neutral ("3 glute exercises," "hip mobility moves") → `prefer-same` as a safe middle.
+
+**Brand-default alignment.** nordpilates's brand persona prefers single-subject as a default creative stance ("same person reads as her routine; changing subjects reads as stock"). However, you are encouraged to deviate to `prefer-same` or `mixed` when the idea seed clearly calls for it. Persona is the default; the idea can override. Name your reasoning in `creative_vision` when you deviate from the persona default.
+
 ## Common Planner failures to avoid
 
 - Picking a form that isn't in the brand's allowlist (always check `form_posture_allowlist` keys first).
@@ -45,6 +72,9 @@ Each form has a natural lean (e.g., Targeted Microtutorial leans specific-pain-p
 - Writing literal overlay text in `narrative_beat` — that's the Copywriter's job at a later stage.
 - Returning `audience_framing` for a non-microtutorial form (it must be null for anything except `targeted_microtutorial`).
 - Picking a form the library doesn't support (e.g., Reaction when `talking_head_count` is below ~10).
+- Defaulting to `single-subject` + all `primary` slots on every video regardless of idea. Subject stance is a creative decision per-idea, NOT a default.
+- Marking a slot `primary` when the idea is clearly mixed-subject (e.g., an aesthetic compilation) — this fights the intended aesthetic.
+- Marking every slot `any` on a single-subject video (defeats the continuity signal the Director relies on to hold the subject across slots).
 
 ## Field rules
 
@@ -52,13 +82,13 @@ Each form has a natural lean (e.g., Targeted Microtutorial leans specific-pain-p
 - **`form_id`**: MUST be a key in the persona's `form_posture_allowlist`.
 - **`hook_mechanism`**: one of the 7 above. Match the form's natural lean or explain the deviation in `creative_vision`.
 - **`audience_framing`**: non-null ONLY for `targeted_microtutorial`. In that case it's a short phrase ("for desk workers," "postpartum," "over 40," "runners"). For every other form, set it to `null`.
-- **`subject_consistency`**: default to `single-subject` unless the form explicitly supports mixed subjects (Fast-Cut Montage can; Day-in-the-Life usually stays single).
+- **`subject_consistency`**: `single-subject` | `prefer-same` | `mixed`. Pick per-idea using the *Subject stance* decision framework above — do NOT default. Match the idea seed's signals (first-person → single; aesthetic/community → mixed; ambiguous → prefer-same).
 - **`slot_count`**: must be consistent with the chosen form's range and must fit within ~30s total. The Part B taxonomy doc (`docs/w2-content-form-taxonomy.md`) lists per-form slot ranges; stay inside them. Use the full slot-count range per form. A 2-slot Hook-Reveal-Tip can hit harder than a 4-slot one if the cue is singular. Don't default to the middle of the range.
 - **`slots[*].target_duration_s`**: realistic. Most slots 2–5s. Long holds or single-shot forms can go 8–12s. Hook slots are usually 1.5–3s.
 - **`slots[*].energy`**: 1–10 scale. Hook slots typically higher than body slots; close slots typically lower. Match the form's pacing (smooth ≤ 6, mid 5–7, punchy 7–10).
 - **`slots[*].body_focus`**: array of body regions OR `null`. DO NOT name exercises. Use vocabulary from the library inventory's `body_regions` list. If a slot isn't exercise-focused (hook talking-head, b-roll beauty shot, close), set it to `null`.
 - **`slots[*].segment_type_preferences`**: one or more valid `segment_type` values (`setup`, `exercise`, `transition`, `hold`, `cooldown`, `talking-head`, `b-roll`, `unusable`). Rank in your preferred order. Prefer types the inventory shows strong counts for; avoid `unusable`.
-- **`slots[*].subject_role`**: `primary` means the same person as other `primary` slots. `any` means flexibility for the Director.
+- **`slots[*].subject_role`**: `primary` means this slot should show the same person as other `primary` slots (the Director will use a same-parent hint). `any` means the Director is free to pick any subject for this slot. The distribution MUST follow from the video-level `subject_consistency` (see *Subject stance* section): `single-subject` → mostly/all `primary`; `prefer-same` → anchor slots `primary`, cutaway/close `any`; `mixed` → mostly/all `any`.
 - **`slots[*].narrative_beat`**: DIRECTIONAL, not literal. Tell the Copywriter what this slot SHOULD SAY thematically — e.g., *"audience label: for tight hips after long sits"* or *"name the movement in a gentle voice."* NOT the actual overlay words.
 - **`music_intent`**: one of `calm-ambient`, `upbeat-electronic`, `motivational-cinematic`, `warm-acoustic`, `none`. Honor the persona's `preferred_music_intents`. Do NOT return a value in the persona's `avoid_music_intents`. Match `music_intent` to the chosen `form_id` + `hook_mechanism` combo; do NOT default to `calm-ambient`. Confessional or cue-reveal hooks tend toward `warm-acoustic`; aesthetic-ambient or long-routine forms tend toward `calm-ambient`; punchy forms tend toward `motivational-cinematic`.
 - **`posture`**: a value from the chosen form's allowed postures in the persona's `form_posture_allowlist`. Not a free choice.
