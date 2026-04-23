@@ -1,212 +1,293 @@
-# Handoff to New Chat — 2026-04-21 (evening)
+# Handoff to New Chat — 2026-04-23 (session close)
 
-**Read this first.** Everything else in `/docs/` is reference material; this doc tells you what's current and what to do next.
-
-Supersedes the prior handoff (W1-start-of-day). W1 closed clean; Part B is now mid-design with material architectural changes — read carefully.
+**Read this first.** Supersedes prior handoff. Part B is substantially further along than the last handoff reflected — W1 through W6 shipped plus a mid-stream tuning iteration (W6.5). Seven ships across two calendar days. W7 Copywriter is the next brief.
 
 ---
 
 ## TL;DR
 
-Video Factory is an automated short-form video pipeline for ~30 organic (non-ad) fitness/wellness brands. Primary test brand: **nordpilates**. The pipeline ingests UGC footage, analyzes it into sub-segments with rich structured metadata (Part A), then assembles ~30-second TikTok/Reels/YouTube Shorts via AI planning + rendering (Part B, rebuilding).
+Video Factory is an automated short-form video pipeline for ~30 organic (non-ad) fitness/wellness brands. Primary test brand: nordpilates.
 
-**Part A (segment intelligence foundation): COMPLETE.** Library is 100% on v2 schema — 720 segments across 190 nordpilates parents, all with structured metadata.
+**State at handoff:**
 
-**W1 (keyframe grids): COMPLETE (2026-04-21).** 720/720 segments have `keyframe_grid_r2_key` populated, 4×3 portrait mosaics at 1024×1365 JPEG q80 with EXIF metadata. `ENABLE_KEYFRAME_GRIDS=true` live on VPS; new v2 segments auto-generate grids.
+- **W1 (keyframe grids):** shipped 2026-04-21.
+- **Legacy Flash removal:** shipped 2026-04-22 morning.
+- **W2 (brand persona + loader):** shipped 2026-04-22 afternoon.
+- **W3 (Planner — form_id + hook_mechanism + slot structure):** shipped 2026-04-22 evening.
+- **W4 (`match_segments_v2` RPC + TS wrapper):** shipped 2026-04-22 evening.
+- **W5 (Visual Director — multimodal clip selection):** shipped 2026-04-22 late.
+- **W6 (Coherence Critic):** shipped 2026-04-23 afternoon.
+- **W6.5 (Planner subject stance + conditional Critic check):** shipped 2026-04-23 late. Single-gate mid-stream tuning iteration addressing the W6-surfaced subject_discontinuity prevalence issue.
+- **W1.5 (Content Sprint 2):** STILL IN PROGRESS. Library at 1116+ segments when last checked mid-session; likely larger now. No agent action needed.
+- **W7–W10:** not started. W7 is the next brief.
 
-**W1.5 (Content Sprint 2 ingestion): IN PROGRESS (2026-04-21 evening).** Domis is uploading ~2x additional nordpilates content to Drive. n8n S8 workflow + VPS ingestion worker are handling it autonomously via the live v2 path. Library will roughly double (720 → ~1500 segments, 190 → ~400 parents). No agent action required; ingestion auto-runs.
-
-**W2 (brand persona / form taxonomy): IN DESIGN (this session).** Major reframe — see "Creative direction reframe" below. Brief not yet written. Taxonomy draft finalized as v1 (`docs/w2-content-form-taxonomy.md`). W2 brief writing unblocked after: (a) Content Sprint 2 is meaningfully ingested so readiness flags are real numbers, (b) Planning chat + Domis review converged taxonomy + voice-evaluation step.
-
-**Part B (pipeline rebuild): sequence revised.** W1 → W1.5 → W2 → W3 → W4 → W5 → W6 → W7 → W8 → W9 → **W10 (voice generation, added this session, deferred to post-shadow-mode)**.
-
-**Immediate next action:** (a) wait for Content Sprint 2 to ingest meaningfully (measured as `SELECT COUNT(*) FROM assets WHERE brand_id='nordpilates'` stabilizing), (b) pull updated library inventory and audit the ⚠️/🔴 form readiness flags in the taxonomy, (c) write the W2 brief at `docs/briefs/w2-brand-playbook.md`.
+**Immediate next actions (new planning chat):**
+1. Verify Sprint 2 status — `SELECT COUNT(*), MAX(created_at) FROM assets WHERE brand_id='nordpilates'`. If count stable for >1hr, meaningfully complete; refresh taxonomy readiness flags with real numbers (already partly done in this session's docs batch — check `w2-content-form-taxonomy.md` for v1.1 marker).
+2. Confirm no issues surfaced from any of the seven ships during the handoff window. Agent should be idle.
+3. Write W7 Copywriter brief. Prereqs all satisfied.
 
 ---
 
 ## What Video Factory is (unchanged)
 
-- **Purpose:** generate short-form video content at scale for ~30 brands (nordpilates, Nordletics, Mindway, Carnimeat, Ketoway, etc.)
-- **Output target:** 150–300 videos/week at steady state (currently ~5–10/week)
-- **Audience:** organic social (TikTok / Instagram Reels / YouTube Shorts). **Not ads.** Optimized for retention and brand-building.
-- **Creative north-star (refined this session):** "pleasurable to watch, feels organic, not selling anything." Retention through pleasure, not persuasion. Hook is load-bearing.
+- Purpose: 150–300 organic short-form videos/week at steady state across ~30 brands
+- Creative north-star: "pleasurable to watch, feels organic, not selling." Retention through pleasure, not persuasion.
+- Audience: organic social (TikTok, Instagram Reels, YouTube Shorts)
 
 ## Infrastructure (unchanged)
 
-- **n8n server:** 46.224.56.174 — orchestration workflows
-- **Video Factory VPS:** 95.216.137.35 (Hetzner CX32) — `/home/video-factory`
-- **Database:** Supabase at `https://kfdfcoretoaukcoasfmu.supabase.co`
-- **Object storage:** Cloudflare R2
-- **Queue:** Upstash Redis
-- **LLM stack:** Gemini 3.1 Pro Preview (`gemini-3.1-pro-preview`) for everything in Part B. Phase 3.5 production still uses Claude Sonnet 4.6 for CD + Copywriter; migrating to Gemini during Part B build-out.
+- n8n server: 46.224.56.174
+- Video Factory VPS: 95.216.137.35 (Hetzner CX32), `/home/video-factory`
+- Supabase: `https://kfdfcoretoaukcoasfmu.supabase.co`
+- R2, Upstash Redis, Gemini 3.1 Pro Preview, ElevenLabs (W10 only)
 
 ---
 
-## Current state (end of day 2026-04-21)
+## Part B pipeline status (current)
 
-### Production (Phase 3.5, still running)
+```
+       Idea seed + brand_id
+              │
+              ▼
+     ┌────────────────┐
+     │  Planner       │  ✅ W3 shipped — form_id + hook_mechanism + 
+     │                │     subject_consistency + slot structure
+     │                │     W6.5: subject stance commits per idea
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Candidate      │  ✅ W4 shipped — match_segments_v2 RPC
+     │ Retrieval      │     layered filters + soft relaxation + 
+     │                │     subject-hint boost (0.02)
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Visual         │  ✅ W5 shipped — multimodal Gemini per slot
+     │ Director       │     parallel non-primary + sequential primary
+     │                │     consumes W1 grids + W4 candidates
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Coherence      │  ✅ W6 shipped — 13-issue taxonomy, 3-verdict
+     │ Critic         │     pre-compute hints for mechanical issues
+     │                │     W6.5: subject_discontinuity conditional
+     └────────┬───────┘
+              │
+              ▼
+     ┌────────────────┐
+     │ Copywriter     │  🔴 W7 — NEXT BRIEF
+     │ (post-select)  │     text-only single call
+     │                │     consumes picks + planner + persona
+     └────────┬───────┘
+              │
+              ▼
+     [Orchestrator W8]    🔴 not started
+     [Shadow mode W9]     🔴 not started
+     [Voice gen W10]      🔴 post-W9
+              │
+              ▼
+        Remotion render
+```
 
-Library-aware CD (Claude) → Asset Curator V2 (Gemini) → Copywriter (Claude) → Remotion render. Videos pass auto QA. NOT being disrupted during Part B — new pipeline builds in parallel, shadow mode first.
-
-### Part A (shipped)
-
-- 190 nordpilates parents, 720 segments, 100% v2 coverage
-- Dual-write pattern: v2 JSONB + legacy v1 columns
-- `ENABLE_SEGMENT_V2=true` on VPS; new ingestion uses v2 path
-
-### W1 (shipped today)
-
-- Migration 009 applied: `keyframe_grid_r2_key TEXT` column on `asset_segments`
-- `src/lib/keyframe-grid.ts` + backfill + ingestion integration
-- 720/720 segments gridded, 0 null
-- `ENABLE_KEYFRAME_GRIDS=true` live on VPS
-- 7 window-fallback + 12 missing-tile warnings during backfill, all degraded-ok per spec
-- Operational note: swapped from brief's `IFD2.UserComment` to `IFD0.ImageDescription` for EXIF (prefix-byte issue); swapped from `decrease+pad` to `increase+crop` in ffmpeg filter (even-dimension rounding). Both documented inline in `src/lib/keyframe-grid.ts`.
-- Known issue from Gate B spot-check: 1-of-5 visual mismatch between `segment_type` label and visual content (segment `0dbfbc89-…` labeled `transition`, looks like exercise/hold). Logged in followups; not blocking — Part B is pivoting to solve creative variance upstream, not via segment taxonomy.
-
-### W1.5 (in progress as of this handoff)
-
-- Content Sprint 2 upload started in n8n
-- Live auto-ingestion path: Drive → S8 → VPS `/ugc-ingest` → `preNormalizeParent` → v2 analyzer → keyframe grid → R2 + Supabase
-- No agent action needed; library populates autonomously
-- Watch-signal: `SELECT COUNT(*) FROM assets WHERE brand_id='nordpilates'` climbs from 190 to ~400 over hours-to-days depending on upload volume
-- Expect ~4-6 min/parent batched ingestion time
-
-### W2 (in design this session — no code written)
-
-- Taxonomy draft at `docs/w2-content-form-taxonomy.md` (v1, 16 forms, 5 aesthetic postures, nordpilates-specific Form×Posture allowlist)
-- Brief NOT yet written
-- Prerequisite for writing brief: Content Sprint 2 meaningfully ingested so ⚠️/🔴 readiness flags can be refreshed with real numbers
-- Voice-selection step (ElevenLabs sample audition) added to W2 as a non-blocking preparation step for W10
-
-### W3–W9 (not started)
-
-See Part B spec (`docs/PHASE_4_PART_B_PIPELINE.md`). W3 unblocked after W2 ships. Revised scope notes below.
-
-### W10 (audio generation, new)
-
-Added this session as post-shadow-mode extension. See "Voice generation" below.
-
----
-
-## Creative direction reframe (IMPORTANT)
-
-This session surfaced that Part B's original framing — "fix clip-picking to match intent" — was necessary but insufficient. The real goal is producing videos that feel like organic creator content, not AI-produced slop. That reframe introduced several architectural decisions that Part B docs now encode:
-
-### 1. Segment taxonomy (Part A) is accepted as fixed
-
-Not because it's perfect — the nordpilates sample surfaced 1 likely mislabel out of 5 spot-checked, and the 8-type taxonomy is fitness-shaped. Accepted because (a) creative problems should be fixed upstream in persona+Planner, not by expanding structural labels, and (b) post-W0d, re-analysis is too expensive to revisit casually. Logged as CLAUDE.md Rule 40.
-
-### 2. Form × Aesthetic Posture two-axis model
-
-Old: single-archetype enum.
-New: FORM (structural shape — what's the video made of) + AESTHETIC POSTURE (tonal/visual framing — how does it feel) as separate axes. Brand persona restricts posture mix; Planner commits to form per video. Each form producible in multiple postures.
-
-16 forms + 5 postures. Nordpilates allowlist ≈ 38 form-posture combinations. Logged as CLAUDE.md Rule 41.
-
-### 3. Hook mechanism as first-class Planner output
-
-Every form has a "hook mechanism" — the specific reason the first 1.5 seconds work. Not the hook's words; the hook's *why*. 7 mechanisms observed across the form taxonomy: specific-pain-promise, visual-pattern-interrupt, opening-energy, authority-claim, confessional-vulnerability, narrative-intrigue, trend-recognition.
-
-Planner output schema (W3) includes `form_id` + `hook_mechanism` + `narrative_beat` — three coupled but distinct fields.
-
-### 4. Success criterion shifted
-
-Old: "auto-QA pass rate" (technical).
-New: "organic-creator-plausibility + form diversity across the output library" (qualitative). Auto-QA remains a necessary gate but is not the bar. Measured via human review at shadow-mode phase + spot-check of 30-50 random outputs during Part B ramp.
-
-### 5. Voice generation as post-shadow Part B extension (W10)
-
-ElevenLabs or equivalent integrated AFTER W9 shadow mode proves the text-only pipeline works. Unlocks ~30% of the form taxonomy currently talking-head-gated (Teacher-Cue Drop, Myth-Buster variants, potentially Reaction). Adds Posture P6 (Voice-Over-Led). Brand persona schema at W2 already includes `voice_config: null` to keep W10 as field-population, not schema migration.
-
-Deferred to W10 (not W7.5) because: (a) voice adds complexity that should not mask foundational problems during Part B validation, (b) if Part B ships well without it, voice is pure upside, (c) if Part B struggles, we want visibility without VO hiding issues.
+**None of W2 through W6.5 has a runtime consumer yet.** All are importable modules validated by test scripts. W8 orchestrator is the first consumer; W9 shadows. This is by design — Part B is building the full pipeline statelessly, then wiring it behind a feature flag once coherent.
 
 ---
 
-## Infrastructure of Part B work (unchanged from prior handoff)
+## What shipped this session (2026-04-22 + 2026-04-23)
 
-### The three-person loop
+Seven ships across two calendar days. Chronological:
 
-- **Planning Claude:** design architecture, write briefs as markdown files in `docs/briefs/`, review agent output, update docs
-- **Domis:** approve briefs, approve merges, strategic direction, paste agent reports back
-- **Claude Code agent (VPS sandbox):** read brief files, execute code changes, run git operations, deploy VPS
+### 2026-04-22
 
-### Brief-writing conventions (unchanged)
+**Legacy Flash removal** (merge `99d661e`, fix `e862ee8`, followup `1824029`):
+- Removed `analyzeClip` call from `src/workers/ingestion.ts` hot path
+- Dropped Flash-populated columns from `assets` insert
+- V1 asset-curator rollback path stays as an emergency door per followup `v1-curator-flash-nulls-if-emergency-rollback`
 
-- Briefs go to `docs/briefs/<stage>.md`
-- Each brief: scope, branch name, files to create/modify, files NOT to touch, expected deliverable, commit message templates, hard constraints, gates for merge
-- Briefs reference `GIT_WORKFLOW.md`, `CLAUDE.md`, `docs/PHASE_4_PART_B_PIPELINE.md` — don't restate
-- Hard gates for multi-stage work ("STOP after Task 1, await Domis approval before Task 2")
-- Explicit non-goals section
+**W2 — Brand persona + form/posture loader** (merge `6b139e4`):
+- `src/types/content-forms.ts`, `src/types/brand-persona.ts`, `src/agents/brand-persona.ts`
+- `docs/brand-personas/nordpilates.md` — persona v1 content canonicalized
+- `docs/brand-personas/_template.md` — onboarding template
+- YAML frontmatter + prose body; loader in-memory cached; Zod-validated
+- Agent collapsed FormId parallel-declaration pattern into single-source-of-truth (`export type FormId = (typeof FORM_ID_VALUES)[number]`) — better than the brief
 
-### Agent scope discipline (proven through W0 + W1)
+**W3 — Planner** (merge `7894ee2`):
+- `src/lib/text-normalize.ts`, `src/types/library-inventory.ts`, `src/agents/library-inventory-v2.ts`
+- `src/types/planner-output.ts`, `src/agents/planner-v2.ts`, `src/agents/prompts/planner-v2.md`
+- `src/scripts/test-planner.ts`
+- Form_id + hook_mechanism + subject_consistency + slot structure per idea + brand + library inventory
+- `stripSchemaBounds()` defensive helper added after Gemini rejected heavy-constraint schemas (reused in W5, W6)
+- Iteration passes addressed homogenization (music_intent collapsed to calm-ambient, creative_vision opener laziness, slot_count compression) and a 1000-row PostgREST silent-truncation bug in the aggregator
 
-Continues to work. Agent pushed back on correct assumptions during W1 Gate A (stale test-segment UUIDs, EXIF prefix issue, ffmpeg rounding). Trust its reviews, read critically.
+**W4 — `match_segments_v2` RPC** (merge `516b3ae`):
+- Migration 010: PL/pgSQL RPC with layered filters + soft relaxation + composite boost scoring
+- `src/agents/candidate-retrieval-v2.ts` — TS wrapper (naming-conflict-guard renamed from brief's suggested `curator-v2-retrieval.ts`)
+- `src/types/candidate-set.ts` + test script + migration applier
+- p95 latency 328ms on 1116 segments, well under 500ms target
+- Iteration: subject-hint boost retuned from 0.10 → 0.02 after scenario 5 returned 100% same-parent (eclipsed cross-parent variety)
 
----
+**W5 — Visual Director** (merge `2e29f4a`):
+- `src/types/slot-pick.ts`, `src/agents/visual-director.ts`, `src/agents/prompts/visual-director.md`
+- `src/lib/r2-fetch.ts` (reuses existing `src/lib/r2-storage.ts`), `src/scripts/test-visual-director.ts`
+- First multimodal Part B agent; consumes W1 keyframe grids + W4 candidate sets
+- Per-slot Gemini call with up to 18 attached grids + structured metadata
+- `pickClipForSlot` (primitive) + `pickClipsForStoryboard` (parallel-non-primary + sequential-primary coordination)
+- Soft subject-continuity enforcement — log cross-parent on primary slots, append to reasoning, don't throw
+- Gate A surfaced duplicate-segment-across-slots finding (storyboard 1 slots 3+4 both picked 9f86f752 at in_point 259.00) — logged as `w5-duplicate-segment-across-slots-in-director`, explicitly addressed at W6
+- Defensive parse-retry matcher widening (HTTP-success-but-empty Gemini responses treated as parse-retry-eligible)
 
-## Immediate next actions (prioritized)
+### 2026-04-23
 
-1. **Monitor Content Sprint 2 ingestion.** Domis is uploading; n8n + VPS handle autonomously. Watch `assets` row count. Spot-check a random new asset's v2 analysis + keyframe grid during first hour to verify ingestion is firing correctly on fresh content.
+**W6 — Coherence Critic** (merge `2255dcf`):
+- `src/types/critic-verdict.ts` (13-issue enum + 3-verdict enum + 3-severity enum)
+- `src/agents/coherence-critic.ts`, `src/agents/prompts/coherence-critic.md`, `src/scripts/test-coherence-critic.ts`
+- Text-only Gemini call, temperature 0.3, pre-compute mechanical hints (duplicate_segment_ids, parent_distribution, total_duration_s, energy_sequence) injected into prompt as observations model must address
+- 3 real storyboards + 2 synthetic failure cases (forced duplicate + forced duration)
+- Both synthetic mechanical assertions PASS; duplicate-segment-across-slots from W5 issue caught correctly
+- Gate A exposed subject_discontinuity firing on 3/3 real storyboards — load-bearing architectural finding (see below)
 
-2. **Pull updated library inventory** once ingestion stabilizes. Specifically:
-   - Total segments count
-   - `segment_type` distribution (especially talking-head count — is the bottleneck relieved?)
-   - `b-roll` lifestyle-vs-exercise-adjacent breakdown (new query — classifies via `setting.location` + `setting.equipment_visible`)
-   - Long-hold segments (≥10s for Cinematic Slow-Cinema viability)
-   - Same-exercise-name distribution (for Single-Exercise Deep-Dive viability)
-
-3. **Refresh taxonomy readiness flags** with real numbers. Promote ⚠️/🔴 forms to ✅ where Sprint 2 unblocks them. Log remaining gaps to `docs/content-library-gaps.md`.
-
-4. **Write W2 brief** at `docs/briefs/w2-brand-playbook.md`. Scope: define brand persona schema, author nordpilates persona document, include voice-evaluation prep step for future W10.
-
-5. **Write W3 brief** after W2 ships. Updated scope vs. original Part B spec: Planner output includes `form_id` + `hook_mechanism`; `content_form` supplements/replaces `archetype`.
-
----
-
-## Architectural documents (reference)
-
-- **`docs/w2-content-form-taxonomy.md`** — **NEW this session.** Canonical form/posture playbook. Source of truth for Planner form_id enum.
-- **`docs/PHASE_4_PART_A_SEGMENT_INTELLIGENCE.md`** — Part A spec, fully implemented. Reference for v2 schema fields.
-- **`docs/PHASE_4_PART_B_PIPELINE.md`** — Part B spec. **Updated this session** with W1.5 + W10, two-axis model in W2/W3, hook-mechanism in W3.
-- **`docs/MVP_PROGRESS_15.md`** — **NEW this session.** Supersedes MVP_PROGRESS_14. W1 closed, W1.5 in-flight, W2 designed, W10 added.
-- **`docs/CLAUDE.md`** — Architecture rules. **New this session: Rules 40 + 41.**
-- **`docs/content-library-gaps.md`** — NEW (deferred to post-Sprint-2 when real gap numbers are known).
-- **`docs/GIT_WORKFLOW.md`** — Option B, unchanged.
-- **`docs/SUPABASE_SCHEMA.md`** — DB schema, current through Migration 009.
-- **`docs/VPS-SERVERS.md`** — infrastructure.
-- **`docs/w0d-complete.md`** — historical closure breadcrumb.
-- **`docs/followups.md`** — known issues.
-- **`docs/briefs/`** — planning-chat-to-agent briefs (gitignored).
-
----
-
-## Anti-patterns to avoid (updated)
-
-1. **Don't paste briefs inline in chat.** File-based delivery via `docs/briefs/`.
-2. **Don't restate git rules in every brief.** GIT_WORKFLOW.md is canonical.
-3. **Don't assume model names or SDK versions.** `gemini-3.1-pro-preview`, `@google/genai`.
-4. **Don't let branches stack.** Max depth 1, multi-stage work on same branch.
-5. **Don't skip Zod validation on Gemini output.**
-6. **Don't mix scopes in one branch.** Part B work revealing a Part A bug → separate branch.
-7. **Don't refactor Phase 3.5 paths.** Still in production. Touch only via explicit migration workstreams.
-8. **Don't promote confabulated output.** Rule 38.
-9. **Don't add Zod refines that encode soft rules as hard constraints.** Rule 39.
-10. **Don't grand-clean the grandfathered dirty tree** as part of Part B work. Still deferred.
-11. **NEW: Don't try to solve creative-quality problems by expanding segment taxonomy.** Rule 40. Creative variance lives in persona + Planner + Copywriter prompts. Segment taxonomy is an ingredient list, not the recipe book.
-12. **NEW: Don't collapse FORM and POSTURE into a single enum.** Rule 41. They're separately extensible. A new brand onboard probably restricts posture, not forms; a new trend probably adds a form, not a posture. Keep them orthogonal.
-13. **NEW: Don't try to add voice generation during core Part B workstreams.** Deferred to W10 post-shadow-mode deliberately.
+**W6.5 — Planner subject stance + conditional Critic check** (merge `370db5e`):
+- Single-gate mid-stream tuning iteration. Prompt-only edits to `planner-v2.md` + `coherence-critic.md`; no schema changes; no new code paths
+- Addressed followup `w6-subject-discontinuity-prevalence-at-director`
+- Planner learns when to commit to `single-subject` / `prefer-same` / `mixed` per idea-seed signals (first-person possessive → single-subject; "vibes/aesthetic/compilation" → mixed; authority framing → single-subject-teacher)
+- Critic's `subject_discontinuity` becomes conditional: fires on `single-subject`, fires at low severity on `prefer-same`, does not fire on `mixed`
+- Agent added proactive note-length cap to Critic prompt after first smoke hit Zod overflow; observable wins (faster latency, shorter notes, no correctness loss)
+- Validated end-to-end via one spot-check invocation (Planner seed 3 → W4 → W5 → Critic on a `mixed` aesthetic storyboard with 5 unique parents across 5 picks): Critic did NOT fire subject_discontinuity; conditional path validated
 
 ---
 
-## Context on Domis (unchanged)
+## The subject_discontinuity arc — worth understanding
 
-Lithuanian, based in Vilnius, academic background. Runs 30+ brands, operates as builder/orchestrator. Stack fluency: n8n, Supabase, Google Sheets, Hetzner VPS.
+This was the most architecturally consequential thread in the session. Understanding it is load-bearing for W7 onward.
 
-Communication style: direct, spelling occasionally loose (don't correct), action-oriented, prefers quick decisions. Frustration triggers: commands that don't work, branch pile-ups, re-litigating. Reward signals: fast iteration, clean execution, agent handling git without his involvement. Recent framing: "groundbreaking for the video pipeline industry." Take it seriously.
+**Initial state (post-W5 Gate A):** Director picked cross-parent on primary slots 29% of the time. Logged as soft-enforcement violation via reasoning-append. At the individual pick level, each deviation was justified in reasoning (posture fit, body_focus fit). Seemed acceptable.
 
-This session specifically: Domis raised a real strategic concern mid-W1 ("we are over-focusing on exercises and treating this project as organic exercise reel maker"). Planning chat and Domis worked through the reframe in dialogue, landed on: segment taxonomy is fixed, creative variance solved upstream. That pattern — real concern surfaced mid-tactical-work, strategic dialogue, doc updates, resume — is worth preserving. Take strategic concerns seriously when they surface; don't reflexively return to tactical work.
+**W6 Gate A finding:** Critic flagged `subject_discontinuity` on 3/3 real storyboards. The compound math that W5 Gate A missed: per-slot 29% cross-parent becomes ~82% probability of at least one cross-parent pick in a 5-slot primary-only video. Individual-pick judgment aggregated to near-universal storyboard-level continuity breaks.
+
+**Initial recommendation (mine):** log + wait for W9 shadow mode. Orchestrator retry loops would either converge on these or exhaust retry budget; shadow data was needed to tune.
+
+**Domis's reframe:** subject continuity is not a universal brand rule; it's a per-video creative decision that depends on the idea. "My morning routine" needs single-subject; "pilates girls summer compilation" works better with mixed subjects. The Planner — which sees the idea seed — is the right agent to commit to a stance per video. The `subject_consistency` schema field already existed; Planner wasn't using it.
+
+**W6.5 outcome:** Planner now picks stance per idea (validated canary on seed 3 "soft golden-hour pilates aesthetic, no teaching" → `mixed`); Critic's subject_discontinuity is conditional on that stance. Architectural fix rather than reactive tuning. False-positive verdicts on mixed-subject ideas eliminated; genuine continuity breaks on single-subject ideas still caught.
+
+**Architectural pattern this established:** problems surfaced at agent N can be solved at agent N-K where a better creative decision lives. Don't reflexively patch at the point of failure; trace the decision chain upstream.
 
 ---
 
-*Handoff written 2026-04-21 evening after W1 closed, Content Sprint 2 kicked off, and W2 design converged on taxonomy v1 + voice deferral to W10. Next planning chat (or this one post-ingestion-completion) should read this first.*
+## Architectural rules added or relevant
+
+**Rule 42 (new, added this session in CLAUDE.md):** Mid-stream tuning iterations follow a single-gate protocol when the iteration is schema-additive, code-path-unchanged, and validated by existing test scripts. Example: W6.5 subject-stance tuning.
+
+**Rules 40 + 41 (from MVP_PROGRESS_15, still load-bearing):** Creative variance lives upstream in persona + Planner, not in segment taxonomy. Form + posture are orthogonal axes.
+
+**Rule 38 (confabulation awareness, exercised heavily this session):** validation failures throw, not silently correct. Applied to Planner semantic validation, Director segment_id confabulation check, Critic approve-with-high-severity self-contradiction check.
+
+---
+
+## Known state for next chat to verify
+
+- **Sprint 2 progress:** query `SELECT COUNT(*), MAX(created_at) FROM assets WHERE brand_id='nordpilates'`. Library was 215 parents / 866 segments when session started (2026-04-22 mid-morning), 241 / 969 during W3, 1116 segments during W4 (aggregator pagination fix revealed the true count), ongoing through W6.5. If count stable for >1hr, Sprint 2 meaningfully complete; unblocks the final taxonomy readiness-flag refresh (most ⚠️ already refreshed in this session's docs batch to v1.1).
+
+- **No production-consumer state changes:** W2 through W6.5 are all unwired. No feature flag has been flipped to route traffic to Part B. Phase 3.5 (Creative Director → Curator → Copywriter) is still the production pipeline.
+
+- **VPS operational stashes:** up to 6 stashes now (pre-W2, pre-W3, pre-W4, pre-W5, pre-W6, pre-W6.5 lockfile drift). Consistent with pattern from prior sessions; not new tech debt.
+
+- **Pre-existing npm audit findings (3 high, 5 critical):** remain unaddressed. Not introduced by any W-work this session; out-of-scope.
+
+---
+
+## Open followups (from `docs/followups.md`)
+
+Active (top of file, most recent first):
+
+- **w5-subject-role-all-primary-in-planner** — partially resolved by W6.5 (Planner now emits `subject_role: 'any'` on mixed-subject videos). Followup stays active until W9 shadow confirms full-rate single-subject assignment is correctly varied.
+- **w5-duplicate-segment-across-slots-in-director** — addressed by W6's `duplicate_segment_across_slots` issue type; Critic catches it. Revisit if W6 misses it in practice.
+- **w6-subject-discontinuity-prevalence-at-director** — partially resolved by W6.5. Load-bearing for W9 shadow-mode measurement: how often orchestrator revise-loop converges vs exhausts retries.
+- **v1-curator-flash-nulls-if-emergency-rollback** — informational; only relevant if `ENABLE_CURATOR_V2=false` flipped.
+- **part-a-classification-noise-spotcheck** — deferred unless W5/W6 show signal.
+- **w1-raw-fallback-crop** — deferred; hypothetical.
+- **part-a-test-segment-uuid-drift** — docs-only.
+- **w3-naive-singularization-es-words** (`crunches → crunche`, `sunglasses → sunglasse`) — deferred; not affecting Planner decisions.
+
+All eight active. None blocking. W9 shadow is the natural revisit point for the top three.
+
+---
+
+## Creative direction commitments (still current)
+
+1. **Segment taxonomy (Part A) accepted as fixed.** Rule 40.
+2. **Form × Aesthetic Posture two-axis model.** Rule 41.
+3. **Hook mechanism as first-class Planner output** (7 mechanism types).
+4. **Subject stance as per-video Planner commitment** (W6.5 addition — not yet a formal rule but architecturally treated as one).
+5. **Success criterion: organic-creator-plausibility + form diversity + subject-stance-appropriateness over auto-QA pass rate.** Measured at shadow + ramp phases.
+6. **W10 voice generation deferred to post-shadow-mode.** Brand persona schema has `voice_config: null` reserved.
+
+---
+
+## Where W7 work lives (next brief)
+
+W7 Copywriter reads:
+- `PlannerOutput` (form, hook_mechanism, subject_consistency, narrative_beats per slot)
+- `StoryboardPicks` from W5 (final clip picks with in/out points)
+- `BrandPersona` (voice tenets + prose body)
+- Optionally: segment_v2 metadata on picked clips (via same snapshot pattern Critic uses)
+
+W7 produces:
+- Per-slot overlay text + timing
+- Hook text + CTA
+- Platform captions + hashtags
+- `voiceover_script: null` field reserved for W10
+
+Single Gemini text-only call per video (not per-slot — W7 has full storyboard context, writes coherently across slots).
+
+Estimated brief size: similar to W3 (~400-500 lines). Temperature likely 0.5-0.6 (Copywriter is creative, needs more variance than Critic).
+
+Does NOT depend on W6 or W6.5 runtime — Copywriter and Critic are parallel at orchestrator level, both consume picks independently.
+
+---
+
+## Anti-patterns reminder (unchanged from prior handoff, reinforced this session)
+
+1. File-based brief delivery, never inline paste for long docs.
+2. Git rules in GIT_WORKFLOW.md — don't restate in briefs.
+3. Model names: `gemini-3.1-pro-preview`. SDK: `@google/genai` for new code, `@google/generative-ai` legacy coexists.
+4. Max stack depth 1.
+5. Zod validation always on Gemini output.
+6. One scope per branch.
+7. Don't refactor Phase 3.5 — it's still production.
+8. Rule 38 confabulation awareness on LLM output.
+9. Rule 39 soft-rule-in-refine avoidance.
+10. Rule 40 creative-variance-in-persona-not-taxonomy.
+11. Rule 41 form×posture orthogonality preserved.
+12. Strategic concerns from Domis during tactical work = strategic response, not tactical dismissal. (Reinforced this session: subject-stance reframe was exactly this pattern.)
+13. **Rule 42 (new): mid-stream tuning iterations follow single-gate protocol.**
+14. **Apply `stripSchemaBounds()` to all Gemini `responseSchema` calls in new code.** Pattern established in W3, reused in W5 + W6.
+15. **Naming-conflict guards at branch-start on every new agent file.** Pattern established in W3 (`library-inventory-v2.ts`), reused in W4 (`candidate-retrieval-v2.ts`), W5 (`r2-fetch.ts` reused existing helper).
+16. **Preserve smoke outputs to non-ephemeral paths.** Pattern: `docs/smoke-runs/w{N}-gate-a-YYYYMMDD.txt`. Established W5 Gate A onward.
+
+---
+
+## Context on Domis (unchanged, still accurate)
+
+Lithuanian, Vilnius. Runs 30+ brands. Stack-fluent: n8n, Supabase, Sheets, Hetzner. Direct communication, spelling occasionally loose (parse for intent, don't correct), prefers quick decisions, "I don't care" means "stop optimizing around this, move on." Rewards: fast iteration, clean execution, agent handling git autonomously. Frustrations: commands that don't work, re-litigating decisions, hedging language.
+
+**This session specifically:**
+- Domis pushed back on the "wait for W9" recommendation when W6 surfaced subject_discontinuity prevalence. Correct pushback — the architectural fix (W6.5) was strictly better than the reactive tuning path. Preserve this pattern: Domis's strategic pushback during tactical work is signal to reframe, not to defend.
+- Domis asked for plain-language explanation of "cross-parents" when the buzzwords got dense. Good sign that communication was getting too jargony; the ensuing plain-language explanation led directly to the architectural reframe. Don't over-anchor on technical vocabulary when discussing creative direction.
+- Domis approved single-gate workstreams and shortened kickoffs readily. Respects velocity when the risk profile justifies it.
+
+---
+
+## Session close metadata
+
+- Session duration: ~2 calendar days of active work (2026-04-22 morning through 2026-04-23 late)
+- Total ships: 7 (6 W-workstreams + Legacy Flash removal + W6.5 tuning iteration)
+- Docs batch at close (this): HANDOFF (this doc), MVP_PROGRESS_16.md, PHASE_4_PART_B_PIPELINE.md updates, w2-content-form-taxonomy.md v1.1 refresh, CLAUDE.md Rule 42 addition.
+- No production cutover. Phase 3.5 still serves all traffic.
+
+---
+
+*Handoff written 2026-04-23 at session close. Supersedes prior handoff (2026-04-22). Next planning chat reads this first, verifies Sprint 2 state + no issues from latest ships, then drafts W7 Copywriter brief.*

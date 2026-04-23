@@ -55,7 +55,7 @@ Legend:
 - **Pacing:** smooth-to-mid
 - **Dominant segment_types:** `exercise` heavy + 1 `talking-head` or `setup` for hook
 - **Overlay posture:** label-heavy (exercise names, optional rep counts)
-- **Library readiness:** ✅ strong — 420 exercise segments, 21 body regions covered
+- **Library readiness:** ✅ strong — 477 exercise segments, 13 body regions covered with core/glutes/legs/shoulders heavily represented (518/333/256/235)
 - **Hook mechanism:** specific-pain-promise (default) or authority-claim (for "over 40" / trainer-figure variants)
 - **Feels organic because:** the specificity of the promise. A real teacher addresses a specific audience with a specific problem.
 - **Reference:** SocialMon "3 exercises for..." + "Pilates for..." formats, documented as consistently high-save formats.
@@ -68,7 +68,7 @@ Legend:
 - **Pacing:** punchy (dedicated punchy form)
 - **Dominant segment_types:** `exercise`, `hold`, occasional `transition`
 - **Overlay posture:** silent or single-text-card intro
-- **Library readiness:** ✅ abundant, but clip-to-clip visual continuity needs Director enforcement
+- **Library readiness:** ✅ abundant. Director (W5, shipped) enforces clip-to-clip visual continuity; Critic (W6, shipped) flags posture drift.
 - **Hook mechanism:** opening-energy — first 2 clips do the work
 - **Feels organic because:** energy compound. Music drives the edit. Viewer is carried, not instructed.
 - **Reference:** Wall Pilates teasers; Spotify Wrapped "Pink Pilates Princess" auto-generated reels.
@@ -80,7 +80,7 @@ Legend:
 - **Pacing:** smooth (deepest smoothness)
 - **Dominant segment_types:** one long `exercise` or `hold`, editorial window near-full
 - **Overlay posture:** silent or one poetic line
-- **Library readiness:** ⚠️ — Part A's 12s exercise cap limits single-segment length; need to query whether hold segments approaching the 15s cap exist. Viable if yes.
+- **Library readiness:** ✅ viable — 271 segments ≥10s (hold/exercise). Part A's 12s exercise cap + 15s hold cap still binds, but the library has enough long-form material for single-shot form. Director (W5) picks via editorial.best_in/out_point_s from this pool.
 - **Hook mechanism:** visual-pattern-interrupt — slow where feed is fast
 - **Feels organic because:** the form trusts the viewer. Pattern-breaking in a fast-cut-dominated feed.
 - **Reference:** Align.app long-form; Move With Nicole extended demos. Your "cinematic pilates" reference.
@@ -92,7 +92,7 @@ Legend:
 - **Pacing:** smooth
 - **Dominant segment_types:** mixed — needs lifestyle `b-roll` (non-workout) + `exercise` for the workout section
 - **Overlay posture:** sparse — time-of-day label or nothing
-- **Library readiness:** ⚠️-to-🔴 — 117 b-roll segments exist but content mix unknown. If b-roll is exercise-adjacent (equipment, gym shots) rather than lifestyle-adjacent (waking up, food, hands, outfit), form is partially or fully blocked. POST-SPRINT-2 AUDIT.
+- **Library readiness:** ✅ viable — 122 b-roll segments split roughly evenly: 60 lifestyle_likely (home/outdoor/other with no equipment visible) + 71 exercise_adjacent_likely (studio/gym or with equipment). The 60 lifestyle-b-roll pool supports the non-workout vignettes characteristic of this form. Subject-stance commitment (W6.5) now correctly matches: day-in-the-life reads as `single-subject` by the Planner's idea-signal heuristic.
 - **Hook mechanism:** narrative-intrigue — viewer stays to see the day unfold
 - **Feels organic because:** doesn't sell, just exists. Relief in a feed full of CTAs.
 - **Reference:** SocialMon "day in the life"; Pilates-Girl aesthetic tribe canonical form.
@@ -116,7 +116,7 @@ Legend:
 - **Pacing:** mid
 - **Dominant segment_types:** paired `exercise` (wrong + right variants), ideally `talking-head` for explanation
 - **Overlay posture:** label-heavy + high-contrast text ("WRONG" / "RIGHT" stamps)
-- **Library readiness:** ⚠️ — requires paired wrong/right variants (likely need Director creative-recombination) or talking-head explanation (gated by 8-segment scarcity). Works in a minimal form: 2-3 clips with strong text overlay per Domis's framing.
+- **Library readiness:** ⚠️ — talking-head count dropped to 7 post-Sprint-2 (was 8 pre-Sprint-2 — one reclassification). Still blocks talking-head-heavy form variants; minimal-form (2-3 clips + strong text overlay) remains viable. W10 voice generation unlocks the full form.
 - **Hook mechanism:** authority-claim — "you might be doing this wrong" triggers the anxiety
 - **Feels organic because:** the correction feels generous. Educational without being boring.
 - **Reference:** SocialMon "mistakes to avoid" format.
@@ -140,7 +140,7 @@ Legend:
 - **Pacing:** smooth
 - **Dominant segment_types:** multiple `exercise`/`hold` segments sharing a move name, or one long exercise with sub-windows
 - **Overlay posture:** label-heavy (cue callouts: "SHOULDERS DOWN", "NEUTRAL SPINE")
-- **Library readiness:** ⚠️ — depends on exercise-name consistency. If 3–5 same-named segments exist, viable. POST-SPRINT-2 PIVOT QUERY.
+- **Library readiness:** ✅ viable for top exercises — post-normalization, 13 exercises have ≥6 same-name segments (donkey kick 31, glute bridge 25, side lying leg lift 24, bird dog 12, wall chest stretch 12, and more at 6-8 each). Planner can commit to this form when the idea seed targets any of those 13. Text normalization helper (from W3) correctly merges variant strings ("glute bridge" + "glute-bridge" + "Glute Bridge" → 25).
 - **Hook mechanism:** authority-claim — teacher-expertise framing
 - **Feels organic because:** only a real teacher thinks to separate hand position from spine alignment. Specificity reads as expertise.
 - **Reference:** SocialMon "pose of the week breakdown"; Move With Nicole pattern.
@@ -164,7 +164,7 @@ Legend:
 - **Pacing:** mid-to-punchy
 - **Dominant segment_types:** `talking-head` heavy
 - **Overlay posture:** label-heavy (quoted captions, reaction labels)
-- **Library readiness:** 🔴 — 8 talking-head segments; reaction is talking-head-heavy. Blocked pending content expansion. Also copyright question on reacted-to content.
+- **Library readiness:** 🔴 — 7 talking-head segments (down 1 post-Sprint-2); reaction is talking-head-heavy. Blocked pending content expansion OR W10 voice generation providing an alternative. Also copyright question on reacted-to content.
 - **Hook mechanism:** authority-claim or trend-recognition (depending on reacted-to content)
 - **Feels organic because:** conversational, engages with broader discourse
 - **Reference:** SocialMon "reaction content."
@@ -190,7 +190,7 @@ Legend:
 - **Pacing:** smooth
 - **Dominant segment_types:** long `exercise` or `hold` segments, consistent front-on framing
 - **Overlay posture:** label-heavy (exercise names as they change)
-- **Library readiness:** ⚠️ — depends on continuous 30–45s front-on sequences. Part A's 12s cap means Director must reassemble multiple same-parent segments. Viable if same-parent continuous footage exists.
+- **Library readiness:** ✅ viable — 271 segments ≥10s in hold/exercise pool provide the base material. Director (W5, shipped) can reassemble multiple same-parent segments via subject-continuity boost (W4 retuned boost 0.02 + W5 sequential primary-slot hint chain). Same-parent concentration observed in current library supports this.
 - **Hook mechanism:** specific-pain-promise — "30-second follow-along for X"
 - **Feels organic because:** utility. Viewer can do it right now. Maximum save signal.
 - **Reference:** SocialMon "beginner-friendly follow-along mini class."
@@ -214,7 +214,7 @@ Legend:
 - **Pacing:** smooth, single-tempo music
 - **Dominant segment_types:** `b-roll` heavy (lifestyle specifically), `setting`-rich
 - **Overlay posture:** silent or single evocative word ("softness," "ritual")
-- **Library readiness:** ⚠️ — depends on lifestyle b-roll mix. POST-SPRINT-2 AUDIT. Core form for Pink-Pilates-Princess aesthetic tribe.
+- **Library readiness:** ✅ viable — 60 lifestyle_likely b-roll segments + long-hold exercise material. Core form for Pink-Pilates-Princess aesthetic tribe. Subject-stance commitment (W6.5) correctly identifies aesthetic-ambient ideas as `mixed` when idea seed signals "aesthetic / vibes / compilation / no teaching" — validated in session via seed 3 canary.
 - **Hook mechanism:** visual-pattern-interrupt
 - **Feels organic because:** pure visual pleasure, no sell-intent. Closest form to Domis's "pleasurable to watch, not selling" north-star.
 - **Reference:** Pink Pilates Princess canonical aesthetic; align.app lean.
@@ -226,7 +226,7 @@ Legend:
 - **Pacing:** mid
 - **Dominant segment_types:** `talking-head` + `exercise` demo
 - **Overlay posture:** label-heavy (text-only until W10 voice generation)
-- **Library readiness:** 🔴 — talking-head-gated (8 segments)
+- **Library readiness:** 🔴 — talking-head-gated (7 segments, down 1 post-Sprint-2). W10 voice generation is the unlock path; post-Sprint-2 ingestion didn't relieve the bottleneck materially.
 - **Hook mechanism:** authority-claim
 - **Feels organic because:** reads as a real teacher, not a brand
 - **Reference:** "Ask a Pilates teacher" condensed to Reel length.
@@ -239,7 +239,7 @@ Legend:
 - **Pacing:** mid
 - **Dominant segment_types:** `exercise` with `setting.equipment_visible` populated
 - **Overlay posture:** label-heavy (move names + prop label)
-- **Library readiness:** ⚠️ — equipment-tagging consistency in v2 analyzer needs verification
+- **Library readiness:** ✅ viable — post-normalization equipment distribution shows clear top-N: mat (634 — the default surface), yoga mat (147), mirror (57), wall (46), plus specific props: pilates ring (14), dumbbell (13), reformer (6). Text normalization merged variants ("mat" + "yoga mat" + "yoga-mat" cluster; "dumbbell" + "dumbbells" merged). Planner can commit to this form when idea seed targets any of the 10+ top equipment items.
 - **Hook mechanism:** specific-pain-promise — "what to do with that magic circle you bought"
 - **Feels organic because:** addresses a real home-practitioner problem. Utility reads as organic.
 - **Reference:** SocialMon "equipment spotlight."
@@ -345,17 +345,17 @@ The grid implies ~38 distinct nordpilates video-identities before Copywriter voi
 
 ---
 
-## Library gaps (pre-Content-Sprint-2)
+## Library gaps (post-Sprint-2 v1.1, 2026-04-23)
 
-Forms with ⚠️ or 🔴 flags imply content-shoot priorities for nordpilates. All four gaps should be re-audited after Content Sprint 2 ingests, since current stats (190 parents / 720 segments) will roughly double.
+Sprint 2 ingestion brought the library from 190/720 (parents/segments) pre-Sprint-2 to 1116+ segments at last mid-session check, still climbing. The doubling did resolve 4 of the 4 original gaps (long_holds, lifestyle b-roll, b-roll mix, temporal metadata — the last remains structurally blocked and not fixable via ingestion). The remaining gap is talking-head scarcity, which ingestion did not meaningfully relieve.
 
-1. **Talking-head scarcity.** 8 talking-head segments across 720 = 1.1% of library. Blocks Reaction (#10), significantly limits Teacher-Cue-Drop (#15) and Myth-Buster (#6). W10 (voice generation) reduces this pressure but doesn't eliminate it — some forms genuinely need a visible face.
+1. **Talking-head scarcity.** 7 talking-head segments in 1116+ = 0.6% of library (was 8 in 720 = 1.1% pre-Sprint-2). Sprint 2 did not materially relieve this; one reclassification lowered the count by 1. Blocks Reaction (#10), significantly limits Teacher-Cue-Drop (#15) and Myth-Buster (#6). W10 voice generation remains the primary unlock path.
 
-2. **Lifestyle b-roll mix unknown.** 117 b-roll segments total, but split between exercise-adjacent (equipment, gym interiors) and lifestyle-adjacent (waking up, food, outfit, hands, texture, ritual objects) is unmeasured. Gates Day-in-the-Life (#4) and Aesthetic-Ambient (#14). Post-Sprint-2 audit: run the v2 analyzer's `setting.location` + `setting.equipment_visible` distribution query and classify b-roll by lifestyle-vs-exercise-adjacency.
+2. **Lifestyle b-roll mix — RESOLVED v1.1.** 122 b-roll total, classified via `segment_v2->'setting'->>'location'` + equipment_visible heuristic: 60 lifestyle_likely + 71 exercise_adjacent_likely + 0 ambiguous. Day-in-the-Life (#4) and Aesthetic-Ambient (#14) now flagged ✅ viable.
 
-3. **Long single-shot footage.** Part A's 12s exercise cap + 15s hold cap means single-segment continuous footage for Cinematic Slow-Cinema (#3) and Beginner-Follow-Along (#12) requires either segments near the hold cap or Director-reassembly from same-parent segments.
+3. **Long single-shot footage — RESOLVED v1.1.** 271 segments ≥10s in hold/exercise pool. Part A caps (12s exercise, 15s hold) still bind per-segment, but the pool is deep enough for Cinematic Slow-Cinema (#3) and Beginner-Follow-Along (#12) to draw from. Director can also reassemble multiple same-parent segments via the subject-continuity boost chain.
 
-4. **Temporal metadata.** Progress-Montage (#11) needs shoot-date / program-week tags. Out of scope for Part A; requires a future metadata extension.
+4. **Temporal metadata — STILL BLOCKED.** Progress-Montage (#11) needs shoot-date / program-week tags. Out of scope for Part A; requires a future metadata extension. Not fixable via ingestion. Sprint 2 did not address.
 
 Logged separately as `docs/content-library-gaps.md`.
 
@@ -363,9 +363,10 @@ Logged separately as `docs/content-library-gaps.md`.
 
 ## Change log
 
+- **v1.1 (2026-04-23):** Readiness flags refreshed with Sprint 2 mid-ingestion numbers (1116+ segments). 5 forms flipped ⚠️ → ✅ (Cinematic Slow-Cinema, Day-in-the-Life, Single-Exercise Deep-Dive, Beginner-Follow-Along, Aesthetic-Ambient, Equipment/Prop Spotlight). 2 forms flipped to reflect talking-head count update (6 → 7; Reaction and Teacher-Cue-Drop stay 🔴). Library gaps section updated: 3 of 4 original gaps resolved by ingestion (long holds, lifestyle b-roll, b-roll mix); talking-head scarcity remains; temporal metadata remains structurally blocked. Sprint 2 still in progress; v1.2 refresh expected once ingestion stabilizes.
 - **v1 (2026-04-21):** 18 forms → 16 (merged #1+#17, dropped What-I-Wish-I-Knew). "Feels organic because" → "hook mechanism" across all forms + new top-level hook-mechanism concept section. Posture P6 Voice-Over-Led deferred to W10. Voice-unlock-when-W10-ships noted with (V) markers in allowlist grid. Library-readiness flags marked as pre-Sprint-2 estimates; post-Sprint-2 audit scheduled.
 - **v0 (2026-04-21):** initial draft, 18 forms, 6 postures.
 
 ---
 
-*Canonical playbook for nordpilates through end of Part B. Reference material for W2 brief, W3 Planner, W5 Visual Director, W6 Coherence Critic, W7 Copywriter. Revised post-Sprint-2 with real library numbers before W2 brief commits.*
+*Canonical playbook for nordpilates through end of Part B. Reference material for W2 (shipped), W3 Planner (shipped + W6.5 tuned), W5 Visual Director (shipped), W6 Coherence Critic (shipped + W6.5 tuned), W7 Copywriter (next brief). v1.1 refreshed 2026-04-23 with Sprint 2 mid-ingestion numbers. Final v1.2 refresh expected once Sprint 2 fully stabilizes.*

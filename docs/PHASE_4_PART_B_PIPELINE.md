@@ -1,6 +1,6 @@
 # Phase 4 Part B — Pipeline
 
-**Status:** W1 complete (2026-04-21). W1.5 in progress. W2 in design.
+**Status:** W1 through W6 shipped (2026-04-21 through 2026-04-23) + W6.5 tuning iteration shipped 2026-04-23. W1.5 Content Sprint 2 still in progress. W7 Copywriter is the next brief.
 **Success criterion (revised 2026-04-21):** Replace the Phase 3.5 CD → Curator → Copywriter flow with a pipeline that produces **organic-plausible, retention-optimized short-form content with form diversity**, not "just" coherent videos. Auto-QA remains a necessary gate; organic-creator-plausibility on human review is the bar. Measured on nordpilates during shadow mode + ramp.
 **Depends on:** Part A's SegmentV2.1 schema (complete) + W1 keyframe grids (complete).
 
@@ -88,18 +88,19 @@ Key architectural decisions:
 | W# | Workstream | Status | Depends on |
 |----|------------|--------|-----------|
 | W1 | Keyframe grids | ✅ shipped 2026-04-21 | Part A |
-| W1.5 | Content Sprint 2 ingestion | 🟡 in progress | W1 |
-| W2 | Brand persona + form/posture playbook | 🔵 in design | W1.5 meaningfully complete |
-| W3 | Planner (form + hook_mechanism) | 🔴 not started | W2 |
-| W4 | match_segments_v2 RPC | 🔴 not started | W3 |
-| W5 | Visual Director (multimodal) | 🔴 not started | W1 + W4 |
-| W6 | Coherence Critic | 🔴 not started | W5 |
-| W7 | Copywriter rebuild | 🔴 not started | W5 (parallel to W6) |
+| W1.5 | Content Sprint 2 ingestion | 🟡 still in progress | W1 |
+| W2 | Brand persona + form/posture playbook | ✅ shipped 2026-04-22 | W1.5 meaningfully complete |
+| W3 | Planner (form + hook_mechanism + subject_consistency) | ✅ shipped 2026-04-22 | W2 |
+| W4 | match_segments_v2 RPC | ✅ shipped 2026-04-22 | W3 |
+| W5 | Visual Director (multimodal) | ✅ shipped 2026-04-22 | W1 + W4 |
+| W6 | Coherence Critic | ✅ shipped 2026-04-23 | W5 |
+| W6.5 | Planner subject stance + conditional Critic | ✅ shipped 2026-04-23 (tuning iteration) | W6 |
+| W7 | Copywriter rebuild | 🔴 not started (NEXT BRIEF) | W5 (parallel to W6) |
 | W8 | Orchestrator | 🔴 not started | W3–W7 |
 | W9 | Shadow mode rollout | 🔴 not started | W8 |
 | **W10** | **Audio generation (NEW)** | 🔴 **not started, POST-shadow** | **W9 validation** |
 
-Estimated timeline: W1.5 through W9 in 4–6 weeks. W10 adds ~1 week post-shadow if Part B foundation is sound.
+Estimated timeline: W7 through W9 remaining in ~2–3 weeks. W10 adds ~1 week post-shadow if Part B foundation is sound.
 
 ---
 
@@ -160,6 +161,8 @@ See `docs/briefs/w1-keyframe-grids.md` (archived) and `src/lib/keyframe-grid.ts`
 ### W3 — Planner
 
 **Purpose:** produce a structural brief with form commitment and hook mechanism, from idea seed + library inventory + brand persona.
+
+**Update 2026-04-23 (W6.5):** Planner now commits to `subject_consistency` per video based on idea-seed signals (first-person possessive / named-routine / authority framing → single-subject; aesthetic-compilation / trend / community language → mixed). Slot-level `subject_role` follows from the video-level stance. Prompt-only change; no schema modification.
 
 **Deliverable:** `src/agents/planner-v2.ts` + `src/agents/prompts/planner-v2.md` + Zod schema.
 
@@ -231,6 +234,17 @@ See `docs/briefs/w1-keyframe-grids.md` (archived) and `src/lib/keyframe-grid.ts`
 
 **When built:** after W5. Shadow mode first.
 
+#### W6.5 — Subject stance conditional check (shipped 2026-04-23)
+
+Single-gate tuning iteration. The `subject_discontinuity` issue type in the Critic's taxonomy became conditional on `planner.subject_consistency`:
+- `single-subject` → fires normally (severity per original spec)
+- `prefer-same` → fires at `low` severity only, and only on genuine scatter (≥3 parents across primary slots)
+- `mixed` → does not fire (mixed subjects are intended)
+
+Addresses followup `w6-subject-discontinuity-prevalence-at-director`. Prompt-only change to both `planner-v2.md` and `coherence-critic.md`; `coherence-critic.ts` surface check confirmed `subject_consistency` already reachable as a flat template variable — no code change.
+
+Validated via Planner seed 3 ("soft golden-hour pilates aesthetic, no teaching") flipping to `subject_consistency: mixed` + spot-check Critic invocation on a resulting 5-unique-parents storyboard correctly NOT firing `subject_discontinuity`.
+
 ### W7 — Copywriter rebuild — largely unchanged, two additions
 
 **Purpose:** write overlay text per slot after clips are picked.
@@ -301,6 +315,8 @@ See `docs/briefs/w1-keyframe-grids.md` (archived) and `src/lib/keyframe-grid.ts`
 
 Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video steady state with W10.
 
+**Actual session cost tracking (2026-04-22 + 2026-04-23):** ~$4 total in Gemini usage across all test-script smokes (W3 iterations + W4 no-LLM + W5 multimodal + W6 Critic + W6.5 revalidation). Production projection unchanged: $0.50/video all-in through W9, $0.52 with W10.
+
 ---
 
 ## Risks & open questions (updated)
@@ -318,6 +334,8 @@ Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video
 | **Content Sprint 2 doesn't meaningfully relieve talking-head bottleneck** | Accept the current library limits through Part B; W10 provides alternative path via VO |
 | **Form×Posture allowlist encoded in persona drifts from taxonomy doc** | Single source of truth — persona references taxonomy doc by form_id, doesn't redefine |
 | **W10 voice choice for nordpilates feels wrong post-ship** | Voice-evaluation during W2 with Domis; fast rollback by flipping brand voice_config and re-rendering |
+| **Subject-stance prompt tuning drifts across future brand onboardings** | Rule 40 + Rule 41 patterns apply: stance-signal heuristics live in Planner prompt, not per-persona prose. Nordpilates persona default-preference framing is the template for new brands. |
+| **W6 Critic note-length overflow on complex storyboards** | W6.5 added explicit `≤300 chars` guidance per note with "cite one mismatch, don't narrate every slot" rule. Observable improvement: latency dropped, max length reduced. Revisit if shadow mode shows re-occurrence. |
 
 ### Open questions
 
@@ -326,6 +344,7 @@ Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video
 3. **Multi-turn Critic-Director loop?** Current design is one-shot. Could be "propose → critique → revise" loop. Adds latency; might not be needed.
 4. **Feature flag strategy:** `ENABLE_PIPELINE_V2_SHADOW` vs `ENABLE_PIPELINE_V2_PROD` — two flags or one with states?
 5. **NEW: W10 voice per brand or per persona?** One voice per brand (nordpilates = voice A, Nordletics = voice B), or per persona-within-brand (nordpilates P5 = teacher voice, nordpilates P1 = softer voice)? Lean toward one per brand for simplicity.
+6. **Should W8 orchestrator retry Director with tighter subject-continuity prompt constraints on `subject_discontinuity` revise verdicts, or re-plan from scratch?** W6.5 reduces false-positive rate by filtering which storyboards get flagged; doesn't change what orchestrator does when a real continuity break IS flagged. Two paths: (a) orchestrator re-invokes W5 with a stronger same-parent constraint on just the flagged slots; (b) orchestrator escalates to Planner re-plan if Director's initial pick-set has continuity issues. Decision pending W8 brief.
 
 ---
 
@@ -333,17 +352,23 @@ Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video
 
 - [x] Part A complete
 - [x] W1 shipped (keyframe grids)
-- [ ] W1.5 meaningfully complete (Content Sprint 2 ingested, inventory refreshed)
-- [ ] W2 shipped (persona + form/posture playbook loaded into codebase)
-- [ ] W4 prototyped
-- [ ] Feature flag plan decided
+- [ ] W1.5 meaningfully complete (Content Sprint 2 still ingesting; inventory refreshed once in this session to partial, final pass pending ingestion stabilization)
+- [x] W2 shipped (persona + form/posture playbook loaded into codebase)
+- [x] W3 shipped (Planner)
+- [x] W4 shipped (retrieval RPC)
+- [x] W5 shipped (Visual Director)
+- [x] W6 shipped (Coherence Critic)
+- [x] W6.5 shipped (subject stance tuning)
+- [ ] W7 shipped (Copywriter) — NEXT BRIEF
+- [ ] W8 shipped (Orchestrator)
+- [ ] Feature flag plan decided (deferred to W8 brief)
 - [ ] Voice-evaluation session held (prep for W10, non-blocking for W2-W9)
 
 ---
 
 ## What "done" looks like for Part B
 
-- [ ] Pipeline v2 (W2-W9) running in shadow mode ≥1 week
+- [ ] Pipeline v2 (W2-W9) running in shadow mode ≥1 week (W2-W6 + W6.5 shipped; W7-W9 remaining)
 - [ ] Shadow diffs show v2 picks at least as good as Phase 3.5 on ≥80% of jobs
 - [ ] A/B test on 10% traffic: retention delta 0% or positive
 - [ ] Human review of 30 random v2 outputs: ≥8/10 rated "could plausibly be a real creator's organic post"
@@ -357,3 +382,5 @@ When Part B is done: Video Factory produces retention-optimized organic short-fo
 ---
 
 *Revised 2026-04-21 evening. Adds W1.5 + W10, updates W2 + W3 scopes for form/posture two-axis model and hook_mechanism first-class concept, updates success criterion from auto-QA-pass-rate to organic-plausibility-plus-form-diversity.*
+
+*Revised 2026-04-23 evening. Updated for W1-W6 shipped + W6.5 tuning iteration. Added subject-stance architectural note to W3. Added W6.5 subsection to W6. Prerequisites checklist marked through W6.5 complete. Risks updated. Next brief: W7 Copywriter.*
