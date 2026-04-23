@@ -90,10 +90,32 @@ const RAW_COPY_JSON_SCHEMA = zodToJsonSchema(CopyPackageSchema, {
   target: 'openApi3',
   $refStrategy: 'none',
 });
-const COPY_JSON_SCHEMA = stripSchemaBounds(RAW_COPY_JSON_SCHEMA) as Record<
-  string,
-  unknown
->;
+
+// Gemini's responseSchema validator rejects `enum` on non-STRING types. Zod's
+// `z.null()` compiles to `{ type: 'null', enum: [null] }`, which Gemini errors
+// on with "enum only allowed for STRING type". The cleanest mitigation: remove
+// `voiceover_script` from the outgoing schema entirely, then inject `null`
+// into the raw response before Zod parse. Zod still enforces the final shape.
+// W10 will widen voiceover_script to z.string().nullable() and this omission
+// will need to be revisited.
+function omitVoiceoverScriptForGemini(schema: unknown): unknown {
+  if (!schema || typeof schema !== 'object') return schema;
+  const s = schema as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...s };
+  if (out.properties && typeof out.properties === 'object') {
+    const props = { ...(out.properties as Record<string, unknown>) };
+    delete props.voiceover_script;
+    out.properties = props;
+  }
+  if (Array.isArray(out.required)) {
+    out.required = (out.required as string[]).filter((k) => k !== 'voiceover_script');
+  }
+  return out;
+}
+
+const COPY_JSON_SCHEMA = omitVoiceoverScriptForGemini(
+  stripSchemaBounds(RAW_COPY_JSON_SCHEMA),
+) as Record<string, unknown>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Snapshot — richer than W6's CandidateMetadataSnapshot
@@ -347,7 +369,12 @@ async function callGemini(
       );
       const text = response.text ?? '';
       if (!text) throw new Error('Gemini copywriter-v2 returned empty text');
-      const raw = JSON.parse(text);
+      const raw = JSON.parse(text) as Record<string, unknown>;
+      // voiceover_script is omitted from the responseSchema sent to Gemini
+      // (Gemini rejects `enum` on non-STRING types, and z.null() compiles to
+      // `{ type: 'null', enum: [null] }`). Inject null server-side so Zod
+      // can enforce the full contract.
+      raw.voiceover_script = null;
       const parsed = CopyPackageSchema.parse(raw);
       return { parsed, retryCount: parseRetries };
     } catch (err) {
