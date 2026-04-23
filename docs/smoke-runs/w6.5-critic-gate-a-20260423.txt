@@ -1,0 +1,116 @@
+=== W6 Coherence Critic — Gate A smoke ===
+brand:   nordpilates
+seeds:   ["morning pilates routine for hip mobility","3 glute exercises that feel better than they should","day in the life of a pilates teacher"]
+synthetic: [A: forced duplicate, B: forced duration-under-floor]
+
+[visual-director] slot_index=1 cross-parent primary pick: prior=b9a21be0 now=ae334bcf
+[visual-director] slot_index=3 cross-parent primary pick: prior=ae334bcf now=cd320ee1
+
+============================================================
+STORYBOARD 1/3   seed: "morning pilates routine for hip mobility"
+============================================================
+  wall_ms: 142821
+  STATUS: PASS
+  plan: form=routine_sequence hook=narrative-intrigue posture=P1 slot_count=4
+        creative_vision: Quiet morning hip mobility routine, framed as a lived personal practice to ease stiffness, using soft natural light and smooth pacing.
+  picks: 4 total, director_latency=97565ms
+
+  CRITIC VERDICT: revise   latency_ms=25021
+  overall_reasoning: The storyboard fails the single-subject consistency requirement, with the primary subject changing across three different parent assets. Additionally, the hook clip feels too instructional and fails to deliver on the requested narrative-intrigue mechanism.
+  issues (2):
+    - [high] subject_discontinuity  slots=[0,1,2,3]
+        note: Storyboard requested single-subject consistency, but primary slots jump across 3 different parent assets (Slot 0: brunette, Slots 1-2: blonde, Slot 3: brunette).
+        fix:  Re-pick slots to use a single parent asset across all primary slots.
+    - [medium] hook_weak  slots=[0]
+        note: Hook mechanism is 'narrative-intrigue', but the picked clip (checking watch, smiling, giving instructions) is a standard fitness intro that lacks intrigue.
+        fix:  Re-pick slot 0 with a clip that sets up a more compelling narrative question or shows a more intimate, less instructional moment.
+[visual-director] slot_index=1 cross-parent primary pick: prior=bd7ef7a2 now=6d6cb705
+[visual-director] slot_index=3 cross-parent primary pick: prior=6d6cb705 now=ccf94180
+
+============================================================
+STORYBOARD 2/3   seed: "3 glute exercises that feel better than they should"
+============================================================
+  wall_ms: 143553
+  STATUS: PASS
+  plan: form=targeted_microtutorial hook=specific-pain-promise posture=P1 slot_count=4
+        creative_vision: Warm, single-subject sequence of three feel-good glute movements, framed as a pleasure-first approach to strength.
+  picks: 4 total, director_latency=108768ms
+
+  CRITIC VERDICT: revise   latency_ms=15528
+  overall_reasoning: The storyboard has two critical slot-level failures: a direct duplicate segment across consecutive slots (1 and 2), and a severe break in subject continuity despite the Planner's 'single-subject' constraint, with primary slots spanning three different parent assets.
+  issues (2):
+    - [high] duplicate_segment_across_slots  slots=[1,2]
+        note: Slots 1 and 2 both picked segment_id 6cc0261d-17d3-402a-bb86-4c0c685ad6d5 at the same in_point (13.00). The viewer would see the exact same clip twice in a row.
+        fix:  Re-pick slot 2, excluding segment_id 6cc0261d-17d3-402a-bb86-4c0c685ad6d5 from the candidate pool.
+    - [high] subject_discontinuity  slots=[0,1,2,3]
+        note: Planner requested single-subject consistency, but primary slots jump across 3 different parents (bd7ef7a2, 6d6cb705, ccf94180). The subject's outfit changes drastically between slots 0, 1, and 3.
+        fix:  Re-pick slots 0 and 3 to use parent 6d6cb705 to match slots 1 and 2, ensuring a true single-subject sequence.
+[visual-director] slot_index=1 cross-parent primary pick: prior=b9a21be0 now=57c46b4a
+[visual-director] slot_index=2 cross-parent primary pick: prior=57c46b4a now=905b6463
+[visual-director] slot_index=3 cross-parent primary pick: prior=905b6463 now=294a44df
+[visual-director] slot_index=4 cross-parent primary pick: prior=294a44df now=8fdedc89
+
+============================================================
+STORYBOARD 3/3   seed: "day in the life of a pilates teacher"
+============================================================
+  wall_ms: 167835
+  STATUS: PASS
+  plan: form=day_in_the_life hook=narrative-intrigue posture=P1 slot_count=5
+        creative_vision: Quiet, narrative-driven day in the life of a single teacher, moving from morning routine to a gentle mat practice.
+  picks: 5 total, director_latency=129885ms
+
+  CRITIC VERDICT: revise   latency_ms=16718
+  overall_reasoning: The storyboard completely fails the single-subject requirement, using 5 different subjects across 5 slots. Additionally, there is posture drift as studio settings are used despite brand tenets explicitly forbidding them.
+  issues (2):
+    - [high] subject_discontinuity  slots=[0,1,2,3,4]
+        note: Planner requested single-subject, but every slot uses a different parent asset and subject (brunette to various blondes, changing outfits and locations).
+        fix:  Re-pick slots 1-4 to match the parent asset of slot 0, or re-plan if insufficient clips exist for a single subject.
+    - [medium] posture_drift  slots=[1,3]
+        note: Brand tenets explicitly state 'Not a studio', but slots 1 and 3 use studio settings.
+        fix:  Re-pick slots 1 and 3 to use home or lived-in settings that match the brand's lived-practice posture.
+
+============================================================
+SYNTHETIC   A: forced duplicate_segment_across_slots
+============================================================
+  wall_ms: 21594
+  ASSERTION: PASS   issue_present=true verdict=revise (expected: revise|reject)
+  CRITIC VERDICT: revise   latency_ms=21365
+  overall_reasoning: The storyboard suffers from severe slot-level issues: a direct clip duplication between slots 0 and 1, and a major subject continuity break across slots 2 and 3 despite a single-subject requirement. Slot 1 also fails to meet its body focus requirement.
+  issues (3):
+    - [high] duplicate_segment_across_slots  slots=[0,1]
+        note: Slots 0 and 1 both picked segment d9fb5e33-8208-4fa0-abc7-74d8894bfd6b at identical in/out points. Viewer would see the exact same clip twice.
+        fix:  Re-pick slot 1 to use a different segment that demonstrates the first gentle movement.
+    - [high] subject_discontinuity  slots=[0,1,2,3]
+        note: Planner requested single-subject consistency, but primary slots span 3 different parents with different subjects (brunette in white, blonde in grey, brunette in brown).
+        fix:  Re-pick slots 2 and 3 to use clips from parent b9a21be0 to maintain the single subject established in slot 0.
+    - [medium] body_focus_mismatch  slots=[1]
+        note: Slot 1 requires body_focus on hips/legs, but the picked clip is a setup segment with no body regions specified.
+        fix:  Re-pick slot 1 with an exercise clip that targets the hips and legs.
+
+============================================================
+SYNTHETIC   B: forced duration_mismatch (under floor)
+============================================================
+  wall_ms: 19214
+  ASSERTION: PASS   issue_present=true severity=high (expected: high)
+  CRITIC VERDICT: revise   latency_ms=19028
+  overall_reasoning: The storyboard has a coherent narrative and energy arc, but fails on two critical mechanical constraints: the total duration is under the 8-second platform floor, and there are severe subject continuity breaks despite a single-subject requirement.
+  issues (2):
+    - [high] duration_mismatch  slots=[0,1,2,3]
+        note: Total storyboard duration is 4s, which falls below the 8s minimum floor for vertical short-form video. Each slot is currently trimmed to exactly 1.0s.
+        fix:  Extend the out_points for all slots to ensure the total duration is between 8s and 32s.
+    - [high] subject_discontinuity  slots=[0,1,2,3]
+        note: Planner requested single-subject, but primary slots jump across 3 different parents (brunette in slot 0, blonde in slots 1-2, different brunette in slot 3).
+        fix:  Re-pick slots 0 and 3 to use parent ae334bcf, or re-pick slots 1-3 to match slot 0's parent (b9a21be0).
+
+============================================================
+AGGREGATE
+============================================================
+  real_storyboards:          3/3 PASS
+  synthetic_A_assertion:     PASS  issue_present=true verdict=revise (expected: revise|reject)
+  synthetic_B_assertion:     PASS  issue_present=true severity=high (expected: high)
+  total_wall_ms:             495017
+  total_critic_calls:        5
+  est_critic_cost_usd:       $0.25  (@ ~$0.05/call)
+  avg_critic_latency_ms:     19532
+  verdict_distribution:      {"revise":5}
+  issue_type_distribution:   {"subject_discontinuity":5,"hook_weak":1,"duplicate_segment_across_slots":2,"posture_drift":1,"body_focus_mismatch":1,"duration_mismatch":1}
