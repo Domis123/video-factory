@@ -1,0 +1,137 @@
+=== W7 Copywriter — Gate A smoke (three tiers) ===
+brand:   nordpilates
+seeds:   5 (tier 1 runs all; tier 2 asserts on seeds 1+3; tier 3 bases on seed 1)
+
+[visual-director] slot_index=1 cross-parent primary pick: prior=b9a21be0 now=005d8bf3
+[visual-director] slot_index=2 cross-parent primary pick: prior=005d8bf3 now=d46e70c4
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 450 (line 18 column 22)
+[copywriter-v2] attempt 2 parse failed, retrying: Expected double-quoted property name in JSON at position 2080 (line 62 column 5)
+
+============================================================
+TIER 1  seed 1/5: "morning pilates routine for hip mobility"
+============================================================
+  wall_ms: 324930
+  STATUS: FAIL
+  error: Expected double-quoted property name in JSON at position 456 (line 18 column 9)
+[visual-director] slot_index=3 cross-parent primary pick: prior=27511ae4 now=57c46b4a
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 2312 (line 63 column 89)
+[copywriter-v2] attempt 2 parse failed, retrying: Unterminated string in JSON at position 1403 (line 51 column 17)
+
+============================================================
+TIER 1  seed 2/5: "3 moves that relieved my lower back after desk work"
+============================================================
+  wall_ms: 280952
+  STATUS: FAIL
+  error: Expected double-quoted property name in JSON at position 827 (line 31 column 1)
+[visual-director] slot_index=1 cross-parent primary pick: prior=cd320ee1 now=ae334bcf
+[visual-director] slot_index=2 cross-parent primary pick: prior=ae334bcf now=96ffe0c5
+[visual-director] slot_index=3 cross-parent primary pick: prior=96ffe0c5 now=d46e70c4
+
+============================================================
+TIER 1  seed 3/5: "slow sunday stretching with the windows open"
+============================================================
+  wall_ms: 259709
+  STATUS: PASS
+  plan: form=aesthetic_ambient hook_mech=visual-pattern-interrupt subject=single-subject slots=4
+        creative_vision: Quiet, atmospheric Sunday stretching routine focusing on deep holds and calm morning light.
+
+  HOOK     (overlay) "sunday."
+           mechanism_tie: Executes a visual pattern interrupt by using a single, lowercase abstract word to frame the quiet, sunlit aesthetic.
+  CTA      (null)
+  CANONICAL "A quiet Sunday morning stretching routine focusing on deep holds and letting the body wake up slowly."
+  TIKTOK   "slow sunday mornings on the mat. #pilates"
+  HASHTAGS [#pilates #wellness #fyp #softnessoversoreness #morningflow #pilatesgirlie #sundayroutine #deepstretch #mobility]
+  OVERLAYS:
+    slot-0  type=none    0.00→0.00s  "(none)"
+    slot-1  type=cue     1.00→6.00s  "soften the hips"
+    slot-2  type=cue     1.00→6.00s  "heavy through the shoulders"
+    slot-3  type=none    0.00→0.00s  "(none)"
+  META: retry_count=0 temperature=0.5
+[visual-director] slot_index=1 cross-parent primary pick: prior=1ee19add now=d46e70c4
+[visual-director] slot_index=2 cross-parent primary pick: prior=d46e70c4 now=57c46b4a
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 456 (line 17 column 53)
+[copywriter-v2] attempt 2 parse failed, retrying: Unexpected end of JSON input
+
+============================================================
+TIER 1  seed 4/5: "how to set up your pelvic floor for every exercise"
+============================================================
+  wall_ms: 228461
+  STATUS: PASS
+  plan: form=hook_rev_tip hook_mech=authority-claim subject=single-subject slots=3
+        creative_vision: A calm, single-subject breakdown of the foundational pelvic floor cue, using an authority hook to reframe how viewers start every movement.
+
+  HOOK     (overlay) "the foundation most practices skip"
+           mechanism_tie: Frames the pelvic floor breath as a missing fundamental, establishing gentle authority without using aggressive pain-bait.
+  CTA      "save this for your next practice"
+  CANONICAL "A calm breakdown of the foundational pelvic floor cue to reframe how you start every movement."
+  TIKTOK   "the invisible foundation most practices skip. try this before your next flow 🌅 #pilates"
+  HASHTAGS [#pilates #wellness #pelvicfloor #coreengagement #morningroutine #pilatesflow #softnessoversoreness]
+  OVERLAYS:
+    slot-0  type=none    0.00→0.00s  "(none)"
+    slot-1  type=cue     1.00→11.00s  "exhale and lift from the base"
+    slot-2  type=caption 1.00→9.00s  "true stability starts before the shape does"
+  META: retry_count=2 temperature=0.5
+[visual-director] slot_index=1 cross-parent primary pick: prior=fc7c1215 now=ccf94180
+[visual-director] slot_index=3 cross-parent primary pick: prior=ccf94180 now=8fdedc89
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 475 (line 17 column 43)
+[copywriter-v2] attempt 2 parse failed, retrying: Unterminated string in JSON at position 2380 (line 60 column 15)
+
+============================================================
+TIER 1  seed 5/5: "what six months of pilates taught me about my hips"
+============================================================
+  wall_ms: 321546
+  STATUS: PASS
+  plan: form=routine_sequence hook_mech=confessional-vulnerability subject=single-subject slots=4
+        creative_vision: Warm, confessional sequence showing a personal hip mobility practice, framed as a gentle lesson learned over six months.
+
+  HOOK     (overlay) "what six months of softening taught me"
+           mechanism_tie: Uses gentle first-person reflection to frame the routine as a lived, personal lesson rather than a prescriptive workout.
+  CTA      (null)
+  CANONICAL "A gentle hip mobility sequence focused on releasing held tension, framed as a personal lesson in choosing softness over force."
+  TIKTOK   "softness over soreness. a gentle release for tight hips 🌅 #pilates"
+  HASHTAGS [#pilates #wellness #mobilityflow #softnessoversoreness #tighthips #morningroutine]
+  OVERLAYS:
+    slot-0  type=caption 0.30→2.70s  "what six months of softening taught me"
+    slot-1  type=cue     0.50→7.50s  "drop the shoulders first"
+    slot-2  type=cue     0.50→7.50s  "exhale into the extension"
+    slot-3  type=none    0.00→0.00s  "(none)"
+  META: retry_count=2 temperature=0.5
+
+============================================================
+TIER 1 — cross-seed homogenization
+============================================================
+  hook opening signatures:  ["sunday", "the foundation", "what six"]
+    distinct=3/3   PASS (threshold: ≥3)
+  slot-0 overlay signatures: ["__NULL__", "__NULL__", "what six"]
+    distinct=1/3   FAIL (threshold: ≥3)
+
+============================================================
+TIER 2 — operator-sanity on seeds 1 (routine-lean) and 3 (aesthetic-ambient-lean)
+============================================================
+  FAIL   seed-1 routine-lean checks
+         seed 1 Tier 1 failed
+  PASS   seed-3 form=aesthetic_ambient: mood-lean overlay distribution (caption+none ≥ label+count)
+         caption=0 none=2 label+count=0
+  PASS   seed-3 CTA nullability: aesthetic-ambient may emit null CTA
+         cta_text=null
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 463 (line 17 column 28)
+[copywriter-v2] attempt 2 parse failed, retrying: Expected double-quoted property name in JSON at position 1072 (line 37 column 1)
+
+============================================================
+TIER 3  synthetic OSR collision: inject "DAY 14" into slot 1 snapshot
+============================================================
+  wall_ms: 142206
+  ASSERTION: PASS   slot 1 overlay.text "your sunday deserves this." does not contain "day 14"
+  slot-1 overlay: type=caption text="your sunday deserves this."
+  slot-1 reasoning: Caption type fits the ambient form, offering a mood-forward thought without colliding with the burned-in DAY 14 text.
+
+============================================================
+AGGREGATE
+============================================================
+  tier_1_seeds_ok:           3/5
+  tier_1_hook_homogenization: PASS (3/3 distinct)
+  tier_1_slot0_homogenization: FAIL (1/3 distinct)
+  tier_2_operator_sanity:    2/3 pass
+  tier_3_osr_collision:      PASS  slot 1 overlay.text "your sunday deserves this." does not contain "day 14"
+  total_wall_ms:             1557804
+  OVERALL:                   FAIL

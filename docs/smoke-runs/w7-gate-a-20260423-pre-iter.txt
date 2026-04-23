@@ -1,0 +1,114 @@
+=== W7 Copywriter — Gate A smoke (three tiers) ===
+brand:   nordpilates
+seeds:   5 (tier 1 runs all; tier 2 asserts on seeds 1+3; tier 3 bases on seed 1)
+
+[visual-director] slot_index=1 cross-parent primary pick: prior=b9a21be0 now=ae334bcf
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 456 (line 18 column 10)
+
+============================================================
+TIER 1  seed 1/5: "morning pilates routine for hip mobility"
+============================================================
+  wall_ms: 214632
+  STATUS: PASS
+  plan: form=routine_sequence hook_mech=narrative-intrigue subject=single-subject slots=5
+        creative_vision: Quiet morning hip mobility sequence, single teacher, soft natural light, narrative hook inviting the viewer into a daily gentle practice.
+
+  HOOK     (overlay) "the difference a slow morning makes"
+           mechanism_tie: Promises a subtle shift in the day's texture, inviting curiosity without making a loud transformation claim.
+  CTA      (null)
+  CANONICAL "A gentle morning hip mobility sequence to create space before the day begins."
+  TIKTOK   "create space before the day begins. #mobilityflow"
+  HASHTAGS [#pilates #morningroutine #hipmobility #gentleflow #mindfulmovement #wellness #mobilityflow]
+  OVERLAYS:
+    slot-0  type=none    0.00→0.00s  "(none)"
+    slot-1  type=cue     0.50→4.50s  "small movements first"
+    slot-2  type=cue     0.50→5.50s  "exhales invite softness"
+    slot-3  type=cue     0.50→6.00s  "yield to gravity"
+    slot-4  type=none    0.00→0.00s  "(none)"
+  META: retry_count=1 temperature=0.5
+[visual-director] slot_index=2 cross-parent primary pick: prior=a56afff5 now=27511ae4
+[visual-director] slot_index=3 cross-parent primary pick: prior=27511ae4 now=905b6463
+[visual-director] slot_index=4 cross-parent primary pick: prior=905b6463 now=754d3052
+
+============================================================
+TIER 1  seed 2/5: "3 moves that relieved my lower back after desk work"
+============================================================
+  wall_ms: 276974
+  STATUS: FAIL
+  error: slot 1: overlay.end_time_s=5.5 exceeds slot.target_duration_s=5
+[visual-director] slot_index=2 cross-parent primary pick: prior=6ec0fff5 now=905b6463
+[visual-director] slot_index=3 cross-parent primary pick: prior=905b6463 now=57c46b4a
+[visual-director] slot_index=5 cross-parent primary pick: prior=57c46b4a now=8fdedc89
+
+============================================================
+TIER 1  seed 3/5: "slow sunday stretching with the windows open"
+============================================================
+  wall_ms: 222193
+  STATUS: FAIL
+  error: slot 2: overlay.type='label' requires snapshot.exercise.name !== null and confidence ∈ {high, medium}; got name="cat-cow" confidence=null
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 1554 (line 42 column 39)
+
+============================================================
+TIER 1  seed 4/5: "how to set up your pelvic floor for every exercise"
+============================================================
+  wall_ms: 188079
+  STATUS: PASS
+  plan: form=hook_rev_tip hook_mech=authority-claim subject=single-subject slots=3
+        creative_vision: Single teacher demonstrates the subtle core engagement cue for pelvic floor setup, using warm acoustic audio and smooth P1 aesthetic.
+
+  HOOK     (overlay) "the core cue most people miss."
+           mechanism_tie: Executes authority-claim by stating most people miss this foundational setup, inviting the viewer to learn the correct method.
+  CTA      "save for your next morning practice."
+  CANONICAL "A subtle pelvic floor setup changes everything about your core engagement. Try this gentle cue before your next movement practice."
+  TIKTOK   "the foundation matters most. try this subtle setup before you move. #pilates"
+  HASHTAGS [#pilates #wellness #movement #pilatesgirlie #softnessoversoreness #coreengagement #pelvicfloor #morningroutine]
+  OVERLAYS:
+    slot-0  type=none    0.00→0.00s  "(none)"
+    slot-1  type=cue     0.50→7.50s  "find your deep core first."
+    slot-2  type=cue     0.50→7.00s  "maintain the connection as you lift."
+  META: retry_count=1 temperature=0.5
+[visual-director] slot_index=2 cross-parent primary pick: prior=54716a18 now=ae334bcf
+[visual-director] slot_index=4 cross-parent primary pick: prior=ae334bcf now=cd320ee1
+[copywriter-v2] attempt 1 parse failed, retrying: Unterminated string in JSON at position 461 (line 18 column 10)
+
+============================================================
+TIER 1  seed 5/5: "what six months of pilates taught me about my hips"
+============================================================
+  wall_ms: 321353
+  STATUS: FAIL
+  error: Unterminated string in JSON at position 458 (line 17 column 39)
+
+============================================================
+TIER 1 — cross-seed homogenization
+============================================================
+  hook opening signatures:  ["the difference", "the core"]
+    distinct=2/2   PASS (threshold: ≥2)
+  slot-0 overlay signatures: ["__NULL__", "__NULL__"]
+    distinct=0/2   FAIL (threshold: ≥2)
+
+============================================================
+TIER 2 — operator-sanity on seeds 1 (routine-lean) and 3 (aesthetic-ambient-lean)
+============================================================
+  PASS   seed-1 form=routine_sequence: info-lean overlay distribution (label+count+cue ≥ none)
+         info_types=3 label=0 none=2
+  FAIL   seed-3 aesthetic-ambient checks
+         seed 3 Tier 1 failed
+[copywriter-v2] attempt 1 parse failed, retrying: Expected double-quoted property name in JSON at position 453 (line 17 column 9)
+
+============================================================
+TIER 3  synthetic OSR collision: inject "DAY 14" into slot 1 snapshot
+============================================================
+  wall_ms: 86408
+  ASSERTION: FAIL   threw: Unterminated string in JSON at position 474 (line 18 column 15)
+  error: Unterminated string in JSON at position 474 (line 18 column 15)
+
+============================================================
+AGGREGATE
+============================================================
+  tier_1_seeds_ok:           2/5
+  tier_1_hook_homogenization: PASS (2/2 distinct)
+  tier_1_slot0_homogenization: FAIL (0/2 distinct)
+  tier_2_operator_sanity:    1/2 pass
+  tier_3_osr_collision:      FAIL  threw: Unterminated string in JSON at position 474 (line 18 column 15)
+  total_wall_ms:             1309639
+  OVERALL:                   FAIL
