@@ -6,6 +6,25 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## w6-subject-discontinuity-prevalence-at-director — load-bearing observation for W9 design
+
+**Status:** Active (informational, load-bearing for W9 design).
+**Discovered:** 2026-04-23, W6 Gate A smoke.
+
+**Pattern:** W6 Critic flagged `subject_discontinuity` on **3/3 real storyboards**. Root cause trace: Planner emits `subject_consistency: single-subject` + `subject_role: primary` on every slot; W4 returns ~78% same-parent candidates; W5 Director picks cross-parent ~29% per slot (observed W5 Gate A). Per-slot 29% compounds at storyboard level to ~80% probability of at least one cross-parent in a 5-slot primary-only video. W6 Critic correctly catches this. W8 orchestrator will trigger revise-loops at high rate on real nordpilates storyboards.
+
+**Tried:** nothing — this is correct Critic behavior on real data.
+
+**Not tried:** (a) tightening W5 prompt to require explicit justification for cross-parent on primary slots; (b) Critic severity tuning to downgrade `subject_discontinuity` to low when Director reasoning names a justification; (c) reducing Planner's default `subject_role=primary` assignment. All three declined at this stage — W5+W6 are shipped, orchestrator loop hasn't been tested yet.
+
+**Revisit at W9 shadow mode.** Measurement criteria: (1) how often orchestrator revise-loop converges on `approve` vs exhausts retry budget; (2) if prohibitive exhaustion rate, which of (a)/(b)/(c) materially reduces `subject_discontinuity` without de-fanging other Critic checks. Do NOT tune W5 or W6 pre-shadow.
+
+**Affected data:** none written. Pure architectural observation.
+
+**Owner hint:** planning-chat (architecture call) → W9 shadow analysis.
+
+---
+
 ## w5-duplicate-segment-across-slots-in-director — same segment_id picked for two adjacent body slots
 
 **Status:** Active, deferred to W6 Coherence Critic.
