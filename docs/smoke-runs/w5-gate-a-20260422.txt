@@ -1,0 +1,166 @@
+=== W5 Visual Director — Gate A smoke ===
+brand:   nordpilates
+seeds:   ["morning pilates routine for hip mobility","3 glute exercises that feel better than they should","day in the life of a pilates teacher"]
+
+[visual-director] slot_index=2 cross-parent primary pick: prior=b9a21be0 now=d46e70c4
+
+============================================================
+STORYBOARD 1/3   seed: "morning pilates routine for hip mobility"
+============================================================
+  wall_ms: 133767  retrieval_ms: 1613  director_ms: 109630
+  STATUS: PASS
+  plan: form=routine_sequence  hook=narrative-intrigue  posture=P1  slot_count=5
+        creative_vision: A quiet, sunlit morning hip mobility routine, framed as a gentle personal practice rather than a workout.
+  picks: total_latency_ms=109629  parallel_speedup_ratio=1  cross_parent_warnings=1
+
+  [slot 1] role=hook  target=3.5s  energy=4  subject_role=primary
+      narrative_beat: gentle invitation to a morning hip mobility practice
+      body_focus: null  segment_types: [b-roll,setup]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: d9fb5e33-8208-4fa0-abc7-74d8894bfd6b  parent=b9a21be0  in=2.00  out=5.50  dur=3.50s
+      diagnostics: similarity=0.4032  was_relaxed=false  same_parent_as_primary=null  latency=17927ms
+      reasoning: Candidate 10 provides a warm, calm, and direct gesture to the camera while already on the mat, perfectly matching the 'gentle invitation' beat and energy level 4. The home setting aligns with the lived practice brand posture.
+
+  [slot 2] role=body  target=6.5s  energy=5  subject_role=primary
+      narrative_beat: softly suggest shifting weight to open the hips
+      body_focus: ["hips"]  segment_types: [exercise]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: bba0d9f9-3f44-4266-b5db-390b28fafed9  parent=d46e70c4  in=183.00  out=189.50  dur=6.50s
+      diagnostics: similarity=0.5835  was_relaxed=false  same_parent_as_primary=false  latency=31229ms
+      reasoning: Candidate 18's warm, natural lighting and elegant setting perfectly capture the 'lived practice' brand posture. The butterfly bridge is a gentle, inviting hip opener that aligns beautifully with the 'softly suggest' narrative beat, avoiding the starker, more clinical feel of the standing options. [WARN: cross-parent pick on primary slot; prior primary parent was b9a21be0]
+
+  [slot 3] role=body  target=6.5s  energy=5  subject_role=primary
+      narrative_beat: reminder to let the breath guide the movement
+      body_focus: ["hips"]  segment_types: [exercise]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: 9f86f752-5a7a-44b1-8ac1-4ea4967fffe8  parent=d46e70c4  in=259.00  out=265.50  dur=6.50s
+      diagnostics: similarity=0.5742  was_relaxed=false  same_parent_as_primary=true  latency=22188ms
+      reasoning: Selected to maintain subject continuity. The grounded, rhythmic nature of the forearm leg extensions pairs perfectly with the narrative beat's focus on breath, and the bright home setting aligns with the brand's lived-practice posture. Expanded the trim slightly to meet the 6.5s target duration.
+
+  [slot 4] role=body  target=7s  energy=4  subject_role=primary
+      narrative_beat: encourage lingering in the space created
+      body_focus: ["hips"]  segment_types: [hold,exercise]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: 9f86f752-5a7a-44b1-8ac1-4ea4967fffe8  parent=d46e70c4  in=259.00  out=265.80  dur=6.80s
+      diagnostics: similarity=0.5710  was_relaxed=false  same_parent_as_primary=true  latency=20455ms
+      reasoning: Candidate 9 maintains primary subject continuity. The slow, deliberate leg extensions provide a visually expansive movement that pairs well with the narrative beat to linger in the space created, fitting the calm, lived-in brand posture.
+
+  [slot 5] role=close  target=4.5s  energy=3  subject_role=primary
+      narrative_beat: close with a feeling of grounded readiness for the day
+      body_focus: null  segment_types: [cooldown,transition]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: 939d50dc-cd2b-4003-a7f0-a016c0666d1e  parent=d46e70c4  in=177.50  out=182.00  dur=4.50s
+      diagnostics: similarity=0.4046  was_relaxed=false  same_parent_as_primary=true  latency=17829ms
+      reasoning: Candidate 14 maintains primary subject continuity and offers a deeply grounded, restorative pose that settles the energy perfectly for a quiet close.
+
+[visual-director] slot_index=2 cross-parent primary pick: prior=db5a6891 now=ccf94180
+
+============================================================
+STORYBOARD 2/3   seed: "3 glute exercises that feel better than they should"
+============================================================
+  wall_ms: 96800  retrieval_ms: 552  director_ms: 72718
+  STATUS: PASS
+  plan: form=routine_sequence  hook=confessional-vulnerability  posture=P1  slot_count=4
+        creative_vision: A warm, personal sequence of three gentle glute movements, framed as a pleasurable morning practice rather than a punishing workout.
+  picks: total_latency_ms=72718  parallel_speedup_ratio=1  cross_parent_warnings=1
+
+  [slot 1] role=hook  target=3s  energy=5  subject_role=primary
+      narrative_beat: Share a personal realization that glute work can actually feel restorative and pleasant.
+      body_focus: ["glutes"]  segment_types: [hold,exercise,b-roll]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: 4b94d256-326c-4375-9739-d73740cd38f4  parent=db5a6891  in=19.00  out=22.00  dur=3.00s
+      diagnostics: similarity=0.5418  was_relaxed=false  same_parent_as_primary=null  latency=24626ms
+      reasoning: The wall-supported variation of the glute bridge visually communicates the 'restorative' beat perfectly, while the bright, elegant room and calm pacing align with the brand's warm, lived-practice posture. Trimmed to a 3s window capturing a smooth, controlled repetition.
+
+  [slot 2] role=body  target=7s  energy=6  subject_role=primary
+      narrative_beat: Guide the first movement with a focus on ease, smooth motion, and quiet activation.
+      body_focus: ["glutes"]  segment_types: [exercise,setup]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: dcd979b3-9e73-4a9a-a383-8dad96d5aa43  parent=ccf94180  in=58.50  out=65.50  dur=7.00s
+      diagnostics: similarity=0.6216  was_relaxed=false  same_parent_as_primary=false  latency=17785ms
+      reasoning: Candidate 4's warm, sunlit indoor setting perfectly embodies the requested 'morning light' brand posture. The donkey kick provides a smooth, quiet glute activation that matches the narrative beat. Expanded the best window to 7s to meet the target duration. [WARN: cross-parent pick on primary slot; prior primary parent was db5a6891]
+
+  [slot 3] role=body  target=7s  energy=6  subject_role=primary
+      narrative_beat: Highlight the gentle stretch and soft strength of the second movement.
+      body_focus: ["glutes"]  segment_types: [exercise,transition]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: dcd979b3-9e73-4a9a-a383-8dad96d5aa43  parent=ccf94180  in=58.50  out=65.50  dur=7.00s
+      diagnostics: similarity=0.6170  was_relaxed=false  same_parent_as_primary=true  latency=13851ms
+      reasoning: Maintains subject continuity with the primary parent. The warm, sunlit aesthetic perfectly matches the brand posture, and the controlled donkey kick motion highlights the requested 'soft strength'. Expanded the best window to hit the 7-second target.
+
+  [slot 4] role=close  target=6s  energy=4  subject_role=primary
+      narrative_beat: Conclude with the third movement, leaving an open invitation to save this for a slow morning.
+      body_focus: ["glutes"]  segment_types: [exercise,cooldown]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: dcd979b3-9e73-4a9a-a383-8dad96d5aa43  parent=ccf94180  in=58.50  out=64.50  dur=6.00s
+      diagnostics: similarity=0.5789  was_relaxed=false  same_parent_as_primary=true  latency=16456ms
+      reasoning: Candidate 16 maintains subject continuity and its warm, sunlit aesthetic perfectly matches the 'slow morning' closing beat. The 6-second trim captures a full, controlled rep to settle the sequence.
+
+[visual-director] slot_index=1 cross-parent primary pick: prior=b9a21be0 now=57c46b4a
+[visual-director] slot_index=3 cross-parent primary pick: prior=57c46b4a now=d46e70c4
+
+============================================================
+STORYBOARD 3/3   seed: "day in the life of a pilates teacher"
+============================================================
+  wall_ms: 112828  retrieval_ms: 550  director_ms: 92475
+  STATUS: PASS
+  plan: form=day_in_the_life  hook=narrative-intrigue  posture=P1  slot_count=5
+        creative_vision: A quiet, intentional look into a teacher's day, opening with soft morning light and transitioning into focused core practice, using narrative intrigue to hold attention.
+  picks: total_latency_ms=92475  parallel_speedup_ratio=1  cross_parent_warnings=2
+
+  [slot 0] role=hook  target=3.5s  energy=4  subject_role=primary
+      narrative_beat: Establish the gentle morning vibe and invite the viewer into the daily rhythm.
+      body_focus: null  segment_types: [b-roll,setup]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: d9fb5e33-8208-4fa0-abc7-74d8894bfd6b  parent=b9a21be0  in=2.00  out=5.50  dur=3.50s
+      diagnostics: similarity=0.3858  was_relaxed=false  same_parent_as_primary=null  latency=22446ms
+      reasoning: Candidate 10 provides a warm, inviting setup on the mat that perfectly matches the 'gentle morning vibe' and 'invite the viewer' narrative beat. The energy is moderate and welcoming, avoiding the high-energy dancing or performative posing of other clips. Trimmed to 3.5s to capture the welcoming gesture.
+
+  [slot 1] role=body  target=4.5s  energy=5  subject_role=primary
+      narrative_beat: Transitioning to the mat, preparing the space with quiet intention.
+      body_focus: null  segment_types: [setup,transition,b-roll]
+      pool: 18 candidates (strict=11, relax_used=[segment_type])
+      PICK: 0f35d2c2-83d2-41c3-a21a-1fa45c8d9a9a  parent=57c46b4a  in=125.50  out=130.00  dur=4.50s
+      diagnostics: similarity=0.3837  was_relaxed=false  same_parent_as_primary=false  latency=18742ms
+      reasoning: Candidate 6 perfectly captures the 'transitioning to the mat' and 'quiet intention' narrative beat, starting from a grounded kneeling position before moving into a downward dog. The calm, well-lit studio setting aligns with the warm, invitational brand posture. [WARN: cross-parent pick on primary slot; prior primary parent was b9a21be0]
+
+  [slot 2] role=body  target=6s  energy=6  subject_role=primary
+      narrative_beat: The center of the personal practice, demonstrating embodied expertise without commanding.
+      body_focus: ["core"]  segment_types: [exercise,hold]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: 0b0b0184-1012-400c-b808-3d1c1af70f23  parent=57c46b4a  in=43.00  out=49.00  dur=6.00s
+      diagnostics: similarity=0.6039  was_relaxed=false  same_parent_as_primary=true  latency=17171ms
+      reasoning: Candidate 16 maintains subject continuity and offers a slow, controlled core movement that perfectly embodies the 'personal practice' and 'expertise' narrative beat. The steady pacing fits the energy level better than the more dynamic jumps in other same-parent options.
+
+  [slot 3] role=body  target=6.5s  energy=6  subject_role=primary
+      narrative_beat: Continuing the movement flow, emphasizing smooth, unhurried strength.
+      body_focus: ["glutes","legs"]  segment_types: [exercise,transition]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: ff0b2664-f7b5-46b3-820b-4c6a16787580  parent=d46e70c4  in=372.50  out=379.00  dur=6.50s
+      diagnostics: similarity=0.5954  was_relaxed=false  same_parent_as_primary=false  latency=13836ms
+      reasoning: Candidate 13's bright, natural-lit room with wooden floors perfectly captures the lived-in, morning practice aesthetic required by the brand posture. The quadruped movement is smooth and controlled, perfectly matching the 'unhurried strength' narrative beat. [WARN: cross-parent pick on primary slot; prior primary parent was 57c46b4a]
+
+  [slot 4] role=close  target=5s  energy=3  subject_role=primary
+      narrative_beat: Closing the practice and returning to the softness of the day's routine.
+      body_focus: null  segment_types: [cooldown,b-roll]
+      pool: 18 candidates (strict=18, relax_used=[])
+      PICK: 230c174f-a4db-44c9-ab1b-323579bb9250  parent=d46e70c4  in=433.00  out=438.00  dur=5.00s
+      diagnostics: similarity=0.4327  was_relaxed=false  same_parent_as_primary=true  latency=20279ms
+      reasoning: Candidate 3 maintains subject continuity from the primary parent and perfectly captures the 'closing the practice' beat as the subject settles into a relaxed resting pose. The suggested 5-second window matches the target duration exactly.
+
+
+============================================================
+AGGREGATE
+============================================================
+  passed:                    3/3
+  total_wall_ms:             343395
+  total_slots_across_boards: 14
+  est_gemini_cost_usd:       $0.98  (@ ~$0.07/slot)
+  cross_parent_warnings:     4
+
+  per-storyboard speedup:
+    1: PASS  wall=133767ms  speedup=1  slots=5  cross_parent_warn=1
+    2: PASS  wall=96800ms  speedup=1  slots=4  cross_parent_warn=1
+    3: PASS  wall=112828ms  speedup=1  slots=5  cross_parent_warn=2
+
+  slot_role_distribution:    {"hook":3,"body":8,"close":3}
