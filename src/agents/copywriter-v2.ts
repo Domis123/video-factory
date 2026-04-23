@@ -348,7 +348,7 @@ async function callGemini(
 ): Promise<{ parsed: CopyPackage; retryCount: number }> {
   const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
-  const maxParseAttempts = 2;
+  const maxParseAttempts = 3;
   let parseRetries = 0;
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= maxParseAttempts; attempt++) {

@@ -139,7 +139,7 @@ You emit `per_slot[i].overlay.type` from this enum:
 
 | Type | Purpose | Example text | Semantic validation |
 |---|---|---|---|
-| `label` | Name the exercise on screen. | `"glute bridge"`, `"bird dog"`, `"dead bug"` | Snapshot `exercise.name !== null` and `exercise.confidence ∈ {high, medium}`. Do not emit `label` on a clip whose exercise identity is low-confidence or null. |
+| `label` | Name the exercise on screen. | `"glute bridge"`, `"bird dog"`, `"dead bug"` | **HARD CONSTRAINT:** snapshot `exercise.name !== null` AND `exercise.confidence ∈ {high, medium}`. If `exercise.confidence` is `low` or `null` (even if `exercise.name` is populated), you MUST use `cue` (e.g., "neutral spine", "slow") or `none` instead. Validation will throw OverlayTypeConstraintError otherwise. |
 | `cue` | Instructional prompt for the viewer. | `"shoulders down"`, `"neutral spine"`, `"BREATHE"`, `"slow"`, `"feel the stretch"` | Always valid. Typically 1-4 words. May be ALL-CAPS for emphasis. |
 | `stamp` | High-contrast single-word emphasis. | `"WRONG"`, `"RIGHT"`, `"HOLD"`, `"DONE"` | Snapshot `posture ∈ {P4, P5}` (requires intimate or extreme framing). Do not emit `stamp` on wide aesthetic or medium-instructional clips. |
 | `caption` | Narrative sentence; provides context the viewer can't see. | `"softness over soreness"`, `"your morning deserves this"`, `"what if recovery was the goal"` | Maximum **2 per video** across all slots. More than 2 caption-type overlays → rewrite. |
@@ -435,20 +435,37 @@ Emit JSON matching `CopyPackageSchema`:
 }
 ```
 
-Timing guidance for overlays:
-- `start_time_s` relative to the slot's start (NOT the video's start).
-- `end_time_s` ≤ the slot's `target_duration_s`.
-- Typical sub-range: overlay appears 0.3-0.5s after slot starts, stays
-  until 0.3-0.5s before slot ends. `label` and `cue` types can be
-  brief (1-2s); `caption` types typically span most of the slot.
-- If `type === 'none'`, set both `start_time_s` and `end_time_s` to 0.
+Timing — HARD CONSTRAINTS (validation throws on violation):
+- `start_time_s` is relative to the slot's start (NOT the video's start).
+- `start_time_s >= 0`, always.
+- **`end_time_s` MUST be ≤ the slot's `target_duration_s`.** The slot
+  plays for `target_duration_s` seconds. An overlay can't outlive the
+  slot. If you cannot produce meaningful overlay text that fits entirely
+  within `[0, target_duration_s]`, use `type: 'none'` instead. Do not
+  round up, do not emit `5.5` on a `5`-second slot.
+- If `type !== 'none'`, `end_time_s > start_time_s`.
+- If `type === 'none'`, set BOTH `start_time_s` and `end_time_s` to 0.
+
+Typical sub-range (soft guidance, not a constraint): overlay appears
+0.3-0.5s after slot starts, stays until 0.3-0.5s before slot ends.
+`label` and `cue` types can be brief (1-2s); `caption` types typically
+span most of the slot.
 
 Reasoning field: brief (10-300 chars) explanation of *why* this type +
 text + timing for this slot given the snapshot. Not commentary — a
 verification artifact. Example:
-- `"label` for glute-bridge slot because exercise.name is high-confidence;
-  short 1.5s appearance at start draws attention then fades so viewer
-  watches the form."`
+- `"label for glute-bridge slot because exercise.name is high-confidence; short 1.5s appearance at start draws attention then fades so viewer watches the form."`
+
+**JSON emission rules (your output is parsed as strict JSON):**
+- Every string value is ONE line. Never emit a raw newline inside a
+  string — use `\n` if a newline is genuinely needed (e.g., Instagram
+  caption paragraph breaks).
+- Do NOT emit unescaped double-quote characters inside string values.
+  If you need to refer to a quoted word inside `reasoning` or
+  `mechanism_tie`, use single quotes or no quotes ('bird-dog' not "bird-dog").
+- Emit the entire JSON object once; do NOT wrap in a markdown code fence,
+  do NOT add prose before or after the JSON, do NOT emit trailing
+  commas.
 
 Set `metadata.copywriter_version: "w7-v1"` literally. `temperature` and
 `retry_count` will be populated/overwritten by the caller — emit the
@@ -486,25 +503,38 @@ an `OnScreenTextCollisionError` if the substring match fires.
 
 Run through this mental checklist. Any "no" → rewrite.
 
-1. Does every slot's `overlay.type` satisfy the per-type rule? (label
-   needs high/med exercise name; stamp needs P4/P5; count needs
-   exercise segment_type; caption count ≤2 across video.)
-2. Is the text-null-iff-none rule satisfied?
-3. Does the hook text execute the Planner's `hook_mechanism`, and does
+1. For every slot with `overlay.type === 'label'`: is
+   `snapshot.exercise.name !== null` AND
+   `snapshot.exercise.confidence ∈ {high, medium}`? If not, swap to
+   `cue` or `none` BEFORE emitting.
+2. For every slot with `overlay.type === 'stamp'`: is
+   `snapshot.posture ∈ {P4, P5}`? If not, swap.
+3. For every slot with `overlay.type === 'count'`: is
+   `snapshot.segment_type === 'exercise'`? If not, swap.
+4. Caption-type overlay count ≤2 across the video? If not, demote
+   captions to `cue` or `none`.
+5. For every slot: is `overlay.end_time_s ≤ slot.target_duration_s`? If
+   not, shorten the overlay window or use `type: 'none'`. Never emit
+   `end_time_s > target_duration_s`.
+6. Is the text-null-iff-none rule satisfied? (`type === 'none'` ↔
+   `text === null`; any other type ↔ non-empty string.)
+7. Does the hook text execute the Planner's `hook_mechanism`, and does
    `mechanism_tie` explain how in 10-200 chars?
-4. If delivery is overlay-only, is hook text ≤60 chars?
-5. Does `cta_text` match the form/energy/narrative-beat pattern? (Or
+8. If delivery is overlay-only, is hook text ≤60 chars?
+9. Does `cta_text` match the form/energy/narrative-beat pattern? (Or
    is it legitimately null?)
-6. Is `cta_text` never hard-sell?
-7. Are all four captions distinct (canonical + platform trims)?
-8. Does TikTok caption retain at least one hashtag if hashtags exist in
-   canonical? (Hashtag-as-hook pattern.)
-9. Are hashtags formatted (`#[a-zA-Z0-9_]+`), unique, and between 3-15?
-10. Is `voiceover_script` literally `null`?
-11. Do any per-slot overlay texts share opening syntax or word?
+10. Is `cta_text` never hard-sell?
+11. Are all four captions distinct (canonical + platform trims)?
+12. Does TikTok caption retain at least one hashtag if hashtags exist in
+    canonical? (Hashtag-as-hook pattern.)
+13. Are hashtags formatted (`#[a-zA-Z0-9_]+`), unique, and between 3-15?
+14. Is `voiceover_script` literally `null`?
+15. Do any per-slot overlay texts share opening syntax or word?
     (Anti-homogenization — rewrite if yes.)
-12. Does any per-slot overlay text contain its snapshot's
+16. Does any per-slot overlay text contain its snapshot's
     `setting.on_screen_text` as a substring? (OSR collision — rewrite.)
+17. Is every string value a single line, with no raw newlines or
+    unescaped double-quote characters inside? (JSON emission rules.)
 
 Emit only after these are all verified.
 
