@@ -1,0 +1,83 @@
+W8 Gate A smoke — orchestrator / flags / render-prep / shadow-writer
+
+Run: npx tsx src/scripts/test-orchestrator.ts
+Date: 2026-04-24
+Branch: feat/phase4-w8-orchestrator @ d5c0c97 (commit 11)
+Cost: $0 (T1 + T3; T2 gated off)
+
+Coverage:
+  T1 — state machine coverage (pure, ~$0)
+       10 synthetic scenarios exercising planNextTransition +
+       enterReviseSlotLevel + enterReviseStructural. No LLM calls,
+       no Supabase writes. Hand-rolled OrchestratorContext + stub
+       outputs (PlannerOutput/CandidateSet/StoryboardPicks/
+       CriticVerdict/CopyPackage) satisfy guard preconditions so
+       every documented transition can be asserted in isolation.
+
+  T2 — real E2E (opt-in via --tier2, ~$3)
+       Skipped for this artifact. Requires two preconditions:
+         (1) migration 011 applied to the remote Supabase so the
+             shadow_runs insert can land (see T3.shadow below for
+             the graceful-degradation evidence when the table is
+             absent — writer returns ok=false, no throw).
+         (2) operator budget sign-off (~$1/seed × 3 seeds ≈ $3).
+       Harness remains in place; re-run with --tier2 once those
+       land.
+
+  T3 — synthetic failure paths (~$0; Supabase probe only)
+       15 cases: 9-case flag truth table + shouldRunPartBByPercentage
+       determinism + 4 render-prep null-safety branches +
+       writeShadowRun graceful-degradation probe.
+
+Expected Gate A totals: 10 + 15 = 25 pass; 0 fail.
+
+Note on shadow_runs table: at the time of this run the remote
+Supabase did NOT have the shadow_runs table from migration 011.
+T3.shadow treats that as a pass condition — the writer must return
+ok=false WITHOUT throwing when the insert fails, which is what
+Phase 3.5's fire-and-forget dispatch depends on. Once migration 011
+is applied, re-running the harness will show the writer producing
+ok=false with a different error shape (FK violation for the bogus
+job_id) — still a pass.
+
+────────────────────────────────────────────────────────────────────
+
+  Tier 2 real E2E: off (pass --tier2 to enable)
+
+── Tier 1: state machine coverage ───────────────────────────
+  ✓ [T1] T1.1 happy path — QUEUED → DONE
+  ✓ [T1] T1.2 slot-level revise — PARALLEL_FANOUT → REVISING_SLOTS → DIRECTING
+  ✓ [T1] T1.3 structural revise — PARALLEL_FANOUT → REPLANNING → PLANNING
+  ✓ [T1] T1.4 revise budget exhaustion → ESCALATING_TO_HUMAN
+  ✓ [T1] T1.5 critic reject → FAILED
+  ✓ [T1] T1.6 agent_error from PLANNING → FAILED
+  ✓ [T1] T1.7 retrieval_empty + retry budget available → silent PLANNING re-entry
+  ✓ [T1] T1.8 retrieval_empty + budget exhausted → FAILED
+  ✓ [T1] T1.9 critic parse exhausted → COMMITTING (soft-approve)
+  ✓ [T1] T1.10 copywriter failure → FAILED
+
+── Tier 3: synthetic failure paths ──────────────────────────
+  ✓ [T3] T3.flag — phase35 gate wins over everything — brand pipeline_version=phase35 — Part B disabled
+  ✓ [T3] T3.flag — part_b_primary gate — Part B only — brand pipeline_version=part_b_primary — Part B is production
+  ✓ [T3] T3.flag — shadow + override=force → dual-run — job pipeline_override='force' — dual-run forced
+  ✓ [T3] T3.flag — shadow + override=part_b → dual-run (synonym) — job pipeline_override='part_b' — dual-run forced
+  ✓ [T3] T3.flag — shadow + override=skip → Part B off — job pipeline_override='skip' — Part B skipped
+  ✓ [T3] T3.flag — shadow + override=phase35 → Part B off — job pipeline_override='phase35' — Part B skipped
+  ✓ [T3] T3.flag — shadow + no override + rollout=100 → dual-run — rollout=100% — job hash bucket selected for Part B dual-run
+  ✓ [T3] T3.flag — shadow + no override + rollout=0 → Part B off — rollout=0% — job hash bucket not selected
+  ✓ [T3] T3.flag — shadow + unknown override (typo) → treated as null, gated by rollout=0 — rollout=0% — job hash bucket not selected
+  ✓ [T3] T3.flag — shouldRunPartBByPercentage determinism
+  ✓ [T3] T3.render — voiceover_script=null pass-through — voiceover_script=null — pass-through (Remotion does not read the field pre-W10)
+  ✓ [T3] T3.render — whitespace string normalizes to null — voiceover_script was empty/whitespace — normalized to null for render-safety
+  ✓ [T3] T3.render — non-empty string pass-through — voiceover_script=<21 chars> — pass-through (pre-W10 schema type z.null, reachable only post-W10)
+  ✓ [T3] T3.render — unexpected type throws
+[shadow-writer] insert failed for job 00000000-0000-0000-0000-000000000000: Could not find the table 'public.shadow_runs' in the schema cache
+  ✓ [T3] T3.shadow — writer graceful on invalid job_id — error='Could not find the table 'public.shadow_runs' in the schema cache'
+
+── Gate A summary ───────────────────────────────────────────
+  T1 state machine:     10 pass / 0 fail
+  T2 real E2E:          0 pass / 0 fail (skipped)
+  T3 synthetic:         15 pass / 0 fail
+  total:                25/25 pass
+
+✓ all active tiers passed
