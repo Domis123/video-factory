@@ -926,20 +926,28 @@ async function runT3(): Promise<void> {
 const T2_SEEDS = [
   {
     tag: 'A',
-    seed:
-      'soft golden-hour pilates aesthetic vignette — mixed subjects, no teaching',
-    expectation: 'happy-path (approve)',
+    // W7 seed 3 — aesthetic-ambient, mixed stance, no teaching.
+    seed: 'slow sunday stretching with the windows open',
+    expectation: 'happy-path (approve) — aesthetic-ambient form',
   },
   {
     tag: 'B',
+    // W7 seed 1 — routine-sequence, single-subject.
     seed: 'morning pilates routine for hip mobility',
-    expectation: 'may revise (subject_discontinuity)',
+    expectation: 'may revise (subject_discontinuity on body slots)',
   },
   {
     tag: 'C',
+    // Synthetic structural-revise seed: bulgarian split squat has exactly 2
+    // matches in nordpilates asset_segments (probed 2026-04-24 via
+    // src/scripts/probe-sparse-exercises.ts). Planner should pick
+    // `single_exercise_deep_dive` form and commit to the exercise; retrieval
+    // returns ≤2 candidates per body slot; picks degenerate to the same
+    // segment across slots; Critic's expected verdict is `revise` with
+    // `revise_scope='structural'` (pool too sparse for slot-level fix).
     seed:
-      'deep dive on the single-leg glute bridge — one exercise, five cue variations',
-    expectation: 'may trigger structural revise (library coverage)',
+      'bulgarian split squat deep dive — walk through five progressions from assisted to plyometric',
+    expectation: 'structural revise expected (bulgarian split = 2 library segments)',
   },
 ];
 
@@ -971,15 +979,11 @@ async function runT2Seed(
     pass('T2', name, note, wall);
   } catch (err) {
     fail('T2', name, (err as Error).message, Date.now() - wallT0);
-  } finally {
-    // Cleanup — leave shadow_runs row for inspection but drop the synthetic
-    // jobs row so we don't clutter the production table.
-    try {
-      await supabaseAdmin.from('jobs').delete().eq('id', jobId);
-    } catch {
-      // non-fatal
-    }
   }
+  // NOTE: intentionally NOT deleting the synthetic jobs row here. shadow_runs.job_id
+  // has ON DELETE CASCADE (migration 011), so a jobs delete wipes the shadow_runs row
+  // we just wrote and blocks post-run inspection. Operator cleans up both tables
+  // afterwards via a targeted DELETE once analysis is done.
 }
 
 async function runT2(): Promise<void> {
