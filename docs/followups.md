@@ -6,6 +6,124 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## w8-q5-signal-validation-not-exercised-in-gate-a — Critic revise_scope library-inventory logic untested at Gate A
+
+**Status:** Active, load-bearing for W9 signal quality.
+**Discovered:** 2026-04-24, W8 Gate A Tier 2.
+
+**Pattern:** Gate A Tier 2 Seed C was designed to trigger Critic's revise_scope='structural' via library-inventory injection (Q5 option a). Seed C did not reach that logic: Critic approved on first fanout (either Planner didn't commit to single_exercise_deep_dive as intended, or 2 library matches + Critic tolerance was enough). Copywriter-v2 then died on parse retry (separate W7 issue). Net: library-inventory injection is live in code but unvalidated as a behavioral change.
+
+**Tried:** Seed C natural seed "bulgarian split squat deep dive." Insufficient trigger — sparse library exists but not sparse enough, or Planner didn't commit to deep-dive form.
+
+**Not tried:** hand-assembled Planner commitment forcing form_id='single_exercise_deep_dive' against an exercise with ≤2 library segments. This requires a synthetic test fixture that injects Planner output rather than running Planner from seed.
+
+**Revisit:** add to W9 shadow measurement surface. If shadow produces no structural revises in first 20 jobs, construct synthetic test. Alternative: measure Critic's revise_scope distribution across real shadow jobs and see if structural ever emits.
+
+**Affected data:** none. Code path is live; behavior unverified.
+
+**Owner hint:** W9 shadow-mode brief author + Critic prompt tuner.
+
+---
+
+## w8-nordpilates-revise-exhaustion-rate-tier-2-baseline — 2 of 3 Gate A seeds exhausted revise budget
+
+**Status:** Active, load-bearing for W9 operator capacity planning.
+**Discovered:** 2026-04-24, W8 Gate A Tier 2.
+
+**Pattern:** Seeds A (aesthetic-ambient) and B (routine-sequence hip mobility) both exhausted the 2-cycle revise budget and escalated to human. Seed C failed on Copywriter parse. Zero seeds completed to shadow_runs.part_b_terminal_state='completed'. At this rate, shadow mode will produce heavy operator escalation load.
+
+**Tried:** nothing at W8 — brief called this exact pattern acceptable and named W9 shadow as the measurement surface.
+
+**Not tried:** (a) widening revise budget from 2 to 3, (b) investigating whether escalated jobs are genuinely unfixable vs Director-retrieval-thrashing (see next followup).
+
+**Revisit:** W9 shadow measurement. Track brief_review escalation rate on part_b_shadow jobs. If exhaustion rate >30% sustained, widen budget to 3. If escalated jobs, on operator review, would have shipped with a 3rd revise cycle but not 4th — budget=3 is the right answer. If operator rejects escalated jobs regardless of cycle count — structural issue with retrieval or Critic prompt.
+
+**Affected data:** shadow_runs rows will skew heavily toward failed_after_revise_budget terminal state in early shadow.
+
+**Owner hint:** W9 shadow operator.
+
+---
+
+## w8-slot-level-revise-thrashing-without-convergence — Director re-picks same candidates on revise-loop
+
+**Status:** Active, load-bearing for Q5 calibration.
+**Discovered:** 2026-04-24, W8 Gate A Tier 2 Seed B.
+
+**Pattern:** Seed B's first Critic verdict flagged subject_discontinuity on slots 2+4 as slot_level. Orchestrator re-invoked Director on those slots. Director's re-picks produced identical (or near-identical) clips; Critic flagged the same issue again. Second re-invocation same result. Revise budget exhausted.
+
+Two possibilities, not yet distinguished:
+(a) Critic should have flagged structural, not slot_level (library-inventory teaching didn't catch this case well enough)
+(b) Retrieval returned identical candidate pools across re-invocations (Director is deterministic given same candidates)
+
+**Tried:** nothing — observed at Gate A, not blocking.
+
+**Not tried:** (a) inspect candidate pool diversity across revise-cycle Director calls (log the candidate_ids fetched), (b) manually inspect seed B's library availability for the flagged slots' body_focus to determine if structural was warranted.
+
+**Revisit:** W9 shadow. When slot_level revise exhausts, retrospectively query library inventory and ask: "does form × library actually support this commitment?" Informs Critic prompt tuning on library-inventory teaching.
+
+**Affected data:** shadow_runs rows where revise_loop_iterations=2 and terminal_state=failed_after_revise_budget. Candidate pool logging not yet captured (would need orchestrator instrumentation).
+
+**Owner hint:** W9 shadow analyst + Critic prompt tuner.
+
+---
+
+## w8-copywriter-parse-fragility-seed-c — Copywriter-v2 parse failure despite W7 commit 9 fix
+
+**Status:** Active, informational.
+**Discovered:** 2026-04-24, W8 Gate A Tier 2 Seed C.
+
+**Pattern:** Copywriter-v2 failed with "Unexpected end of JSON input" on Seed C (bulgarian split squat deep dive) despite W7 commit 2597f7f's maxOutputTokens 8000 + aggressive bounds strip. Pattern resembles gemini-3.1-pro-preview-stability-with-rich-response-schemas followup — Copywriter's deep-dive form may push prompt payload closer to token budget than other forms, or structured-output stability degrades intermittently.
+
+**Tried:** nothing at W8 — separate concern from W8 scope.
+
+**Not tried:** (a) further maxOutputTokens bump, (b) prompt payload trimming for deep-dive form, (c) model-fallback retry policy (linked to gemini-3.1-pro-preview-stability followup).
+
+**Revisit:** W9 shadow. If production shows Copywriter parse exhaustion >2% on any form type, investigate. Linked to gemini-3.1-pro-preview-stability followup; solution may be shared (model-fallback or payload trim).
+
+**Affected data:** shadow_runs rows where Copywriter failed will have terminal_state=failed_agent_error; check part_b_failure_reason field in shadow for parse exhaustion attribution.
+
+**Owner hint:** W9 shadow analyst.
+
+---
+
+## w8-phase-3-5-unaffected-check-via-worker-harness — Gate A harness bypassed BullMQ worker
+
+**Status:** Resolved at deploy-time (manual verification).
+**Discovered:** 2026-04-24, W8 Gate A Tier 2.
+
+**Pattern:** test-orchestrator.ts called runPipelineV2 directly, bypassing the BullMQ planning worker. Automated verification that Phase 3.5 dispatch is unaffected by Part B code loading was not in Gate A scope. Risk: Part B code loading could have caused side effects at worker startup that Gate A couldn't catch.
+
+**Tried:** post-deploy manual verification on 2026-04-24: submitted verification job cbd6d445 against pipeline_version=phase35 brand; Phase 3.5 reached brief_review on schedule; dispatcher correctly logged "Part B disabled"; zero partb_* events emitted; job_events shape matched Phase 3.5 baseline.
+
+**Not tried:** automated worker-harness test. Deferred as W8.1 or W9 pre-shadow check if desired.
+
+**Revisit:** W9 brief decides whether to add automated worker-harness test before first brand flip, or rely on ongoing manual verification during shadow ramp.
+
+**Affected data:** none. Phase 3.5 verified unaffected.
+
+**Owner hint:** W9 brief author.
+
+---
+
+## w8-job-events-to-status-varchar-30-ceiling — Part B event names required translation map vs naive prefix
+
+**Status:** Active, cosmetic code simplification.
+**Discovered:** 2026-04-24, W8 post-Gate-A fix commit 9b83f56.
+
+**Pattern:** job_events.to_status is varchar(30). 7 of 20 TransitionEventType enum values overflow when prefixed with "partb_" (e.g. partb_snapshot_building_started = 31 chars). Resolution at W8: DB_EVENT_NAMES translation map mapping each enum value to a ≤30-char string. Works correctly but adds indirection; future state additions must also fit in 30 chars after translation.
+
+**Tried:** translation map (shipped in W8 commit 9b83f56).
+
+**Not tried:** migration 012 widening to_status to varchar(64) + collapsing translation map to a simple prefix concat. Cosmetic refactor; no correctness benefit.
+
+**Revisit:** when W10 or later adds new Part B transitions, if any overflow forces awkward translation, schedule migration 012. Non-urgent.
+
+**Affected data:** none. Translation map is deterministic; event rows are queryable by to_status prefix partb_.
+
+**Owner hint:** whoever adds new Part B transition types.
+
+---
+
 ## w7-slot0-homogenization-metric-treats-none-as-collision — test-harness false failure
 
 **Status:** Active (test-harness tuning, not prompt iteration).
