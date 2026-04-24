@@ -13,13 +13,11 @@
  * orchestrator can distinguish retriable (LLM variance) from non-retriable
  * (prompt bug).
  *
- * The segment snapshot reused from W6 (`CandidateMetadataSnapshot`) doesn't
- * carry every field the W7 prompt needs, so this file defines a richer
- * `CopywriterSegmentSnapshot` and a local fetch helper that extracts from
- * `asset_segments.segment_v2` JSONB. W6's shipped snapshot is NOT modified
- * (Rule 36 — additive only).
+ * Segment snapshot type + fetch helper live in `src/lib/segment-snapshot.ts`
+ * (extracted in W8 commit 3 so W6 Critic and W7 Copywriter can share the
+ * same shape and the orchestrator builds it once per job).
  *
- * Not yet wired. W8 orchestrator is first consumer; W9 shadows.
+ * W8 orchestrator is the first consumer; W9 shadows.
  *
  * File: src/agents/copywriter-v2.ts
  */
@@ -31,8 +29,11 @@ import { GoogleGenAI } from '@google/genai';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { env } from '../config/env.js';
-import { supabaseAdmin } from '../config/supabase.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
+import {
+  buildSegmentSnapshots,
+  type SegmentSnapshot,
+} from '../lib/segment-snapshot.js';
 import {
   CopyPackageSchema,
   type CopyPackage,
@@ -182,131 +183,6 @@ const COPY_JSON_SCHEMA = stripAggressiveBounds(
 ) as Record<string, unknown>;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Snapshot — richer than W6's CandidateMetadataSnapshot
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface CopywriterSegmentSnapshot {
-  segment_id: string;
-  segment_type: string;
-  duration_s: number;
-  exercise: {
-    name: string | null;
-    confidence: 'high' | 'medium' | 'low' | null;
-  };
-  setting: {
-    location: string;
-    equipment_visible: string[];
-    on_screen_text: string | null;
-  };
-  posture: string;
-  body_focus: string[];
-  description: string;
-}
-
-interface SegmentRowForCopywriter {
-  id: string;
-  segment_type: string | null;
-  start_s: number | null;
-  end_s: number | null;
-  description: string | null;
-  segment_v2: unknown;
-}
-
-export async function fetchCopywriterSnapshots(
-  segmentIds: string[],
-): Promise<Map<string, CopywriterSegmentSnapshot>> {
-  const out = new Map<string, CopywriterSegmentSnapshot>();
-  if (segmentIds.length === 0) return out;
-  const { data, error } = await supabaseAdmin
-    .from('asset_segments')
-    .select('id, segment_type, start_s, end_s, description, segment_v2')
-    .in('id', segmentIds);
-  if (error) {
-    throw new Error(`[copywriter-v2] snapshot fetch failed: ${error.message}`);
-  }
-  for (const row of (data ?? []) as SegmentRowForCopywriter[]) {
-    out.set(row.id, rowToCopywriterSnapshot(row));
-  }
-  for (const id of segmentIds) {
-    if (!out.has(id)) {
-      throw new Error(
-        `[copywriter-v2] snapshot fetch: segment_id ${id} not found in asset_segments`,
-      );
-    }
-  }
-  return out;
-}
-
-function rowToCopywriterSnapshot(
-  r: SegmentRowForCopywriter,
-): CopywriterSegmentSnapshot {
-  const v2 = (r.segment_v2 ?? {}) as Record<string, unknown>;
-  const exercise = (v2['exercise'] ?? {}) as Record<string, unknown>;
-  const setting = (v2['setting'] ?? {}) as Record<string, unknown>;
-  const audio = (v2['audio'] ?? {}) as Record<string, unknown>;
-  const framing = (v2['framing'] ?? {}) as Record<string, unknown>;
-
-  const duration =
-    r.start_s != null && r.end_s != null ? Math.max(0, r.end_s - r.start_s) : 0;
-
-  const bodyFocus = Array.isArray(exercise['body_regions'])
-    ? (exercise['body_regions'] as unknown[]).filter(
-        (x): x is string => typeof x === 'string',
-      )
-    : [];
-
-  const equipment = Array.isArray(setting['equipment_visible'])
-    ? (setting['equipment_visible'] as unknown[]).filter(
-        (x): x is string => typeof x === 'string',
-      )
-    : [];
-
-  const rawConfidence = exercise['name_confidence'];
-  const confidence =
-    rawConfidence === 'high' ||
-    rawConfidence === 'medium' ||
-    rawConfidence === 'low'
-      ? rawConfidence
-      : null;
-
-  // on_screen_text lives under segment_v2.audio per W6's reading; some v2
-  // variants nested it under setting instead — check both to be robust to the
-  // schema-v2 migration.
-  const ostFromAudio =
-    typeof audio['on_screen_text'] === 'string'
-      ? (audio['on_screen_text'] as string)
-      : null;
-  const ostFromSetting =
-    typeof setting['on_screen_text'] === 'string'
-      ? (setting['on_screen_text'] as string)
-      : null;
-
-  return {
-    segment_id: r.id,
-    segment_type: r.segment_type ?? 'unknown',
-    duration_s: +duration.toFixed(2),
-    exercise: {
-      name:
-        typeof exercise['name'] === 'string'
-          ? (exercise['name'] as string)
-          : null,
-      confidence,
-    },
-    setting: {
-      location:
-        typeof setting['location'] === 'string'
-          ? (setting['location'] as string)
-          : 'unknown',
-      equipment_visible: equipment,
-      on_screen_text: ostFromAudio ?? ostFromSetting,
-    },
-    posture: typeof framing['posture'] === 'string' ? (framing['posture'] as string) : 'unknown',
-    body_focus: bodyFocus,
-    description: r.description ?? '',
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Public entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -317,7 +193,7 @@ export interface WriteCopyInput {
   // Optional: pre-fetched snapshots (e.g., synthetic tests forcing specific
   // on_screen_text). When omitted, the wrapper queries Supabase for the picked
   // segment_ids' segment_v2 JSONB.
-  segmentSnapshots?: Map<string, CopywriterSegmentSnapshot>;
+  segmentSnapshots?: Map<string, SegmentSnapshot>;
 }
 
 export async function writeCopyForStoryboard(
@@ -331,9 +207,7 @@ export async function writeCopyForStoryboard(
     );
   }
 
-  const snapshots =
-    input.segmentSnapshots ??
-    (await fetchCopywriterSnapshots(picks.picks.map((p) => p.picked_segment_id)));
+  const snapshots = input.segmentSnapshots ?? (await buildSegmentSnapshots(picks));
 
   const prompt = renderPrompt(plannerOutput, picks, brandPersona, snapshots);
 
@@ -367,7 +241,7 @@ function renderPrompt(
   plannerOutput: PlannerOutput,
   picks: StoryboardPicks,
   persona: BrandPersona,
-  snapshots: Map<string, CopywriterSegmentSnapshot>,
+  snapshots: Map<string, SegmentSnapshot>,
 ): string {
   const snapshotsByPick = buildSnapshotsBySlot(plannerOutput, picks, snapshots);
   return PROMPT_TEMPLATE.replace(
@@ -381,11 +255,11 @@ function renderPrompt(
 function buildSnapshotsBySlot(
   plannerOutput: PlannerOutput,
   picks: StoryboardPicks,
-  snapshots: Map<string, CopywriterSegmentSnapshot>,
+  snapshots: Map<string, SegmentSnapshot>,
 ): Array<{
   slot_index: number;
   slot_id: string;
-  snapshot: CopywriterSegmentSnapshot | null;
+  snapshot: SegmentSnapshot | null;
 }> {
   const pickByIndex = new Map(picks.picks.map((p) => [p.slot_index, p]));
   return plannerOutput.slots.map((slot) => {
@@ -468,7 +342,7 @@ function validateOverlayTypeConstraints(
   pkg: CopyPackage,
   plannerOutput: PlannerOutput,
   picks: StoryboardPicks,
-  snapshots: Map<string, CopywriterSegmentSnapshot>,
+  snapshots: Map<string, SegmentSnapshot>,
 ): void {
   const pickBySlotIndex = new Map(picks.picks.map((p) => [p.slot_index, p]));
   const slotsByIndex = new Map(plannerOutput.slots.map((s) => [s.slot_index, s]));
@@ -666,7 +540,7 @@ function validateHashtagFormat(pkg: CopyPackage): void {
 function validateOnScreenTextCollision(
   pkg: CopyPackage,
   picks: StoryboardPicks,
-  snapshots: Map<string, CopywriterSegmentSnapshot>,
+  snapshots: Map<string, SegmentSnapshot>,
 ): void {
   const pickBySlotIndex = new Map(picks.picks.map((p) => [p.slot_index, p]));
   for (const entry of pkg.per_slot) {
@@ -724,7 +598,7 @@ export function renderPromptForTest(
   plannerOutput: PlannerOutput,
   picks: StoryboardPicks,
   persona: BrandPersona,
-  snapshots: Map<string, CopywriterSegmentSnapshot>,
+  snapshots: Map<string, SegmentSnapshot>,
 ): string {
   return renderPrompt(plannerOutput, picks, persona, snapshots);
 }

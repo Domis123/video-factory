@@ -32,11 +32,11 @@ import { retrieveCandidates } from '../agents/candidate-retrieval-v2.js';
 import { loadBrandPersona } from '../agents/brand-persona.js';
 import { embedText } from '../lib/clip-embed.js';
 import { pickClipsForStoryboard } from '../agents/visual-director.js';
+import { writeCopyForStoryboard } from '../agents/copywriter-v2.js';
 import {
-  writeCopyForStoryboard,
-  fetchCopywriterSnapshots,
-  type CopywriterSegmentSnapshot,
-} from '../agents/copywriter-v2.js';
+  buildSegmentSnapshots,
+  type SegmentSnapshot,
+} from '../lib/segment-snapshot.js';
 import type { PlannerOutput } from '../types/planner-output.js';
 import type { StoryboardPicks } from '../types/slot-pick.js';
 import type { BrandPersona } from '../types/brand-persona.js';
@@ -61,7 +61,7 @@ interface Tier1Result {
   seed: string;
   plannerOutput?: PlannerOutput;
   picks?: StoryboardPicks;
-  snapshots?: Map<string, CopywriterSegmentSnapshot>;
+  snapshots?: Map<string, SegmentSnapshot>;
   copyPackage?: CopyPackage;
   wall_ms: number;
   ok: boolean;
@@ -113,9 +113,7 @@ async function runTier1Seed(
     });
     result.picks = picks;
 
-    const snapshots = await fetchCopywriterSnapshots(
-      picks.picks.map((p) => p.picked_segment_id),
-    );
+    const snapshots = await buildSegmentSnapshots(picks);
     result.snapshots = snapshots;
 
     const copyPackage = await writeCopyForStoryboard({
@@ -173,7 +171,7 @@ async function runTier3Collision(
         `basis snapshots missing slot 1 segment ${slot1Pick.picked_segment_id}`,
       );
     }
-    const forgedSnap: CopywriterSegmentSnapshot = {
+    const forgedSnap: SegmentSnapshot = {
       ...originalSnap,
       setting: { ...originalSnap.setting, on_screen_text: 'DAY 14' },
     };
