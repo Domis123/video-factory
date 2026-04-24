@@ -53,6 +53,13 @@ export type Severity = (typeof SEVERITY_VALUES)[number];
 export const VERDICT_VALUES = ['approve', 'revise', 'reject'] as const;
 export type Verdict = (typeof VERDICT_VALUES)[number];
 
+// W8 addition — when verdict='revise', tells the orchestrator whether the
+// fix is a slot re-pick (Director re-invoke) or a full re-plan. On verdict
+// 'approve'/'reject' the field is ignored but must still be emitted for
+// schema conformance; default `slot_level` covers the degenerate case.
+export const REVISE_SCOPE_VALUES = ['slot_level', 'structural'] as const;
+export type ReviseScope = (typeof REVISE_SCOPE_VALUES)[number];
+
 export const CriticIssueSchema = z.object({
   issue_type: z.enum(ISSUE_TYPE_VALUES),
   severity: z.enum(SEVERITY_VALUES),
@@ -66,6 +73,7 @@ export type CriticIssue = z.infer<typeof CriticIssueSchema>;
 // The minimal shape Gemini is asked to emit. No wrapper-populated fields.
 export const GeminiCriticResponseSchema = z.object({
   verdict: z.enum(VERDICT_VALUES),
+  revise_scope: z.enum(REVISE_SCOPE_VALUES).default('slot_level'),
   overall_reasoning: z.string().min(20).max(500),
   issues: z.array(CriticIssueSchema),
 });
@@ -74,6 +82,7 @@ export type GeminiCriticResponse = z.infer<typeof GeminiCriticResponseSchema>;
 
 export const CriticVerdictSchema = z.object({
   verdict: z.enum(VERDICT_VALUES),
+  revise_scope: z.enum(REVISE_SCOPE_VALUES).default('slot_level'),
   overall_reasoning: z.string().min(20).max(500),
   issues: z.array(CriticIssueSchema),
   // Diagnostic — populated wrapper-side.

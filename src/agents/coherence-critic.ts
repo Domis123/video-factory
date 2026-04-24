@@ -40,6 +40,7 @@ import {
 import type { PlannerOutput, PlannerSlot } from '../types/planner-output.js';
 import type { StoryboardPicks, SlotPick } from '../types/slot-pick.js';
 import type { BrandPersona } from '../types/brand-persona.js';
+import type { LibraryInventory } from '../types/library-inventory.js';
 
 const CRITIC_MODEL = process.env['GEMINI_CRITIC_MODEL'] || 'gemini-3.1-pro-preview';
 const TEMPERATURE = 0.3;
@@ -117,6 +118,13 @@ export interface ReviewStoryboardInput {
   // Optional: pre-fetched snapshots (e.g., synthetic tests). When omitted, the
   // wrapper queries Supabase for the picked segment_ids' segment_v2 JSONB.
   candidateSnapshots?: CandidateMetadataSnapshot[];
+  // W8 addition — the same inventory the Planner consumed when committing to
+  // form_id + hook_mechanism. Injected so the Critic can distinguish
+  // slot-level fixes (revise_scope='slot_level') from plan-level mismatches
+  // (revise_scope='structural'). When omitted, the prompt falls back to a
+  // "not provided" placeholder and the model should default to slot_level
+  // unless issues are clearly structural regardless of library.
+  libraryInventory?: LibraryInventory;
 }
 
 export async function reviewStoryboard(
@@ -147,6 +155,7 @@ export async function reviewStoryboard(
     brandPersona,
     snapshots,
     precompute,
+    input.libraryInventory,
   );
   const response = await callGemini(prompt);
 
@@ -156,6 +165,7 @@ export async function reviewStoryboard(
   const latency_ms = Date.now() - t0;
   return CriticVerdictSchema.parse({
     verdict: response.verdict,
+    revise_scope: response.revise_scope,
     overall_reasoning: response.overall_reasoning,
     issues: response.issues,
     latency_ms,
@@ -366,10 +376,14 @@ function renderPrompt(
   persona: BrandPersona,
   snapshots: CandidateMetadataSnapshot[],
   precompute: PrecomputeSignals,
+  libraryInventory: LibraryInventory | undefined,
 ): string {
   const slotBlocks = renderSlotBlocks(plannerOutput.slots, picks.picks, snapshots);
   const allowedPostures = collectAllowedPostures(persona);
   const personaTenets = formatPersonaTenets(persona);
+  const inventoryBlock = libraryInventory
+    ? JSON.stringify(libraryInventory, null, 2)
+    : '(library inventory not provided — default revise_scope to `slot_level` unless issues are clearly structural regardless of library)';
 
   return PROMPT_TEMPLATE.replace(
     '{precompute_observations}',
@@ -391,7 +405,8 @@ function renderPrompt(
       persona.allowed_color_treatments.join(', ') || '(none declared)',
     )
     .replace('{allowed_postures}', allowedPostures)
-    .replace('{persona_tenets}', personaTenets);
+    .replace('{persona_tenets}', personaTenets)
+    .replace('{library_inventory_json}', inventoryBlock);
 }
 
 function renderSlotBlocks(

@@ -43,6 +43,16 @@ You do NOT fix the storyboard. The orchestrator (downstream) uses your verdict t
 4. If 0–1 `medium` + any `low` issues: verdict = `approve` with issue list preserved.
 5. If 0 issues: verdict = `approve`, `issues: []`.
 
+## `revise_scope` field
+
+When your verdict is `revise`, emit one of:
+
+- **`slot_level`** — specific slots can be re-picked by the Director to fix the issue. Examples: subject_discontinuity on a single slot, duplicate_segment_across_slots, duration overflow on one slot, overlay_text_visual_collision on one slot. The issue is fixable by swapping one or a few clips from the same candidate pool.
+
+- **`structural`** — the underlying plan is wrong given the library. Examples: form commitment requires content the library doesn't sufficiently provide; hook mechanism doesn't match the narrative shape any set of picks could support; subject_consistency stance doesn't fit the idea when paired with available content. Fixing requires re-planning, not re-picking.
+
+When verdict is `approve` or `reject`, `revise_scope` is ignored by the orchestrator but must still be emitted (as `slot_level`) for schema conformance.
+
 ## Pre-compute observations (MUST address)
 
 The following mechanical signals were computed by the wrapper BEFORE this prompt was built. These are **observations**, not verdicts — you still render final judgment. But if an observation represents a real problem, you MUST include it in your `issues` list. Missing a pre-announced observation is a failure mode.
@@ -87,6 +97,18 @@ Each block shows the slot's plan alongside the Director's pick + the picked clip
 **Persona tenets (from prose body):**
 {persona_tenets}
 
+### Library inventory for your consideration
+
+You are shown the library inventory the Planner used to commit to this form and hook mechanism. The inventory includes total segment count, segment-type distribution, top body-region distribution, top exercise clusters (post-normalization), and equipment distribution. Use it to evaluate whether the form commitment is achievable.
+
+Example: if the Planner committed to `form_id: single_exercise_deep_dive` for "side lying leg lift" and the library shows 24 segments of that exercise, the form is well-supported. If the Planner committed to the same form for an exercise with only 1-2 library segments, the plan is structurally underspecified — even perfect picks can't deliver the form's promise.
+
+You do NOT use the inventory to second-guess good picks. You use it to distinguish "the picks are wrong" (slot_level) from "the plan is wrong given what's available" (structural).
+
+```json
+{library_inventory_json}
+```
+
 ## Evaluation checklist
 
 Work through these before returning your verdict. For each, decide: is this a problem in THIS storyboard? If yes, add an issue with the appropriate `issue_type`, `severity`, `affected_slot_indices`, `note`, and `suggested_fix`.
@@ -125,6 +147,7 @@ Strict JSON matching the responseSchema. No prose outside JSON. No code fences. 
 ```json
 {
   "verdict": "revise",
+  "revise_scope": "slot_level",
   "overall_reasoning": "Storyboard is coherent on narrative and posture but slots 3 and 4 both pick segment 9f86f752 at the same in_point, which would show the viewer the same clip twice in a row. Energy arc is otherwise clean.",
   "issues": [
     {

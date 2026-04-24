@@ -10,6 +10,9 @@ import { createServer } from 'node:http';
 import { env } from './config/env.js';
 import { createWorker, createQueue, QUEUE_NAMES } from './config/redis.js';
 import { runPlanning, runRenderPipeline } from './workers/pipeline.js';
+import { supabaseAdmin } from './config/supabase.js';
+import { computePipelineFlags } from './orchestrator/feature-flags.js';
+import { runPipelineV2 } from './orchestrator/orchestrator-v2.js';
 import type { Job as BullJob } from 'bullmq';
 
 console.log(`\n🎬 Video Factory — Worker ${env.WORKER_ID}`);
@@ -18,15 +21,67 @@ console.log(`   Temp dir: ${env.RENDER_TEMP_DIR}`);
 console.log(`   Queues: ${Object.values(QUEUE_NAMES).join(', ')}\n`);
 
 // ── Planning Worker ──
-// Triggered when n8n moves a job to `planning` status
+// Triggered when n8n moves a job to `planning` status.
+//
+// W8 (2026-04-24): after Phase 3.5 planning completes, this worker
+// consults the 3-tier feature flag composition and fire-and-forgets a
+// Part B shadow pipeline dispatch alongside. Phase 3.5 is the source of
+// truth during shadow; Part B errors MUST NOT propagate back into the
+// BullMQ job's lifecycle. The `.catch(...)` guards against this even
+// though `runPipelineV2` is itself designed to never throw on normal
+// failure paths (agent errors → terminal FAILED, not thrown).
 const planningWorker = createWorker(
   QUEUE_NAMES.planning,
   async (job: BullJob<{ jobId: string }>) => {
-    console.log(`[worker:planning] Processing job ${job.data.jobId}`);
-    await runPlanning(job.data.jobId);
+    const { jobId } = job.data;
+    console.log(`[worker:planning] Processing job ${jobId}`);
+    await runPlanning(jobId);
+    dispatchPartBIfEnabled(jobId);
   },
   { concurrency: 1 }, // One planning job at a time (API rate limits)
 );
+
+/**
+ * Non-blocking helper. Resolves the brand_id for the completed job, computes
+ * 3-tier pipeline flags, and fire-and-forgets `runPipelineV2` when flags
+ * route Part B on. All failures (brand lookup error, flag decide error,
+ * runPipelineV2 rejection) log and return — none propagate.
+ */
+function dispatchPartBIfEnabled(jobId: string): void {
+  (async () => {
+    const { data: jobRow, error: jobErr } = await supabaseAdmin
+      .from('jobs')
+      .select('brand_id')
+      .eq('id', jobId)
+      .single();
+    if (jobErr || !jobRow) {
+      console.warn(
+        `[w8] Part B dispatch skipped — job ${jobId} lookup failed: ${jobErr?.message ?? 'not found'}`,
+      );
+      return;
+    }
+    const brandId = (jobRow as { brand_id: string }).brand_id;
+
+    const flags = await computePipelineFlags(brandId, jobId);
+    if (!flags.runPartB) {
+      console.log(`[w8] Part B not routed for job ${jobId} — ${flags.reason}`);
+      return;
+    }
+
+    console.log(`[w8] Dispatching Part B shadow for job ${jobId} — ${flags.reason}`);
+    runPipelineV2(jobId)
+      .then((summary) => {
+        console.log(
+          `[w8] Part B shadow complete for job ${jobId} — terminal=${summary.terminalState} runId=${summary.runId ?? 'none'} walltime=${summary.walltime_ms}ms`,
+        );
+      })
+      .catch((err) => {
+        console.error(`[w8] Part B shadow threw for job ${jobId}:`, err);
+      });
+  })().catch((err) => {
+    console.error(`[w8] Part B dispatch wrapper threw for job ${jobId}:`, err);
+  });
+}
 
 planningWorker.on('completed', (job) => {
   console.log(`[worker:planning] Completed: ${job.data.jobId}`);
