@@ -57,6 +57,12 @@ const envSchema = z.object({
   // Single fallback track UUID used when ENABLE_MUSIC_SELECTION=false.
   // Must be a row ID in music_tracks. Empty string = render without background music.
   FALLBACK_MUSIC_TRACK_ID: z.string().default(''),
+
+  // Phase 4 Part B W8 — Tier 3 percentage rollout for Part B shadow runs.
+  // Only consulted for brands with pipeline_version='part_b_shadow' and no
+  // job-level pipeline_override. Deterministic per job.id (FNV hash mod 100).
+  // 0 = no rollout (default); 100 = all eligible jobs dual-run.
+  PART_B_ROLLOUT_PERCENT: z.coerce.number().int().min(0).max(100).default(0),
 });
 
 const parsed = envSchema.safeParse(process.env);
