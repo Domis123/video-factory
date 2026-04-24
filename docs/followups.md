@@ -6,6 +6,86 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## w7-slot0-homogenization-metric-treats-none-as-collision — test-harness false failure
+
+**Status:** Active (test-harness tuning, not prompt iteration).
+**Discovered:** 2026-04-24, W7 Gate A smoke (both pre-fix and post-fix runs).
+
+**Pattern:** Gate A's `tier_1_slot0_homogenization` metric signatures the first 8 chars of `per_slot[0].overlay.text`. When `hook.delivery='overlay'`, the hook renders separately on slot 0 and the prompt correctly sets `per_slot[0].overlay.type='none', text=null` — the harness signatures this as `__NULL__`. Across 5 seeds that picked `overlay` delivery 3 times (narrative-intrigue, visual-pattern-interrupt, authority-claim), the `__NULL__` signature collides with itself and trips the ≥4 distinct threshold. The seeds are behaving correctly; the metric is wrong about what to count.
+
+**Tried:** two rounds of prompt hardening (commit 9965138, commit 2597f7f). Both left the metric FAIL because the failure is not prompt-side.
+
+**Not tried:** (a) exclude `__NULL__` signatures from the distinct count; (b) signature `(type, text_prefix)` tuple instead of text-only; (c) replace the metric with a downstream check that only fires when 4+ seeds emit non-null slot-0 text that all collapses to one cluster.
+
+**Revisit at W8 Orchestrator design** when Gate A assertions are re-examined for orchestrator-loop relevance. Low priority — overall Tier 1 pass rate (5/5 on final smoke) is the load-bearing signal.
+
+**Affected data:** none. Smoke-run artifact only.
+
+**Owner hint:** W8 brief author.
+
+---
+
+## w7-parse-retry-headroom-in-production — max 3 attempts may be tight under real traffic
+
+**Status:** Active (production-monitoring flag).
+**Discovered:** 2026-04-24, W7 Gate A smoke (second run, commit 465ae1e).
+
+**Pattern:** W7 Copywriter allows up to 3 total attempts per call (1 initial + 2 retries, per brief §Retry). On the second Gate A smoke, 2/5 seeds exhausted all 3 attempts with JSON parse malformation (unterminated strings / unquoted property names). Root cause was upstream: aggressive Zod bounds in the responseSchema appeared to destabilize Gemini 3.1 Pro Preview's JSON emission on rich schemas. Fixed in commit 2597f7f by stripping additional bounds — after fix, final smoke saw 0 parse retries across 5 seeds. But the retry headroom under the old config was visibly thin: 2 of 5 seeds hit the cap, meaning production traffic at 10-30 jobs/day could surface the same pattern whenever Gemini's emission stability drifts.
+
+**Tried:** parameter-layer mitigation (commit 2597f7f) — maxOutputTokens 4000→8000, stripAggressiveBounds() for hashtags regex + min/max on reasoning/captions/hook fields. Final smoke 5/5 pass with retry_count=0.
+
+**Not tried:** (a) bumping retry ceiling from 2→3 (4 total attempts) — brief-locked value, would require a protocol-amendment conversation; (b) per-attempt temperature escalation (0.5 → 0.4 → 0.3) to coax more deterministic emission on the retry path; (c) surfacing parse-retry counts as a W8 Orchestrator telemetry metric so production drift is visible.
+
+**Revisit if:** production telemetry (once W8 ships) shows parse-retry rate >5% sustained across a week, OR a single job exhausts 3 attempts and surfaces as a hard failure to the operator. Either condition justifies revisiting (a) or (b).
+
+**Affected data:** none. Smoke-run artifact only.
+
+**Owner hint:** W8 Orchestrator author (telemetry hook) → W7 prompt author if retry escalation lands.
+
+---
+
+## w7-stripAggressiveBounds-kept-distinct-from-stripSchemaBounds — deliberate two-helper pattern
+
+**Status:** Active (architectural note, no action pending).
+**Discovered:** 2026-04-24, W7 param-only tuning (commit 2597f7f).
+
+**Pattern:** W3/W5/W6 use a global defensive `stripSchemaBounds()` helper that strips common bounds (min/max on numbers, minLength/maxLength on strings) from Zod→JSON-Schema output before handing to Gemini. W7 added a second helper, `stripAggressiveBounds()`, that targets specific paths (hashtags regex, reasoning/captions/hook.text/hook.mechanism_tie bounds) rather than walking the whole tree. The two helpers were deliberately kept distinct:
+- `stripSchemaBounds` (used by W3/W5/W6/W7): general blast radius, safe across all agents.
+- `stripAggressiveBounds` (W7 only): path-targeted, strips bounds that `stripSchemaBounds` intentionally leaves in place on other agents (e.g., hashtag regex is a real format constraint that W3/W5/W6 don't use).
+
+Combining into one global helper would risk destabilizing W3/W5/W6 responseSchemas where the preserved bounds are load-bearing. The trade-off is that any future agent that adopts hashtag-style regex constraints will need to duplicate the aggressive path-targeted stripping.
+
+**Tried:** the two-helper split itself (commit 2597f7f). Verified W3/W5/W6 unchanged behavior by inspecting imports (none touch `stripAggressiveBounds`).
+
+**Not tried:** (a) extracting a shared `schemaStripRegistry` where each agent opts into specific strip rules by path; (b) collapsing back to one helper with config flags.
+
+**Revisit if:** a second cross-agent Gemini-stability fix surfaces that needs path-targeted stripping — at that point, (a) becomes the right refactor. Until then, two-helper is the smaller surface.
+
+**Affected data:** none. Code-structure note.
+
+**Owner hint:** whoever owns the next agent that hits schema-richness parse instability.
+
+---
+
+## gemini-3.1-pro-preview-stability-with-rich-response-schemas — model-level observation
+
+**Status:** Active (monitor, non-actionable at app layer).
+**Discovered:** 2026-04-24, W7 Gate A smoke iterations.
+
+**Pattern:** Gemini 3.1 Pro Preview occasionally emits malformed JSON (unterminated strings, unquoted property names) when the responseSchema is large + has many bounded fields (min/max/regex). W7's schema is the richest Part B agent has emitted (per_slot array of overlay objects + hook object + captions object + hashtags array + metadata). Before the W7 fixes, parse malformation rate was ~40% (2/5 seeds exhausted 3 attempts). After stripping aggressive bounds (commit 2597f7f), rate dropped to 0% on the final Gate A. This is a model-level stability sensitivity that the W3/W5/W6 agents avoided via smaller schemas; W7 hit it first because CopyPackage is denser.
+
+**Tried:** (a) schema-layer mitigations — `omitVoiceoverScriptForGemini()` (commit 2ea6431), `stripSchemaBounds()` (pre-existing), `stripAggressiveBounds()` (commit 2597f7f); (b) parameter bump — maxOutputTokens 4000→8000.
+
+**Not tried:** (a) switching W7 to a different Gemini tier (2.5 Pro stable, 3.1 Flash) to compare stability vs quality; (b) splitting W7 into two Gemini calls (hook/captions + per-slot overlays) — named in W7 brief §Escalation as option (b), unused because the param-only fix resolved it.
+
+**Revisit if:** production parse-retry rate climbs above 5% sustained (suggests Gemini stability drifted), OR a future Part B agent (W8 Orchestrator synthesis calls? W10 voice-script emitter?) emits an equally rich schema and hits the same pattern. At that point the option to split calls, swap models, or graduate `stripAggressiveBounds` to a shared registry all become relevant.
+
+**Affected data:** none. Schema-stability observation.
+
+**Owner hint:** W8 Orchestrator author (telemetry on parse-retry counts across agents) → model-selection call if drift is sustained.
+
+---
+
 ## w6-subject-discontinuity-prevalence-at-director — load-bearing observation for W9 design
 
 **Status:** Active (informational, load-bearing for W9 design).

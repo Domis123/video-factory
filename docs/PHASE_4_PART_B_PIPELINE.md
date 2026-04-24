@@ -1,6 +1,6 @@
 # Phase 4 Part B — Pipeline
 
-**Status:** W1 through W6 shipped (2026-04-21 through 2026-04-23) + W6.5 tuning iteration shipped 2026-04-23. W1.5 Content Sprint 2 still in progress. W7 Copywriter is the next brief.
+**Status:** W1 through W7 shipped (2026-04-21 through 2026-04-24) + W6.5 tuning iteration shipped 2026-04-23. W1.5 Content Sprint 2 complete. W8 Orchestrator is the next brief.
 **Success criterion (revised 2026-04-21):** Replace the Phase 3.5 CD → Curator → Copywriter flow with a pipeline that produces **organic-plausible, retention-optimized short-form content with form diversity**, not "just" coherent videos. Auto-QA remains a necessary gate; organic-creator-plausibility on human review is the bar. Measured on nordpilates during shadow mode + ramp.
 **Depends on:** Part A's SegmentV2.1 schema (complete) + W1 keyframe grids (complete).
 
@@ -95,12 +95,12 @@ Key architectural decisions:
 | W5 | Visual Director (multimodal) | ✅ shipped 2026-04-22 | W1 + W4 |
 | W6 | Coherence Critic | ✅ shipped 2026-04-23 | W5 |
 | W6.5 | Planner subject stance + conditional Critic | ✅ shipped 2026-04-23 (tuning iteration) | W6 |
-| W7 | Copywriter rebuild | 🔴 not started (NEXT BRIEF) | W5 (parallel to W6) |
+| W7 | Copywriter rebuild | ✅ shipped 2026-04-24 | W5 (parallel to W6) |
 | W8 | Orchestrator | 🔴 not started | W3–W7 |
 | W9 | Shadow mode rollout | 🔴 not started | W8 |
 | **W10** | **Audio generation (NEW)** | 🔴 **not started, POST-shadow** | **W9 validation** |
 
-Estimated timeline: W7 through W9 remaining in ~2–3 weeks. W10 adds ~1 week post-shadow if Part B foundation is sound.
+Estimated timeline: W8 through W9 remaining in ~2 weeks. W10 adds ~1 week post-shadow.
 
 ---
 
@@ -359,7 +359,7 @@ Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video
 - [x] W5 shipped (Visual Director)
 - [x] W6 shipped (Coherence Critic)
 - [x] W6.5 shipped (subject stance tuning)
-- [ ] W7 shipped (Copywriter) — NEXT BRIEF
+- [x] W7 shipped (Copywriter) — W7 shipped 2026-04-24
 - [ ] W8 shipped (Orchestrator)
 - [ ] Feature flag plan decided (deferred to W8 brief)
 - [ ] Voice-evaluation session held (prep for W10, non-blocking for W2-W9)
@@ -384,3 +384,5 @@ When Part B is done: Video Factory produces retention-optimized organic short-fo
 *Revised 2026-04-21 evening. Adds W1.5 + W10, updates W2 + W3 scopes for form/posture two-axis model and hook_mechanism first-class concept, updates success criterion from auto-QA-pass-rate to organic-plausibility-plus-form-diversity.*
 
 *Revised 2026-04-23 evening. Updated for W1-W6 shipped + W6.5 tuning iteration. Added subject-stance architectural note to W3. Added W6.5 subsection to W6. Prerequisites checklist marked through W6.5 complete. Risks updated. Next brief: W7 Copywriter.*
+
+*Revised 2026-04-24. Copywriter shipped. Part B creative agents all complete (Planner → Retrieval → Director → Critic → Copywriter). Next brief: W8 Orchestrator.*
