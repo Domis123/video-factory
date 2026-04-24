@@ -287,3 +287,97 @@ coverage that Phase 3.5 cannot be affected by Part B state.
   + copywriter fragility are out-of-scope upstream/downstream concerns
   for W8.
 
+
+══════════════════════════════════════════════════════════════════════
+  Post-fix verification (2026-04-24, commit 9b83f56 + follow-up)
+══════════════════════════════════════════════════════════════════════
+
+Fix landed:
+  bug #2 (job_events column mismatch + missing to_status) resolved.
+
+  - emitEvent param renamed: payload → details (matches jsonb column).
+  - to_status is synthesized from the event enum via a translation map
+    DB_EVENT_NAMES : TransitionEventType → string. Writes use a
+    partb_* prefix for namespace isolation from Phase 3.5 state values.
+    event_type AND to_status both get the same translated string
+    (job_events.to_status is NOT NULL in current schema).
+  - Translation was needed because several enum values exceed the
+    column's varchar(30) once prefixed (e.g. snapshot_building_started
+    → partb_snapshot_building_started is 31 chars). All 20 mapped
+    names fit in 30 chars. A follow-up migration 012 can widen the
+    columns to varchar(64) and collapse the map to a simple prefix,
+    but that's a schema change so it's out-of-scope for this fix.
+  - try/catch .warn wrapper removed; emitEvent now console.error's
+    the supabase error and throws. Matches Rule 38 (loud shadow-mode
+    observability). Fire-and-forget dispatcher's outer .catch still
+    prevents the orchestrator from taking down the request handler.
+
+Seed A single-seed re-smoke:
+
+  Seed A — "slow sunday stretching with the windows open"
+  runId=37323ece-e9b0-40b2-8d04-20818dca06a8
+  job_id=745c626e-fe43-4f8f-99c8-dd2200cae4de
+  terminal_state=failed_after_revise_budget   (matches prior run)
+  wallTotal=379311ms  wallPartB=378719ms
+  revise_loop_iterations=2   total_agent_invocations=11
+  job_events rows inserted: 26   (zero errors in stdout)
+
+  Event-count breakdown (ORDER BY created_at ASC):
+    partb_planning_started        1
+    partb_planning_completed      1
+    partb_retrieval_started       1
+    partb_retrieval_completed     1
+    partb_director_started        3   (original + 2 revise cycles)
+    partb_director_completed      3
+    partb_snapshot_started        3
+    partb_snapshot_completed      3
+    partb_fanout_started          3
+    partb_fanout_completed        3
+    partb_revise_slots            2   (matches 2 revise iterations)
+    partb_revise_exhausted        1
+    partb_pipeline_escalated      1
+
+  FIRST 5 rows:
+    12:17:28.834  partb_planning_started         to_status=partb_planning_started
+      details={"to":"PLANNING","from":"QUEUED"}
+    12:17:47.419  partb_planning_completed       to_status=partb_planning_completed
+      details={"to":"RETRIEVING","from":"PLANNING"}
+    12:17:47.529  partb_retrieval_started        to_status=partb_retrieval_started
+      details={"to":"RETRIEVING","from":"PLANNING"}
+    12:17:49.041  partb_retrieval_completed      to_status=partb_retrieval_completed
+      details={"to":"DIRECTING","from":"RETRIEVING"}
+    12:17:49.154  partb_director_started         to_status=partb_director_started
+      details={"to":"DIRECTING","from":"RETRIEVING"}
+
+  LAST 3 rows:
+    12:23:45.389  partb_revise_exhausted         to_status=partb_revise_exhausted
+      details={"to":"ESCALATING_TO_HUMAN","from":"PARALLEL_FANOUT",
+               "failureReason":"revise budget exhausted after 2 cycles;
+                final verdict: The storyboard suffers from a complete
+                breakdown in subject continuity…",
+               "terminalState":"failed_after_revise_budget"}
+    12:23:45.508  partb_fanout_completed         to_status=partb_fanout_completed
+      details={"to":"ESCALATING_TO_HUMAN",…}
+    12:23:45.612  partb_pipeline_escalated       to_status=partb_pipeline_escalated
+      details={"to":"ESCALATING_TO_HUMAN",…,"terminalState":"failed_after_revise_budget"}
+
+  Assertion checklist:
+    ✓ Forward-transition events populate (planning / retrieval /
+      directing / snapshot_building / parallel_fanout)
+    ✓ partb_revise_slots fires ×2 (matches revise_loop_iterations=2)
+    ✓ partb_revise_exhausted fires ×1
+    ✓ terminal state event fires (partb_pipeline_escalated — the
+      state machine's terminal event for ESCALATING_TO_HUMAN is the
+      escalation event, not pipeline_failed; enum lookup confirmed
+      against src/types/orchestrator-state.ts)
+    ✓ No NULL to_status values (NOT NULL constraint satisfied)
+    ✓ details column is structured JSONB on every row
+
+  Note: the 3 Part B event enums that weren't exercised on Seed A
+  (partb_pipeline_completed / partb_pipeline_failed / partb_commit_*)
+  are reachable on happy-path + critic-reject paths; Seed A is a
+  revise-budget-exhaust path which terminates via escalation. All 13
+  reachable enum values for this path emitted correctly.
+
+Totals after post-fix run: 26/26 harness pass, job_events observability
+restored. No new surprises.
