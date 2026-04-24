@@ -986,9 +986,19 @@ async function runT2Seed(
   // afterwards via a targeted DELETE once analysis is done.
 }
 
-async function runT2(): Promise<void> {
-  console.log('\n── Tier 2: real E2E (3 seeds, ~$3) ──────────────────────────');
-  for (const s of T2_SEEDS) {
+async function runT2(seedFilter: string | null): Promise<void> {
+  const seeds = seedFilter
+    ? T2_SEEDS.filter((s) => s.tag === seedFilter)
+    : T2_SEEDS;
+  const header = seedFilter
+    ? `\n── Tier 2: real E2E (seed ${seedFilter} only) ─────────────────`
+    : '\n── Tier 2: real E2E (3 seeds, ~$3) ──────────────────────────';
+  console.log(header);
+  if (seeds.length === 0) {
+    console.log(`  (no seed matched --seed=${seedFilter}; skipping)`);
+    return;
+  }
+  for (const s of seeds) {
     await runT2Seed(s.tag, s.seed, s.expectation);
   }
 }
@@ -1000,13 +1010,16 @@ async function runT2(): Promise<void> {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const runTier2 = argv.includes('--tier2');
+  const seedArg = argv.find((a) => a.startsWith('--seed='))?.split('=')[1] ?? null;
 
   console.log('W8 Gate A smoke — orchestrator / flags / render-prep / shadow-writer');
-  console.log(`  Tier 2 real E2E: ${runTier2 ? 'ON' : 'off (pass --tier2 to enable)'}`);
+  console.log(
+    `  Tier 2 real E2E: ${runTier2 ? `ON${seedArg ? ` (seed=${seedArg} only)` : ''}` : 'off (pass --tier2 to enable)'}`,
+  );
 
   await runT1();
   if (runTier2) {
-    await runT2();
+    await runT2(seedArg);
   }
   await runT3();
 

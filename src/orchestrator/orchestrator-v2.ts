@@ -513,9 +513,16 @@ function classifyAgentError(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Emit every event in a StateTransition to job_events. Kept graceful —
- * Supabase errors log and return so a temporary write failure does not
- * cause the orchestrator to abort mid-transition.
+ * Emit every event in a StateTransition to job_events.
+ *
+ * Failures are loud: this function does not swallow Supabase errors.
+ * Part B runs fire-and-forget under a BullMQ `.catch(...)` at the
+ * dispatcher layer, so a raised error here is contained (it cannot
+ * reach Phase 3.5's job state) but remains visible via the BullMQ
+ * failure signal + stdout. An emit failure is a schema/access bug
+ * worth failing fast on; silent `.warn` logs during shadow are how
+ * observability regressions like the prior `payload`/`details`
+ * mismatch sit undetected for an entire Gate A cycle.
  */
 async function recordTransition(
   jobId: string,
@@ -531,27 +538,68 @@ async function recordTransition(
   }
 }
 
+/**
+ * Part B events are namespaced with `partb_` so they don't collide
+ * with Phase 3.5's `jobs.status` set (which `to_status` carries for
+ * real status transitions). The same prefixed string is written to
+ * both `event_type` and `to_status` — `to_status` is NOT NULL on
+ * the table, and Part B internal transitions don't correspond to a
+ * `jobs.status` value, so we synthesize one from the event itself.
+ *
+ * `job_events.event_type`, `.from_status`, `.to_status` are all
+ * varchar(30). The internal TransitionEventType values are longer
+ * than 30-chars-minus-prefix for several events, so we translate to
+ * a compact DB form at emit time. The internal enum stays clean so
+ * state-machine logic + T1 assertions remain readable. W9 analysis
+ * filters Part B events via `event_type LIKE 'partb_%'`.
+ *
+ * If a future event is added to TransitionEventType, TypeScript will
+ * flag it here because the table is typed as Record<TransitionEventType, ...>.
+ * Followup filed: widen job_events varchar(30) columns to varchar(64)
+ * in migration 012 so the translation layer can go away.
+ */
+const DB_EVENT_NAMES: Record<TransitionEventType, string> = {
+  planning_started: 'partb_planning_started',
+  planning_completed: 'partb_planning_completed',
+  retrieval_started: 'partb_retrieval_started',
+  retrieval_completed: 'partb_retrieval_completed',
+  directing_started: 'partb_director_started',
+  directing_completed: 'partb_director_completed',
+  snapshot_building_started: 'partb_snapshot_started',
+  snapshot_building_completed: 'partb_snapshot_completed',
+  parallel_fanout_started: 'partb_fanout_started',
+  parallel_fanout_completed: 'partb_fanout_completed',
+  committing_started: 'partb_commit_started',
+  committing_completed: 'partb_commit_completed',
+  revise_slot_level_triggered: 'partb_revise_slots',
+  revise_structural_triggered: 'partb_revise_structural',
+  revise_budget_exhausted: 'partb_revise_exhausted',
+  retrieval_retry_exhausted: 'partb_retrieval_exhausted',
+  critic_unavailable_approving_default: 'partb_critic_soft_approve',
+  pipeline_v2_completed: 'partb_pipeline_completed',
+  pipeline_v2_failed: 'partb_pipeline_failed',
+  pipeline_v2_escalated: 'partb_pipeline_escalated',
+};
+
 async function emitEvent(
   jobId: string,
   eventType: TransitionEventType,
-  payload: Record<string, unknown>,
+  details: Record<string, unknown>,
 ): Promise<void> {
-  try {
-    const { error } = await supabaseAdmin.from('job_events').insert({
-      job_id: jobId,
-      event_type: eventType,
-      payload: payload as Record<string, unknown>,
-    });
-    if (error) {
-      console.warn(
-        `[orchestrator-v2] job_events insert failed (${eventType}):`,
-        error.message,
-      );
-    }
-  } catch (err) {
-    console.warn(
-      `[orchestrator-v2] job_events insert threw (${eventType}):`,
-      err,
+  const dbName = DB_EVENT_NAMES[eventType];
+  const { error } = await supabaseAdmin.from('job_events').insert({
+    job_id: jobId,
+    event_type: dbName,
+    to_status: dbName,
+    details,
+  });
+  if (error) {
+    console.error(
+      `[orchestrator-v2] job_events insert failed (${dbName}):`,
+      error.message,
+    );
+    throw new Error(
+      `job_events insert failed for ${dbName}: ${error.message}`,
     );
   }
 }
