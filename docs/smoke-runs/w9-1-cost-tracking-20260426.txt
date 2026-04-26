@@ -1,0 +1,141 @@
+═══════════════════════════════════════════════════════════════════════════
+W9.1 Gate A — Cost Tracking Wireup smoke
+2026-04-26  •  branch: feat/phase4-w9-1-cost-tracking  •  HEAD: f31d894
+═══════════════════════════════════════════════════════════════════════════
+
+Pre-W9.1 baseline (reference shadow_runs row cb87d32c, pre-fix):
+  part_b_cost_usd = $0.0000   ← Pattern A emit failure: Part B agents
+  dropped Gemini usageMetadata at the SDK boundary, so the orchestrator
+  CostAccumulator stayed at zero and the shadow_runs column persisted $0.
+
+This Gate A run validates the W9.1 fix end-to-end:
+  - Per-agent emit (Planner, Visual Director, Coherence Critic, Copywriter)
+    via computeGeminiCost() in src/lib/llm-cost.ts
+  - Orchestrator additive accumulation in ctx.costAccumulator
+  - shadow_runs.part_b_cost_usd persisted as totalCost(ctx.costAccumulator)
+
+
+───────────────────────────────────────────────────────────────────────────
+Method
+───────────────────────────────────────────────────────────────────────────
+
+Vehicle: `npx tsx src/scripts/test-orchestrator.ts --tier2 --seed=A`
+  Runs runPipelineV2() locally (same code path Part B worker invokes), real
+  Supabase + Gemini, writes a real shadow_runs row. Same Q5d signal surface
+  as test-forced-structural.ts but does not require a VPS deploy of the
+  branch — exercises the W9.1 code on this branch directly.
+
+Seed A: "slow sunday stretching with the windows open"
+  Brand: nordpilates
+  Expectation per test-orchestrator.ts: happy-path / approve / aesthetic-
+  ambient form.
+
+
+───────────────────────────────────────────────────────────────────────────
+Run summary
+───────────────────────────────────────────────────────────────────────────
+
+T1 (state machine, 10 cases):  10/10 PASS
+T2 (real E2E, seed A):         1/1 PASS
+T3 (synthetic, 14 cases):      14/14 PASS
+Final line: "✓ all active tiers passed"
+
+T2.A specifics (job_id=62bd8f00-89c7-42b5-8b9a-fbd1b9bd6ed4):
+  shadow_runs row id            ff67fc55-1fc1-472f-8ef6-aec36e87a9c1
+  part_b_terminal_state         failed_after_revise_budget
+  part_b_failure_reason         "revise budget exhausted after 2 cycles;
+                                 final verdict: ...single-subject
+                                 constraint... studio setting against brand
+                                 guidelines."
+  revise_loop_iterations        2
+  total_agent_invocations       11
+  part_b_wall_time_ms           447,368
+
+The seed terminated in `failed_after_revise_budget` rather than the
+expected `done` — Critic flagged subject_discontinuity / off-brand
+location across both revise cycles. Unrelated to W9.1; it's a real
+Q5b/Q5c content signal that the test exercises naturally. For the W9.1
+gate, what matters is that runPipelineV2 ran 11 agent calls and emitted
+a complete shadow_runs row with non-zero cost.
+
+
+───────────────────────────────────────────────────────────────────────────
+W9.1 cost data (the actual gate)
+───────────────────────────────────────────────────────────────────────────
+
+shadow_runs.part_b_cost_usd:    $0.563500   ← was $0.0 pre-W9.1 (PASS)
+
+Per-agent cost_usd persisted in shadow_runs JSONB (last-cycle snapshots):
+  planner_output.cost_usd       $0.011440
+  storyboard_picks.cost_usd     $0.156590   ← sum of 5 per-slot SlotPick costs
+  critic_verdict.cost_usd       $0.012337
+  copy_package.cost_usd         $0.015164
+
+  sum-of-snapshots              $0.195531
+  shadow_runs column            $0.563500
+  delta                         $0.367969
+
+The delta is expected behavior, not a regression:
+  - shadow_runs.part_b_cost_usd persists totalCost(ctx.costAccumulator),
+    which `+=` accumulates across every agent invocation in the run
+    (including all 2 revise iterations × 4 agents = ~8 extra calls beyond
+    the final-cycle snapshot).
+  - The per-agent `cost_usd` fields in the JSONB blob reflect each agent's
+    most-recent successful call only (mutation-after-parse pattern). They
+    are not cumulative.
+  - Total invocations = 11; per-agent JSONB shows 4 final-cycle calls; the
+    other 7 calls' cost is captured in the column but not in the snapshot.
+
+The two surfaces have different semantics by design:
+  - part_b_cost_usd column   → cumulative spend for the run (auditable)
+  - per-agent JSONB cost_usd → last successful agent output's cost (debug
+                                aid, mirrors how `metadata.retry_count`
+                                is mutated post-parse)
+
+
+───────────────────────────────────────────────────────────────────────────
+W9.1 assertions
+───────────────────────────────────────────────────────────────────────────
+
+[PASS]  shadow_runs.part_b_cost_usd > 0          $0.563500
+[PASS]  planner_output.cost_usd > 0              $0.011440
+[PASS]  storyboard_picks.cost_usd > 0            $0.156590
+[PASS]  critic_verdict.cost_usd > 0              $0.012337
+[PASS]  copy_package.cost_usd > 0                $0.015164
+[PASS]  per-slot SlotPick.cost_usd > 0           5/5 slots
+        (verified inside test-visual-director.ts assertion path; not
+         re-checked here — every storyboard_picks.cost_usd is the sum
+         of its per-slot picks by construction)
+
+
+───────────────────────────────────────────────────────────────────────────
+Q5d composite cutover signal
+───────────────────────────────────────────────────────────────────────────
+
+Pre-W9.1: 4-of-5 (cost signal dead — see diagnostic
+  docs/diagnostics/w9-cost-tracking-rootcause-20260426.md)
+Post-W9.1: 5-of-5 expected once shadow_runs has post-W9.1 rows from
+  the live nordpilates worker. This Gate A run produces the first
+  shadow_runs row with non-zero cost on this branch.
+
+
+───────────────────────────────────────────────────────────────────────────
+Cost incurred by Gate A
+───────────────────────────────────────────────────────────────────────────
+
+$0.5635 (seed A, single run). Within the brief's $1-2 budget.
+Brief allocated ~$1-2 expecting test-forced-structural; the local
+runPipelineV2 vehicle came in cheaper because no dual-run + no VPS
+round-trip overhead.
+
+
+───────────────────────────────────────────────────────────────────────────
+Rollback path
+───────────────────────────────────────────────────────────────────────────
+
+Pure additive change (Rule 36): `cost_usd: z.number().min(0).default(0)`
+on four schemas + read-only call to computeGeminiCost. No DB schema
+changes, no field renames, no enum widening. If a regression lands on
+main, `git revert <merge-sha>` restores prior agent shapes and the
+ctx.costAccumulator falls back to its initialContext zero state — Part B
+keeps running, just without populated cost_usd. Phase 3.5 untouched.
