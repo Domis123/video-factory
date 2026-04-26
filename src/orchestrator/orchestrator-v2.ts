@@ -62,6 +62,7 @@ import { writeShadowRun } from './shadow-writer.js';
 
 import {
   initialContext,
+  totalCost,
   type FailedAgent,
   type OrchestratorContext,
   type StateTransition,
@@ -86,10 +87,10 @@ export interface PipelineV2Summary {
   terminalState: TerminalState;
   walltime_ms: number;
   /**
-   * Aggregate USD spend across agents. Placeholder during W8 — agents don't
-   * surface per-call USD today. Remains 0 until cost instrumentation lands
-   * in a later workstream; shadow_runs.part_b_cost_usd captures the same
-   * 0 until then, and W9 analysis can reconstruct cost from token logs.
+   * Aggregate USD spend across agents. Populated by W9.1 — sum of per-agent
+   * cost_usd accumulated into ctx.costAccumulator during the run. On early-
+   * failure paths (job-row lookup, persona/inventory bootstrap) this is 0
+   * because no agent has run yet.
    */
   cost_usd: number;
 }
@@ -160,7 +161,7 @@ export async function runPipelineV2(jobId: string): Promise<PipelineV2Summary> {
       runId: null,
       terminalState: 'failed_agent_error',
       walltime_ms: Date.now() - wallT0,
-      cost_usd: 0,
+      cost_usd: totalCost(ctx.costAccumulator),
     };
   }
 
@@ -191,7 +192,7 @@ export async function runPipelineV2(jobId: string): Promise<PipelineV2Summary> {
         runId: null,
         terminalState: 'failed_agent_error',
         walltime_ms: Date.now() - wallT0,
-        cost_usd: 0,
+        cost_usd: totalCost(ctx.costAccumulator),
       };
     }
 
@@ -254,7 +255,7 @@ export async function runPipelineV2(jobId: string): Promise<PipelineV2Summary> {
     runId,
     terminalState: ctx.terminalState!,
     walltime_ms: Date.now() - wallT0,
-    cost_usd: 0,
+    cost_usd: totalCost(ctx.costAccumulator),
   };
 }
 
@@ -307,6 +308,9 @@ async function runPlanner(ctx: OrchestratorContext): Promise<TransitionSignal> {
     brand_id: ctx.brandId,
   });
   ctx.plannerOutput = plannerOutput;
+  // W9.1 — accumulate additively: revise loops re-call planVideo, so each
+  // call charges incrementally rather than overwriting the prior run's cost.
+  ctx.costAccumulator.planner_usd += plannerOutput.cost_usd;
   return { kind: 'advance' };
 }
 
@@ -365,6 +369,8 @@ async function runDirector(
     brandPersona,
   });
   ctx.picks = picks;
+  // W9.1 — additive across revise-slot loops which re-call the director.
+  ctx.costAccumulator.director_usd += picks.cost_usd;
   return { kind: 'advance' };
 }
 
@@ -441,6 +447,9 @@ async function runCriticAndCopy(
   ]);
 
   ctx.copyPackage = copyPackage;
+  // W9.1 — copywriter ran successfully (errors throw and surface above).
+  // Additive across revise loops because the copywriter re-runs each cycle.
+  ctx.costAccumulator.copywriter_usd += copyPackage.cost_usd;
 
   if (!criticResult.ok) {
     // Critic failed entirely — soft-approve per brief. Synthesize a default
@@ -455,6 +464,8 @@ async function runCriticAndCopy(
   }
 
   ctx.criticVerdict = criticResult.verdict;
+  // W9.1 — successful critic call charges its incremental cost.
+  ctx.costAccumulator.critic_usd += criticResult.verdict.cost_usd;
   return { kind: 'critic_verdict_ready' };
 }
 
@@ -667,7 +678,7 @@ async function maybeWriteShadowRun(
     reviseLoopIterations: ctx.reviseHistory.length,
     totalAgentInvocations: ctx.budget.totalAgentInvocations,
     partBWallTimeMs: wallMs,
-    partBCostUsd: 0,
+    partBCostUsd: totalCost(ctx.costAccumulator),
     partBTerminalState: ctx.terminalState!,
     partBFailureReason: ctx.failureReason ?? null,
   });
