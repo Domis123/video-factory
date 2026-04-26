@@ -269,6 +269,7 @@ function printTier1Report(i: number, r: Tier1Result): void {
     console.log(`    ${slot.slot_id}  type=${slot.overlay.type.padEnd(7)} ${timing}  ${JSON.stringify(text)}`);
   }
   console.log(`  META: retry_count=${pkg.metadata.retry_count} temperature=${pkg.metadata.temperature}`);
+  console.log(`  COST: $${pkg.cost_usd.toFixed(6)}`);
 }
 
 function printTier3Report(r: Tier3Result): void {
@@ -420,18 +421,31 @@ async function main(): Promise<void> {
   const tier1Passed = okResults.length;
   const tier2Passed = tier2Assertions.filter((a) => a.pass).length;
   const totalWall = tier1Results.reduce((a, r) => a + r.wall_ms, 0) + tier3.wall_ms;
+  // W9.1 — sum of cost_usd across Tier 1 + Tier 3 copy packages.
+  const allCopyPackages: CopyPackage[] = [
+    ...okResults.map((r) => r.copyPackage!).filter((c): c is CopyPackage => !!c),
+    ...(tier3.copyPackage ? [tier3.copyPackage] : []),
+  ];
+  const totalCopyCost = allCopyPackages.reduce((a, c) => a + (c.cost_usd ?? 0), 0);
+  const zeroCostPackages = allCopyPackages.filter((c) => (c.cost_usd ?? 0) <= 0);
+  const cw91Pass = zeroCostPackages.length === 0 && totalCopyCost > 0;
+
   console.log(`  tier_1_seeds_ok:           ${tier1Passed}/${tier1Results.length}`);
   console.log(`  tier_1_hook_homogenization: ${hookHomogenizationPass ? 'PASS' : 'FAIL'} (${hookDistinct}/${okResults.length} distinct)`);
   console.log(`  tier_1_slot0_homogenization: ${slot0HomogenizationPass ? 'PASS' : 'FAIL'} (${slot0Distinct}/${okResults.length} distinct)`);
   console.log(`  tier_2_operator_sanity:    ${tier2Passed}/${tier2Assertions.length} pass`);
   console.log(`  tier_3_osr_collision:      ${tier3.assertion_pass ? 'PASS' : 'FAIL'}  ${tier3.assertion_detail}`);
   console.log(`  total_wall_ms:             ${totalWall}`);
+  console.log(`  total_copywriter_cost_usd: $${totalCopyCost.toFixed(6)}  (sum of CopyPackage.cost_usd across ${allCopyPackages.length} run(s))`);
+  console.log(`  w9_1_cost_tracking:        ${cw91Pass ? 'PASS' : 'FAIL'}  ${zeroCostPackages.length} package(s) with cost_usd<=0`);
+
   const overallPass =
     tier1Passed === tier1Results.length &&
     hookHomogenizationPass &&
     slot0HomogenizationPass &&
     tier2Passed === tier2Assertions.length &&
-    tier3.assertion_pass;
+    tier3.assertion_pass &&
+    cw91Pass;
   console.log(`  OVERALL:                   ${overallPass ? 'PASS' : 'FAIL'}`);
   if (!overallPass) process.exitCode = 1;
 }

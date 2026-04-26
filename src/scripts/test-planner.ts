@@ -95,6 +95,7 @@ function printSeedReport(r: SeedResult): void {
   console.log(`  subject_consistency: ${o.subject_consistency}`);
   console.log(`  slot_roles:     ${slotRolesSummary(o.slots)}`);
   console.log(`  creative_vision: ${firstLine(o.creative_vision)}`);
+  console.log(`  cost_usd:       $${o.cost_usd.toFixed(6)}`);
 }
 
 async function main(): Promise<void> {
@@ -124,11 +125,32 @@ async function main(): Promise<void> {
 
   const passed = results.filter((r) => r.ok).length;
   const totalMs = results.reduce((a, r) => a + r.wall_ms, 0);
+  const totalCostUsd = results
+    .filter((r) => r.ok && r.output)
+    .reduce((a, r) => a + (r.output!.cost_usd ?? 0), 0);
   console.log('');
   console.log('=== summary ===');
   console.log(`  passed:       ${passed}/${results.length}`);
   console.log(`  total wall:   ${totalMs} ms`);
   console.log(`  avg per seed: ${Math.round(totalMs / results.length)} ms`);
+  console.log(`  total cost:   $${totalCostUsd.toFixed(6)}`);
+
+  // W9.1 — hard assertion: every successful seed must report cost_usd > 0.
+  // A zero here means computeGeminiCost silently returned 0 (Rule 38 violation)
+  // OR the wrapper isn't attaching cost_usd post-parse.
+  const zeroCostSeeds = results
+    .filter((r) => r.ok && r.output)
+    .filter((r) => (r.output!.cost_usd ?? 0) <= 0);
+  if (zeroCostSeeds.length > 0) {
+    console.log('');
+    console.log(`  ✗ W9.1 cost-tracking assertion FAILED: ${zeroCostSeeds.length}/${passed} successful seeds reported cost_usd <= 0`);
+    for (const r of zeroCostSeeds) {
+      console.log(`    seed=${JSON.stringify(r.seed)} cost_usd=${r.output!.cost_usd}`);
+    }
+    process.exitCode = 1;
+  } else if (passed > 0) {
+    console.log(`  ✓ W9.1 cost-tracking assertion PASS: all ${passed} seeds reported cost_usd > 0`);
+  }
 
   // Variance report across the soft dimensions — music_intent, slot_count,
   // creative_vision opening word, form_id, hook_mechanism, posture.

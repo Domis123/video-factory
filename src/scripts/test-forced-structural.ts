@@ -325,6 +325,32 @@ async function main() {
   }
   console.log('');
 
+  // ── 7b. W9.1 cost-tracking assertion (Q5d signal validation) ─────────
+  // Pre-W9.1 baseline: cb87d32c shadow_runs.part_b_cost_usd === $0 (Pattern A
+  // emit failure). Post-W9.1: every shadow_runs row written from a successful
+  // Part B run MUST have part_b_cost_usd > 0 because at least Planner ran.
+  console.log('── W9.1 GATE A ASSERTION (cost tracking wireup) ──');
+  let costPass = false;
+  if (shadowRunRow) {
+    const cost = Number((shadowRunRow as any).part_b_cost_usd);
+    if (cost > 0) {
+      console.log(`  ✓ part_b_cost_usd=$${cost.toFixed(6)} > $0 — cost wireup is alive end-to-end.`);
+      costPass = true;
+    } else {
+      console.log(`  ✗ part_b_cost_usd=$${cost.toFixed(6)} (expected > 0).`);
+      console.log('    Indicates a regression: agents emit cost_usd=0 OR orchestrator/');
+      console.log('    shadow-writer drops it OR the field never made it to the DB column.');
+    }
+  } else {
+    console.log('  ⊘ no shadow_runs row to assert against (early-failure path); cost assertion N/A.');
+    // Early-failure paths are not a W9.1 regression — no row written, nothing to gate on.
+    costPass = true;
+  }
+  if (!costPass) {
+    process.exitCode = 1;
+  }
+  console.log('');
+
   // ── 8. Print artifact-capture commands ───────────────────────────────
   console.log('── REMINDER: capture this output into a Gate A artifact ──');
   console.log(`  npx tsx src/scripts/test-forced-structural.ts | tee \\`);

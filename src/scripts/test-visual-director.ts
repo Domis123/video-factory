@@ -19,7 +19,6 @@ import type { CandidateSet } from '../types/candidate-set.js';
 import type { StoryboardPicks } from '../types/slot-pick.js';
 
 const BRAND_ID = 'nordpilates';
-const PER_SLOT_COST_USD = 0.07;
 
 const SEEDS: string[] = [
   'morning pilates routine for hip mobility',
@@ -216,13 +215,16 @@ async function main(): Promise<void> {
     (a, r) => a + (r.picks?.picks.length ?? 0),
     0,
   );
-  const estCost = totalSlots * PER_SLOT_COST_USD;
+  // W9.1 — actual cost from picks.cost_usd (sum of per-slot costs).
+  const totalDirectorCost = results
+    .filter((r) => r.ok && r.picks)
+    .reduce((a, r) => a + (r.picks!.cost_usd ?? 0), 0);
   const totalWarnings = results.reduce((a, r) => a + r.crossParentWarnings, 0);
 
   console.log(`  passed:                    ${passed}/${results.length}`);
   console.log(`  total_wall_ms:             ${totalWall}`);
   console.log(`  total_slots_across_boards: ${totalSlots}`);
-  console.log(`  est_gemini_cost_usd:       $${estCost.toFixed(2)}  (@ ~$${PER_SLOT_COST_USD}/slot)`);
+  console.log(`  actual_gemini_cost_usd:    $${totalDirectorCost.toFixed(6)}  (per StoryboardPicks.cost_usd)`);
   console.log(`  cross_parent_warnings:     ${totalWarnings}`);
   console.log('');
 
@@ -243,6 +245,26 @@ async function main(): Promise<void> {
   }
   console.log('');
   console.log(`  slot_role_distribution:    ${JSON.stringify(roleCounts)}`);
+
+  // W9.1 — hard assertion: every successful storyboard reports cost_usd > 0
+  // both at the aggregate StoryboardPicks level AND at every per-slot SlotPick.
+  const zeroAggBoards = results
+    .filter((r) => r.ok && r.picks)
+    .filter((r) => (r.picks!.cost_usd ?? 0) <= 0);
+  let zeroPerSlotCount = 0;
+  for (const r of results) {
+    if (!(r.ok && r.picks)) continue;
+    for (const p of r.picks.picks) {
+      if ((p.cost_usd ?? 0) <= 0) zeroPerSlotCount++;
+    }
+  }
+  if (zeroAggBoards.length > 0 || zeroPerSlotCount > 0) {
+    console.log('');
+    console.log(`  ✗ W9.1 cost-tracking assertion FAILED: ${zeroAggBoards.length} board(s) with cost_usd<=0, ${zeroPerSlotCount} per-slot pick(s) with cost_usd<=0`);
+    process.exitCode = 1;
+  } else if (passed > 0) {
+    console.log(`  ✓ W9.1 cost-tracking assertion PASS: all storyboards + slots reported cost_usd > 0`);
+  }
 
   if (passed < results.length) {
     process.exitCode = 1;
