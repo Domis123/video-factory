@@ -1,6 +1,6 @@
 # Phase 4 Part B — Pipeline
 
-**Status:** W1 through W8 shipped (2026-04-21 through 2026-04-24) + W6.5 tuning iteration shipped 2026-04-23. W1.5 Content Sprint 2 complete. W9 Shadow rollout is the next brief.
+**Status:** W1 through W8 shipped (2026-04-21 through 2026-04-24) + W6.5 tuning iteration shipped 2026-04-23. W1.5 Content Sprint 2 complete. Part B pipeline complete as runtime code, deployed and dormant. W9 Shadow Rollout is the next brief.
 **Success criterion (revised 2026-04-21):** Replace the Phase 3.5 CD → Curator → Copywriter flow with a pipeline that produces **organic-plausible, retention-optimized short-form content with form diversity**, not "just" coherent videos. Auto-QA remains a necessary gate; organic-creator-plausibility on human review is the bar. Measured on nordpilates during shadow mode + ramp.
 **Depends on:** Part A's SegmentV2.1 schema (complete) + W1 keyframe grids (complete).
 
@@ -245,6 +245,19 @@ Addresses followup `w6-subject-discontinuity-prevalence-at-director`. Prompt-onl
 
 Validated via Planner seed 3 ("soft golden-hour pilates aesthetic, no teaching") flipping to `subject_consistency: mixed` + spot-check Critic invocation on a resulting 5-unique-parents storyboard correctly NOT firing `subject_discontinuity`.
 
+#### W8 update — Library inventory injection (shipped 2026-04-24)
+
+Additive extension to W6 from W8's brief. Critic's agent signature gained a `libraryInventory: LibraryInventoryV2` parameter (same shape W3 Planner consumes). Critic prompt teaching expanded with two new sections:
+
+- **Library inventory for your consideration** — explains how to read inventory data (segment-type distribution, body-region distribution, top exercise clusters, equipment distribution) when evaluating whether a form commitment is achievable.
+- **`revise_scope` field** — teaches Critic to emit `slot_level` (issue is fixable by re-picking specific slots from the same candidate pool) vs `structural` (the underlying plan is wrong given the library; full re-plan needed).
+
+`CriticVerdictSchema` gained `revise_scope: z.enum(['slot_level', 'structural']).default('slot_level')`. Default is benign — when verdict is `approve` or `reject`, the field is ignored by the orchestrator but emitted for schema conformance.
+
+Cost impact: ~$0.01-0.02 additional per Critic call (library inventory payload). Annual at 150 videos/week × 50 weeks ≈ $110/year. Absorbed within ~$1/video operator budget.
+
+Validation status: code shipped + Gate A semantic checks passed. Behavior validation — does Critic actually emit `structural` when library is sparse — is W9 shadow measurement (followup `w8-q5-signal-validation-not-exercised-in-gate-a`).
+
 ### W7 — Copywriter rebuild — largely unchanged, two additions
 
 **Purpose:** write overlay text per slot after clips are picked.
@@ -261,7 +274,40 @@ Validated via Planner seed 3 ("soft golden-hour pilates aesthetic, no teaching")
 
 **When built:** parallel to W5/W6.
 
-### W8 — Orchestrator — unchanged from original spec
+**Shipped:** 2026-04-24 (merged at SHA 73ad155).
+
+Pure function `writeCopyForStoryboard(picks, planner, persona, snapshots) → CopyPackage`. Single Gemini text-only call per video (option a; option b two-call escalation path documented in brief but not preemptively built). Produces per-slot overlay text + timing, hook, CTA, platform captions (canonical + 3 platform-trimmed), hashtags. `voiceover_script: z.null()` reserved for W10 widening.
+
+**Overlay type enum authored at W7:** `label | cue | stamp | caption | count | none` with per-type validation rules. `label` requires picked clip's `exercise.name` non-null at confidence high/medium; `stamp` requires posture P4/P5; `count` requires `segment_type='exercise'`; `caption` soft budget max 2 per video; `cue`/`none` always valid.
+
+**Pipeline-invariant CTA logic:** never hard-sell. Decision driven by `form_id + close-slot energy + narrative_beat`. NO per-brand `hard_sell_allowed` field — organic content is pipeline-level invariant, not brand-level config.
+
+**Subject stance modulates voice + overlay density** at Copywriter prompt level. `single-subject` ≠ first-person — brand persona's "rarely first-person" tenet binds at brand level; stance modulates within.
+
+### W8 — Orchestrator
+
+**Shipped:** 2026-04-24 (merged at SHA 89c886f, deployed same day).
+
+State machine over the pipeline (not a DAG executor): QUEUED → PLANNING → RETRIEVING → DIRECTING → SNAPSHOT_BUILDING → PARALLEL_FANOUT → (branch on Critic verdict). Sequential spine + parallel tail.
+
+**Three-tier feature flag composition:**
+- Tier 1: `brand_configs.pipeline_version` (`phase35` | `part_b_shadow` | `part_b_primary`)
+- Tier 2: `jobs.pipeline_override` (per-job override; values `force`/`part_b` or `skip`/`phase35` or NULL)
+- Tier 3: `PART_B_ROLLOUT_PERCENT` env var (deterministic per-job hash)
+
+Composition logic in `src/orchestrator/feature-flags.ts`. All three default to off; merging W8 was a no-op for production traffic.
+
+**shadow_runs table** stores Part B output during shadow; never touches `jobs.context_packet` (Phase 3.5's). Migration 011 added `shadow_runs` + `brand_configs.pipeline_version` + `jobs.pipeline_override`.
+
+**Revise-loop:** soft cap 2 cycles. `slot_level` → orchestrator surgical re-invokes Director on flagged slots. `structural` → orchestrator triggers full re-plan (Planner → Retrieval → Director). Budget exhaustion → escalates to human at `brief_review` with full revise history.
+
+**Fire-and-forget dispatch from BullMQ planning worker.** Part B errors NEVER propagate to Phase 3.5's flow. The `.catch()` boundary is at the dispatch site; internal Part B calls throw normally per Rule 38.
+
+**Pre-builds segment snapshots once per job** at SNAPSHOT_BUILDING state, passes to Critic + Copywriter (saves one Supabase round-trip vs each agent fetching independently). Required minor W7 refactor — `buildSegmentSnapshots` extracted to `src/lib/segment-snapshot.ts` shared lib.
+
+**job_events observability:** `partb_*`-prefixed event types via `DB_EVENT_NAMES` translation map (varchar(30) ceiling on `to_status` column required map vs naive prefix concat). Per-state-transition + per-retry-exhaustion granularity per Q8.
+
+**Validation:** Gate A 28/28 cases (10 mocked state machine + 15 synthetic + 3 real E2E). Tier 2 surfaced two informational signals — none of three real seeds completed without escalation, signal that nordpilates' early shadow will see heavy operator escalation load (followup tracked).
 
 ### W9 — Shadow mode rollout — unchanged from original spec
 
@@ -359,8 +405,10 @@ Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video
 - [x] W5 shipped (Visual Director)
 - [x] W6 shipped (Coherence Critic)
 - [x] W6.5 shipped (subject stance tuning)
-- [x] W7 shipped (Copywriter) — W7 shipped 2026-04-24
-- [x] W8 shipped (Orchestrator) — W8 shipped 2026-04-24
+- [x] W7 shipped (Copywriter; merged 2026-04-24)
+- [x] W8 shipped (Orchestrator; merged + deployed 2026-04-24)
+- [ ] W9 shipped (Shadow rollout) — NEXT BRIEF
+- [ ] W10 shipped (Voice generation) — post-shadow
 - [ ] Feature flag plan decided (deferred to W8 brief)
 - [ ] Voice-evaluation session held (prep for W10, non-blocking for W2-W9)
 
@@ -388,3 +436,5 @@ When Part B is done: Video Factory produces retention-optimized organic short-fo
 *Revised 2026-04-24. Copywriter shipped. Part B creative agents all complete (Planner → Retrieval → Director → Critic → Copywriter). Next brief: W8 Orchestrator.*
 
 *Revised 2026-04-24 (second revision). W8 Orchestrator shipped + deployed. Part B pipeline exists as runtime code end-to-end; dormant until and flipped to pipeline_version='part_b_shadow'. Next brief: W9 Shadow rollout (operates the flags W8 built).*
+
+*Revised 2026-04-24 evening (session close). W7 Copywriter + W8 Orchestrator both shipped this session; Part B pipeline now exists as runtime code end-to-end. W8 was the first runtime-changing merge; Phase 3.5 verified unaffected via post-deploy test job. Q5 architectural flip during W8 brief drafting (Critic gets library inventory injected for signal-based revise_scope routing) was the session's load-bearing decision. Next brief: W9 Shadow Rollout — operates the flags W8 built, ramps Part B from 0% to first-brand-cutover.*

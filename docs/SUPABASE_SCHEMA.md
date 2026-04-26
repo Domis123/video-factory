@@ -2,7 +2,7 @@
 
 **Project:** Video Factory
 **Supabase URL:** `https://kfdfcoretoaukcoasfmu.supabase.co`
-**Last updated:** 2026-04-20
+**Last updated:** 2026-04-24 (Migration 011 applied; W8 shadow infrastructure landed)
 **Status:** Mixed — some tables fully verified via SQL inspection, others inferred from code/migrations
 
 **Verification key:**
@@ -291,6 +291,93 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | 006 | `006_brand_configs_color_treatments.sql` | ✅ **Applied 2026-04-15 (Phase 3 W1)** | Add allowed_color_treatments TEXT[] + backfill nordpilates and carnimeat |
 | 007 | `007_pre_normalized_clips.sql` | ✅ **Applied 2026-04-16 (Phase 3 W5)** | Add pre_normalized_r2_key TEXT to assets. Nullable, no default, no backfill (clean-slate drop). |
 | 008 | `008_segment_v2_sidecar.sql` | ✅ **Applied 2026-04-20 (Phase 4 Part A W0c)** | Add segment_v2 JSONB to asset_segments + GIN index. Nullable, no default. Backfilled by W0d. |
+| 011 | `011_shadow_runs.sql` | ✅ **Applied 2026-04-24 (Phase 4 Part B W8)** | Add shadow_runs table + brand_configs.pipeline_version + jobs.pipeline_override (W8 shadow infrastructure). See section below for full schema. |
+
+> Table is non-exhaustive — migrations 009 (`009_keyframe_grid_column.sql`) and 010 (`010_match_segments_v2.sql`) exist on disk under `src/scripts/migrations/` but are not yet documented in this table. Backfill at next refresh.
+
+### Migration 011 — Part B shadow infrastructure (applied 2026-04-24)
+
+Adds three changes for W8 Orchestrator's shadow-mode infrastructure:
+
+**1. New table: `shadow_runs`**
+
+Stores Part B pipeline output during shadow mode. Never touches `jobs.context_packet` (which Phase 3.5 owns during shadow).
+
+```sql
+CREATE TABLE shadow_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  job_id UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Part B output
+  planner_output JSONB NOT NULL,
+  retrieval_debug JSONB NOT NULL,
+  storyboard_picks JSONB NOT NULL,
+  critic_verdict JSONB NOT NULL,
+  copy_package JSONB NOT NULL,
+  context_packet_v2 JSONB NOT NULL,
+
+  -- Phase 3.5 reference (null if not dual-run)
+  context_packet_v1 JSONB,
+
+  -- Run metadata
+  revise_loop_iterations INT NOT NULL DEFAULT 0,
+  total_agent_invocations INT NOT NULL,
+  part_b_wall_time_ms INT NOT NULL,
+  part_b_cost_usd NUMERIC(6,4) NOT NULL,
+
+  -- Operator verdict (W9-populated; null at W8-time)
+  operator_comparison_verdict TEXT,  -- 'part_b_better' | 'v1_better' | 'tie' | NULL
+  operator_notes TEXT,
+
+  -- Failure mode if Part B didn't complete
+  part_b_terminal_state TEXT,
+  part_b_failure_reason TEXT
+);
+
+CREATE INDEX idx_shadow_runs_job_id ON shadow_runs(job_id);
+CREATE INDEX idx_shadow_runs_created_at ON shadow_runs(created_at DESC);
+CREATE INDEX idx_shadow_runs_terminal_state ON shadow_runs(part_b_terminal_state);
+CREATE INDEX idx_shadow_runs_brand_state_time
+  ON shadow_runs((context_packet_v2->>'brand_id'), part_b_terminal_state, created_at DESC);
+```
+
+**2. New column: `brand_configs.pipeline_version`**
+
+Tier 1 of W8's three-tier feature flag composition. Brand-level eligibility for Part B.
+
+```sql
+ALTER TABLE brand_configs
+  ADD COLUMN pipeline_version TEXT NOT NULL DEFAULT 'phase35'
+  CHECK (pipeline_version IN ('phase35', 'part_b_shadow', 'part_b_primary'));
+```
+
+Values:
+- `phase35` — only Phase 3.5 runs. Part B never considered. (Default.)
+- `part_b_shadow` — eligible for Part B via Tier 2/3 below. Phase 3.5 still runs.
+- `part_b_primary` — Part B serves production; Phase 3.5 not called. (W9 ramp terminal state; unreachable at W8 time.)
+
+All 5 brands defaulted to `phase35` at migration apply time.
+
+**3. New column: `jobs.pipeline_override`**
+
+Tier 2 of W8's three-tier feature flag composition. Per-job override.
+
+```sql
+ALTER TABLE jobs
+  ADD COLUMN pipeline_override TEXT DEFAULT NULL;
+```
+
+Values (read by `src/orchestrator/feature-flags.ts`):
+- `NULL` (default) — Tier 3 percentage rollout decides.
+- `'part_b'` or `'force'` — Part B runs even if Tier 3 percentage would have skipped.
+- `'phase35'` or `'skip'` — Phase 3.5 only, even if Tier 3 would have selected Part B.
+
+Operator workflow for setting this column (n8n + Sheets coordination) is W9 scope.
+
+**Migration verification post-apply:** `src/scripts/verify-011.ts` confirmed all 18 columns of `shadow_runs` are reachable, CHECK constraint on `pipeline_version` rejects nonsense values, default values applied to existing rows, round-trip insert/delete on `shadow_runs` with real `jobs` FK passes.
+
+**Rollback procedure:** rolling back W8 code without rolling back Migration 011 is safe — new columns default to values compatible with pre-W8 code. Rolling back the migration requires verifying no code reads the new columns first (trivial post-revert), then dropping `shadow_runs` table + columns. No data migration; no downtime.
 
 ---
 

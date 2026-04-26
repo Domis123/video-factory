@@ -1,293 +1,286 @@
-# Handoff to New Chat — 2026-04-23 (session close)
+# Handoff to New Chat — Session 2026-04-24
 
-**Read this first.** Supersedes prior handoff. Part B is substantially further along than the last handoff reflected — W1 through W6 shipped plus a mid-stream tuning iteration (W6.5). Seven ships across two calendar days. W7 Copywriter is the next brief.
-
----
-
-## TL;DR
-
-Video Factory is an automated short-form video pipeline for ~30 organic (non-ad) fitness/wellness brands. Primary test brand: nordpilates.
-
-**State at handoff:**
-
-- **W1 (keyframe grids):** shipped 2026-04-21.
-- **Legacy Flash removal:** shipped 2026-04-22 morning.
-- **W2 (brand persona + loader):** shipped 2026-04-22 afternoon.
-- **W3 (Planner — form_id + hook_mechanism + slot structure):** shipped 2026-04-22 evening.
-- **W4 (`match_segments_v2` RPC + TS wrapper):** shipped 2026-04-22 evening.
-- **W5 (Visual Director — multimodal clip selection):** shipped 2026-04-22 late.
-- **W6 (Coherence Critic):** shipped 2026-04-23 afternoon.
-- **W6.5 (Planner subject stance + conditional Critic check):** shipped 2026-04-23 late. Single-gate mid-stream tuning iteration addressing the W6-surfaced subject_discontinuity prevalence issue.
-- **W1.5 (Content Sprint 2):** STILL IN PROGRESS. Library at 1116+ segments when last checked mid-session; likely larger now. No agent action needed.
-- **W7–W10:** not started. W7 is the next brief.
-
-**Immediate next actions (new planning chat):**
-1. Verify Sprint 2 status — `SELECT COUNT(*), MAX(created_at) FROM assets WHERE brand_id='nordpilates'`. If count stable for >1hr, meaningfully complete; refresh taxonomy readiness flags with real numbers (already partly done in this session's docs batch — check `w2-content-form-taxonomy.md` for v1.1 marker).
-2. Confirm no issues surfaced from any of the seven ships during the handoff window. Agent should be idle.
-3. Write W7 Copywriter brief. Prereqs all satisfied.
+**Read this first. Then read MVP_PROGRESS_17.md for the historical record. Then read the Project Context Primer if you don't already have it loaded — it tells you why the pipeline exists and what failure modes are load-bearing. Tactical specs come last.**
 
 ---
 
-## What Video Factory is (unchanged)
+## What you're walking into
 
-- Purpose: 150–300 organic short-form videos/week at steady state across ~30 brands
-- Creative north-star: "pleasurable to watch, feels organic, not selling." Retention through pleasure, not persuasion.
-- Audience: organic social (TikTok, Instagram Reels, YouTube Shorts)
+Video Factory is a pipeline that produces ~150-300 short-form videos per week across ~30 wellness/fitness brands, fully automated. Operators (humans) fill idea seeds in a Google Sheet; the pipeline does ingestion, segmentation, analysis, scripting, clip selection, copywriting, rendering, and platform-export delivery. Two Hetzner VPS servers (n8n orchestrator + worker engine) run the whole thing.
 
-## Infrastructure (unchanged)
+The bigger architectural arc this session continued: **Phase 3.5 is the production pipeline today (Creative Director → Asset Curator → Copywriter → render). Part B is the rebuild that exploits richer segment metadata + multimodal pick + post-select copy.** Part B's creative goal — *retention through pleasure, not persuasion; videos that feel organic, not like ads* — is the entire reason the rebuild exists.
 
-- n8n server: 46.224.56.174
-- Video Factory VPS: 95.216.137.35 (Hetzner CX32), `/home/video-factory`
-- Supabase: `https://kfdfcoretoaukcoasfmu.supabase.co`
-- R2, Upstash Redis, Gemini 3.1 Pro Preview, ElevenLabs (W10 only)
+**As of this session close: Part B is complete as runtime code, end-to-end, deployed and dormant.** All five creative agents (Planner, Retrieval, Director, Critic, Copywriter) are shipped. The Orchestrator that wires them is shipped. Shadow-mode infrastructure (shadow_runs table, 3-tier feature flag composition, dual-run dispatch) is deployed. **Zero brands are flipped to shadow mode yet.** Phase 3.5 still serves 100% of production, exactly as it has all session.
+
+The next brief is **W9 Shadow Rollout** — the workstream that operates the flags W8 built, ramps Part B from 0% to 100% on nordpilates first, then expands.
 
 ---
 
-## Part B pipeline status (current)
+## Pipeline status at a glance
+
+| Stage | Phase 3.5 | Part A | Part B |
+|---|---|---|---|
+| Ingestion | ✅ Production v1 | ✅ V2 flag ON | — |
+| Segment analysis | ✅ Production (v2) | ✅ Complete | — |
+| Keyframe grids | — | — | ✅ W1 shipped |
+| Content Sprint 2 | — | — | ✅ Complete (1116+ segments, 100% v2) |
+| Creative Director | ✅ Production (Claude) | — | ✅ Replaced by Planner |
+| Brand persona | ✅ Minimal | — | ✅ W2 shipped |
+| Planner | — | — | ✅ W3 shipped + W6.5 tuned |
+| Retrieval RPC | ✅ v1 match_segments | — | ✅ W4 shipped (v2) |
+| Visual Director | — | — | ✅ W5 shipped |
+| Coherence Critic | — | — | ✅ W6 shipped + W6.5 tuned + W8 lib-inv |
+| Copywriter | ✅ Production (Claude) | — | ✅ W7 shipped |
+| Orchestrator | ✅ Phase 3.5 worker | — | ✅ **W8 shipped 2026-04-24** |
+| Shadow rollout | — | — | 🔴 **W9 NEXT BRIEF** |
+| Audio generation | — | — | 🔴 W10 post-shadow |
+| Remotion render | ✅ Production | — | (unchanged) |
+| Platform export | ✅ Production | — | (unchanged) |
+
+Legend: ✅ shipped · 🔴 not started · — not applicable
+
+**Production state right now:** Phase 3.5 serves every job. All 5 brands have `brand_configs.pipeline_version = 'phase35'`. `PART_B_ROLLOUT_PERCENT = 0` (or unset). `jobs.pipeline_override` is NULL on every row. Part B code is loaded into the worker process (memory baseline rose from ~142MB to ~210MB on W8 deploy), but no job ever routes to it.
+
+---
+
+## What shipped this session
+
+Two ships and one critical bugfix. Both ships were full Part B workstreams; the bugfix was W8 commit 13 closing the `job_events` observability gap pre-merge.
+
+### W7 — Copywriter (shipped 2026-04-24, merged at SHA 73ad155)
+
+Single Gemini text-only call producing per-slot overlay text + timing, hook, CTA (organic-content invariant — never hard-sell), platform captions (canonical + 3 platform-trimmed), hashtags. Pure function `writeCopyForStoryboard(picks, planner, persona, snapshots) → CopyPackage`. `voiceover_script: z.null()` reserved for W10.
+
+**Key architectural commitments locked in W7 brief Q&A:**
+- Single call (option a) with two-call fallback (option b) named but not preemptively built
+- Pure function — no orchestrator coupling
+- Reference Phase 3.5 Copywriter for output conventions (caption length, hashtag count, platform split); inherit shape, extend with Part B inputs
+- Overlay type enum authored: `label | cue | stamp | caption | count | none` with per-type validation rules
+- Captions: one canonical + three platform-trimmed, all in one Gemini call
+- Hook mechanism → text mapping taught in prompt (no external registry)
+- CTA pipeline-invariant: never hard-sell. NOT a per-brand `hard_sell_allowed` field. Decision driven by form_id + close-slot energy + narrative_beat.
+- segment_v2 snapshot per pick: extends Critic's snapshot shape with `on_screen_text` (load-bearing for overlay-collision avoidance)
+- Subject stance modulates voice + overlay density. `single-subject` ≠ first-person — nordpilates persona binds at brand level.
+
+**8 commits on the W7 branch.** Two unplanned: commit 6 worked around Gemini rejecting `voiceover_script: z.null()` (constraint-density ceiling, W3 pattern second occurrence — schema strip + post-parse inject). Commit 9 was param-only tuning (maxOutputTokens 4000→8000, aggressive bounds strip beyond `stripSchemaBounds()`) that fixed the dominant JSON parse malformation pattern. **Final Gate A: 5/5 Tier 1 with zero parse retries.**
+
+The slot-0 "homogenization FAIL" in the test harness was test-metric semantic, not Copywriter behavior — when `hook.delivery='overlay'`, slot-0 type=`'none'` is correct; the distinctness metric counted two `none`s as identical. Filed as followup, not a Gate A blocker.
+
+### W8 — Orchestrator (shipped 2026-04-24, merged at SHA 89c886f)
+
+The first runtime-changing merge of Part B. Wires W3 → W4 → W5 → [W6 ∥ W7] into a coordinated pipeline behind a 3-tier flag composition. Writes output to a new `shadow_runs` table; **never** touches `jobs.context_packet` (which Phase 3.5 owns). Fire-and-forget dispatch from BullMQ planning worker — Part B errors NEVER propagate to Phase 3.5's flow.
+
+**12 commits on the W8 branch.** Two more added during Gate B (commit 13: the `job_events` column-mismatch fix; commit 14: post-fix verification re-smoke). Total 14 SHAs.
+
+**Key architectural commitments locked in W8 brief Q&A:**
+- `shadow_runs` table for all Part B output during shadow (Q1 option c). Migration 011.
+- Critic-Copywriter parallel on expected-pass path (Q2 option a)
+- Per-agent retries kept; W8 only coordinates inter-agent (Q3 option a)
+- Revise-loop soft cap at 2; exhaustion → human escalation at brief_review (Q4 option b)
+- **Critic gets library inventory injected** (Q5 option a — flipped from initial b during brief drafting). `revise_scope: 'slot_level' | 'structural'` is a signal-based decision, not a guess.
+- Three-tier feature flag composition: brand-level eligibility + job-level allowlist + percentage rollout (Q6 option d)
+- Dual-run during shadow's first ~20 nordpilates jobs (Q7 option a); switches to Part-B-only after signal stabilizes
+- job_events: per-state-transition + per-retry-exhaustion (Q8 option c). Successful retries silent.
+- W8 pre-builds segment snapshots once, passes to Critic + Copywriter (Q9 option b — small W7 refactor in W8 scope)
+- Sequential spine + parallel tail: Planner → Retrieval → Director → [Critic ∥ Copywriter]
+- Pre-enqueue render guard for `voiceover_script: null` (Q11)
+- Three-tier Gate A: mocked state machine + real E2E + synthetic failure paths
+
+**Migration 011 applied to remote Supabase before merge.** Adds `shadow_runs` table, `brand_configs.pipeline_version` column (CHECK constraint enum: 'phase35' | 'part_b_shadow' | 'part_b_primary'; default 'phase35'), `jobs.pipeline_override` column.
+
+**W6 received an additive extension:** Critic's agent signature gained a `libraryInventory` parameter (same shape W3 Planner consumes). Critic prompt teaching expanded to use inventory data for distinguishing slot-level fixability from structural plan-mismatch. Cost impact ~$0.01-0.02/call.
+
+**W7 received a refactor (no behavior change):** `buildSegmentSnapshots` extracted from W7's internal call to `src/lib/segment-snapshot.ts` shared lib. W7 + W6 now both consume pre-built snapshots passed in by W8. One Supabase round-trip per video instead of two.
+
+### Gate A Tier 2 findings — what the smokes told us
+
+Gate A passed at 28/28 cases (10 mocked + 15 synthetic + 3 real E2E). But the per-seed real-E2E results revealed signals worth understanding:
+
+- **Seed A** (aesthetic-ambient, "slow sunday stretching"): expected happy-path; observed **revise budget exhausted ×2 → escalated to human**. State machine behaved correctly. Critic legitimately flagged real issues twice; Director's surgical re-picks couldn't resolve them.
+- **Seed B** (routine-sequence, "morning pilates hip mobility"): expected revise-loop exercise; observed **same exhaustion pattern as A**. Director re-invocations on the flagged slots produced near-identical clips both times — slot-level revise didn't converge.
+- **Seed C** (structural-revise canary, "bulgarian split squat deep dive"): designed to force `revise_scope: 'structural'` via library-inventory injection. **Did NOT trigger structural.** Critic approved on first fanout (sparse library wasn't sparse enough, or Planner didn't commit to deep-dive form). Copywriter then died on parse — separate W7-residual issue.
+
+**What this means:** the W8 state machine, flag composition, render-prep guard, shadow-writer, and Critic library-inventory injection (as code) all work correctly. **What we don't have evidence for yet:** that the Q5(a) library-inventory-at-Critic actually changes Critic behavior. Seed C didn't reach the path. This is a W9 measurement gap, not a W8 bug, but it's load-bearing — if the library-inventory teaching doesn't move Critic's `revise_scope` distribution in shadow, we revisit.
+
+The 2-of-3 revise-exhaustion rate also tells us nordpilates' early shadow will see heavy operator escalation. Followup `w8-nordpilates-revise-exhaustion-rate-tier-2-baseline` flags this; W9 measures whether budget=3 helps.
+
+### Phase 3.5 verified unaffected post-W8 deploy
+
+Submitted test job `cbd6d445-...` against nordpilates after W8 deploy. Phase 3.5 reached `brief_review` on schedule. Dispatcher correctly logged `Part B not routed for job ... — brand pipeline_version=phase35 — Part B disabled`. Zero `partb_*` events emitted (expected — no brand is flagged shadow). Test job cleaned up.
+
+The fire-and-forget invariant held. Phase 3.5's job lifecycle is genuinely unaffected by Part B code being loaded.
+
+---
+
+## What's next — W9 Shadow Rollout
+
+This is operational, not architectural. The flags W8 built get operated. The shadow_runs table starts populating. Operator verdicts accumulate. Eventually a brand flips from `part_b_shadow` to `part_b_primary` and Part B serves production for that brand.
+
+**Decisions W9 will need to make:**
+
+- When to flip nordpilates to `part_b_shadow` (probably immediately — it's the canary brand)
+- Initial `PART_B_ROLLOUT_PERCENT` value (probably low, e.g. 10-20%, given Tier 2's revise-exhaustion baseline)
+- How operator reviews dual-run output in practice — Sheet view? Direct Supabase query? Something else?
+- Cadence for ramp decisions (weekly review? when N comparisons accumulate?)
+- Signals that decide `part_b_primary` cutover (operator verdict ratio, escalation rate, cost per video, organic-creator-plausibility)
+- Pause / rollback thresholds (what makes us roll back to phase35?)
+- When to flip dual-run mode off (Q7 said "after signal stabilizes" — what's the concrete threshold?)
+- W10 sequencing — does voice generation get scheduled relative to shadow's progress on a brand-by-brand basis?
+
+W9 will probably be a shorter brief than W8 (less code, more measurement framework + decision cadence). Expect ~300-400 lines vs W8's 797.
+
+**The decisions in W9 are different in character from W1-W8.** W1-W8 were "build this thing, validate with Gate A, ship." W9 is "operate the thing, measure, decide cutover." Less code, more operational protocol. The planning chat for W9 should expect to spend more time on measurement-framework design and less time on agent prompt engineering or schema migration.
+
+---
+
+## Active rules from CLAUDE.md (full list at session close)
+
+42 rules. Rule 42 was the only addition this session (single-gate tuning protocol; W6.5 was the precedent). I considered proposing Rule 43 ("push feature branches to origin continuously during work, not just at task end") after W8's local-only branch incident, but didn't push for it — GIT_WORKFLOW already states this; the session lesson is that the agent missed it once, not that the convention is unclear.
+
+Rules that bound this session's decisions most:
+
+- **Rule 34** — Never mix Gemini SDKs. New code uses `@google/genai`. Honored throughout W7 and W8.
+- **Rule 36** — Additive only. Honored: no Phase 3.5 modification, W6 extension was schema-additive + signature-additive, W7 refactor was parameter-shape only.
+- **Rule 38** — Validation throws loud, never silent-corrects. Honored: 7 distinct W7 semantic validation error classes; W8 state-machine guard errors throw with named errors; the post-Gate-A `emitEvent` fix removed a try/catch precisely because Rule 38 says event emission failures should be loud during shadow.
+- **Rule 40** — Creative variance lives upstream in persona + prompts, not in segment taxonomy. Honored: W7 didn't add a `hard_sell_allowed` field; organic-content is pipeline-invariant.
+- **Rule 41** — Form × posture orthogonality. Honored: W7's `stamp` overlay type validates against posture P4/P5; the axis is read, not modified.
+- **Rule 42** — Single-gate tuning protocol. Did NOT apply to W7 or W8. Both were full workstreams with new code paths; both used two-gate (Gate A smoke + Gate B merge approval).
+
+---
+
+## Open followups at session close
+
+`docs/followups.md` has 14 active entries. Ranked by W9 relevance:
+
+**Load-bearing for W9 (top of mind):**
+
+1. **`w8-q5-signal-validation-not-exercised-in-gate-a`** — does library-inventory-at-Critic actually change `revise_scope` distribution? W9 measures.
+2. **`w8-nordpilates-revise-exhaustion-rate-tier-2-baseline`** — 2 of 3 Gate A seeds exhausted. Shadow rate measurement is the calibration signal for whether budget=3 is needed.
+3. **`w8-slot-level-revise-thrashing-without-convergence`** — Director re-picks identical candidates. Is Critic mis-classifying as slot-level? Is retrieval pool too sparse? W9 measurement disambiguates.
+4. **`w7-slot0-homogenization-metric-treats-none-as-collision`** — test-harness metric tuning; resolve when shadow has real slot-0-non-null cases.
+5. **`gemini-3.1-pro-preview-stability-with-rich-response-schemas`** — cross-agent (W5 + W7 + possibly W8). W9 measures parse-exhaustion rate per agent.
+
+**Carried from prior sessions, may surface in W9:**
+
+6. **`w6-subject-discontinuity-prevalence-at-director`** — partially resolved by W6.5; full validation at W9 shadow.
+7. **`w5-subject-role-all-primary-in-planner`** — Planner emits primary on ~100% of slots; observe in shadow whether mixed videos feel monotonous.
+8. **`w5-duplicate-segment-across-slots-in-director`** — addressed by W6 issue type; revisit only if W6 misses it.
+
+**Lower priority / informational:**
+
+9. **`w7-parse-retry-headroom-in-production`** — 3-attempt ceiling held with headroom at Gate A; widen if shadow exhausts.
+10. **`w7-stripAggressiveBounds-kept-distinct-from-stripSchemaBounds`** — design documentation; future agent extending stripAggressive path list rather than widening global strip.
+11. **`w8-copywriter-parse-fragility-seed-c`** — observed once at Gate A; linked to gemini stability followup.
+12. **`w8-phase-3-5-unaffected-check-via-worker-harness`** — resolved at deploy time via manual verification; automated harness still owed if W9 wants belt-and-suspenders.
+13. **`w8-job-events-to-status-varchar-30-ceiling`** — cosmetic; migration 012 if W10+ overflows again.
+
+**Inactive backlog:**
+
+14. Various Part A spot-check, Part B test-segment UUID drift, raw-fallback crop, naive singularization — all deferred, unlikely to surface in W9.
+
+---
+
+## Operator (Domis) — how he works, refresher
+
+Lithuanian, Vilnius. Stack-fluent (n8n, Supabase, Sheets, Hetzner, AI pipelines). Direct communicator — spelling can be loose, parse for intent, don't correct.
+
+**Rewards:**
+- Decisive moves. Strategic pushback over tactical defense.
+- Architectural reframing when the surface problem isn't the real one.
+- Plain language when jargon stacks.
+- Agents handling git autonomously.
+
+**Frustrations:**
+- Re-litigating decisions in docs.
+- Hedging language.
+- Tactical dismissal of strategic concerns.
+- Things that should work but don't.
+
+**Tells observed this session:**
+- *"seems alright, continue"* = full approval, ship it.
+- *"it will be in /docs/briefs"* = he's already filed; don't re-ask where to put it.
+- *"hold on merge"* / *"merge to main and deploy"* = the literal instruction; do it.
+- One-line answers to multi-question Q&A = trust earned, decisions made, proceed.
+- *"maybe we should have chosen X then?"* = strategic pushback, not a tactical objection. Reframe and re-evaluate; don't defend.
+
+The Q5 flip from (b) to (a) on W8 was a textbook example. Domis surfaced "calibration concern" as a strategic doubt; the planning chat reframed (laid out the false-slot_level thrashing failure mode), recommended the flip, and Domis confirmed. That's the working pattern. Repeat it.
+
+**Cost stance from this session:** *"$1 per video acceptable, even higher if necessary."* Removes pressure to micro-optimize. Multimodal Director is the cost driver; accept it as the price of organic-creator quality.
+
+---
+
+## Tactical state for tools the next chat will use
+
+### Branches at session close
+
+`main` only. All feature branches merged + deleted.
 
 ```
-       Idea seed + brand_id
-              │
-              ▼
-     ┌────────────────┐
-     │  Planner       │  ✅ W3 shipped — form_id + hook_mechanism + 
-     │                │     subject_consistency + slot structure
-     │                │     W6.5: subject stance commits per idea
-     └────────┬───────┘
-              │
-              ▼
-     ┌────────────────┐
-     │ Candidate      │  ✅ W4 shipped — match_segments_v2 RPC
-     │ Retrieval      │     layered filters + soft relaxation + 
-     │                │     subject-hint boost (0.02)
-     └────────┬───────┘
-              │
-              ▼
-     ┌────────────────┐
-     │ Visual         │  ✅ W5 shipped — multimodal Gemini per slot
-     │ Director       │     parallel non-primary + sequential primary
-     │                │     consumes W1 grids + W4 candidates
-     └────────┬───────┘
-              │
-              ▼
-     ┌────────────────┐
-     │ Coherence      │  ✅ W6 shipped — 13-issue taxonomy, 3-verdict
-     │ Critic         │     pre-compute hints for mechanical issues
-     │                │     W6.5: subject_discontinuity conditional
-     └────────┬───────┘
-              │
-              ▼
-     ┌────────────────┐
-     │ Copywriter     │  🔴 W7 — NEXT BRIEF
-     │ (post-select)  │     text-only single call
-     │                │     consumes picks + planner + persona
-     └────────┬───────┘
-              │
-              ▼
-     [Orchestrator W8]    🔴 not started
-     [Shadow mode W9]     🔴 not started
-     [Voice gen W10]      🔴 post-W9
-              │
-              ▼
-        Remotion render
+main: 2548a81 docs: post-w8-merge status + 6 followups
+        ↑
+        89c886f merge feat/phase4-w8-orchestrator
+        ↑
+        79c6f3b docs: post-w7-merge status + 4 followups
+        ↑
+        73ad155 merge feat/phase4-w7-copywriter
+        ↑
+        ... earlier session-close commits ...
 ```
 
-**None of W2 through W6.5 has a runtime consumer yet.** All are importable modules validated by test scripts. W8 orchestrator is the first consumer; W9 shadows. This is by design — Part B is building the full pipeline statelessly, then wiring it behind a feature flag once coherent.
+11+ unmerged origin branches still sitting (hygiene cleanup deferred). Stash count on VPS likely up to 7-8 (W7 + W8 lockfile drift). Anti-pattern #10 (no `git add -A`) honored throughout the session.
+
+### Database state
+
+Supabase migration 011 applied. All 5 brands on `pipeline_version='phase35'`. Zero rows in `shadow_runs`. Zero rows in `jobs` with `pipeline_override` set.
+
+W3 library inventory shows 1116+ segments on nordpilates with v2 coverage near-100%. Sprint 2 confirmed complete by operator.
+
+### VPS state
+
+Service restarted on W8 deploy (2026-04-24 13:00:50 UTC). Memory baseline ~210MB (up from ~142MB pre-W8). 4 queues running: ingestion, planning, rendering, export. API on :3000.
+
+### Files added/modified this session
+
+W7 created: `src/types/copywriter-output.ts`, `src/agents/copywriter-v2.ts`, `src/agents/prompts/copywriter-v2.md`, `src/scripts/test-copywriter.ts`, `docs/smoke-runs/w7-phase35-reference-notes.md`, plus 3 Gate A artifacts.
+
+W8 created: `src/orchestrator/orchestrator-v2.ts`, `state-machine.ts`, `feature-flags.ts`, `shadow-writer.ts`, `revise-loop.ts`, `render-prep.ts`, `src/types/orchestrator-state.ts`, `src/lib/segment-snapshot.ts`, `supabase/migrations/011_shadow_runs.sql`, `src/scripts/test-orchestrator.ts`, plus pre-work + Gate A artifacts.
+
+W6 modified additively: `src/types/critic-verdict.ts`, `src/agents/critic-v2.ts`, `src/agents/prompts/critic-v2.md`, `src/scripts/test-critic.ts` (if existed).
+
+W7 refactored: `src/agents/copywriter-v2.ts` (now consumes pre-built snapshots), `src/scripts/test-copywriter.ts` (snapshot setup external).
+
+`src/index.ts` modified: added fire-and-forget Part B dispatch alongside Phase 3.5 planning.
+
+Phase 3.5 code: untouched. Rule 36 honored throughout.
+
+### Cost tracking — actual session spend
+
+Rough estimate from agent reports:
+- W7 Gate A (3 smoke runs incl. iterations): ~$2-3 across all attempts
+- W8 Gate A (T1+T3 mocked = $0; T2 real E2E = ~$1.0; post-fix re-smoke = ~$0.40): ~$1.5
+- Session total: ~$4 in Gemini usage
+
+Production projection unchanged: ~$0.55-0.75/video happy-path Part B; up to ~$1.50/video worst-case with revise loops; absorbable within operator's $1/video target with revise-budget calibration in W9.
 
 ---
 
-## What shipped this session (2026-04-22 + 2026-04-23)
+## What you should NOT do on day 1
 
-Seven ships across two calendar days. Chronological:
+- Re-derive architectural decisions from this session. Trust the record. The 24 questions across W7 + W8 brief Q&A are answered; their answers are in the briefs at `docs/briefs/W7_COPYWRITER_BRIEF.md` and `docs/briefs/W8_ORCHESTRATOR_BRIEF.md`. Don't re-ask.
+- Suggest rewriting any W2-W8 code. All shipped + validated.
+- Skip Part B's organic-content invariant in any W9 measurement framework. "Retention through pleasure, not persuasion" is the success criterion.
+- Treat W9 like W8. Different mental mode — operations + measurement, not architecture.
+- Assume nordpilates is the only brand worth designing for. W9's decision framework should generalize to the eventual 30 brands; nordpilates is just the canary.
+- Skip the plain-language check. If Domis asks you to explain something simpler, reset framing entirely.
 
-### 2026-04-22
+## What you SHOULD do on day 1
 
-**Legacy Flash removal** (merge `99d661e`, fix `e862ee8`, followup `1824029`):
-- Removed `analyzeClip` call from `src/workers/ingestion.ts` hot path
-- Dropped Flash-populated columns from `assets` insert
-- V1 asset-curator rollback path stays as an emergency door per followup `v1-curator-flash-nulls-if-emergency-rollback`
-
-**W2 — Brand persona + form/posture loader** (merge `6b139e4`):
-- `src/types/content-forms.ts`, `src/types/brand-persona.ts`, `src/agents/brand-persona.ts`
-- `docs/brand-personas/nordpilates.md` — persona v1 content canonicalized
-- `docs/brand-personas/_template.md` — onboarding template
-- YAML frontmatter + prose body; loader in-memory cached; Zod-validated
-- Agent collapsed FormId parallel-declaration pattern into single-source-of-truth (`export type FormId = (typeof FORM_ID_VALUES)[number]`) — better than the brief
-
-**W3 — Planner** (merge `7894ee2`):
-- `src/lib/text-normalize.ts`, `src/types/library-inventory.ts`, `src/agents/library-inventory-v2.ts`
-- `src/types/planner-output.ts`, `src/agents/planner-v2.ts`, `src/agents/prompts/planner-v2.md`
-- `src/scripts/test-planner.ts`
-- Form_id + hook_mechanism + subject_consistency + slot structure per idea + brand + library inventory
-- `stripSchemaBounds()` defensive helper added after Gemini rejected heavy-constraint schemas (reused in W5, W6)
-- Iteration passes addressed homogenization (music_intent collapsed to calm-ambient, creative_vision opener laziness, slot_count compression) and a 1000-row PostgREST silent-truncation bug in the aggregator
-
-**W4 — `match_segments_v2` RPC** (merge `516b3ae`):
-- Migration 010: PL/pgSQL RPC with layered filters + soft relaxation + composite boost scoring
-- `src/agents/candidate-retrieval-v2.ts` — TS wrapper (naming-conflict-guard renamed from brief's suggested `curator-v2-retrieval.ts`)
-- `src/types/candidate-set.ts` + test script + migration applier
-- p95 latency 328ms on 1116 segments, well under 500ms target
-- Iteration: subject-hint boost retuned from 0.10 → 0.02 after scenario 5 returned 100% same-parent (eclipsed cross-parent variety)
-
-**W5 — Visual Director** (merge `2e29f4a`):
-- `src/types/slot-pick.ts`, `src/agents/visual-director.ts`, `src/agents/prompts/visual-director.md`
-- `src/lib/r2-fetch.ts` (reuses existing `src/lib/r2-storage.ts`), `src/scripts/test-visual-director.ts`
-- First multimodal Part B agent; consumes W1 keyframe grids + W4 candidate sets
-- Per-slot Gemini call with up to 18 attached grids + structured metadata
-- `pickClipForSlot` (primitive) + `pickClipsForStoryboard` (parallel-non-primary + sequential-primary coordination)
-- Soft subject-continuity enforcement — log cross-parent on primary slots, append to reasoning, don't throw
-- Gate A surfaced duplicate-segment-across-slots finding (storyboard 1 slots 3+4 both picked 9f86f752 at in_point 259.00) — logged as `w5-duplicate-segment-across-slots-in-director`, explicitly addressed at W6
-- Defensive parse-retry matcher widening (HTTP-success-but-empty Gemini responses treated as parse-retry-eligible)
-
-### 2026-04-23
-
-**W6 — Coherence Critic** (merge `2255dcf`):
-- `src/types/critic-verdict.ts` (13-issue enum + 3-verdict enum + 3-severity enum)
-- `src/agents/coherence-critic.ts`, `src/agents/prompts/coherence-critic.md`, `src/scripts/test-coherence-critic.ts`
-- Text-only Gemini call, temperature 0.3, pre-compute mechanical hints (duplicate_segment_ids, parent_distribution, total_duration_s, energy_sequence) injected into prompt as observations model must address
-- 3 real storyboards + 2 synthetic failure cases (forced duplicate + forced duration)
-- Both synthetic mechanical assertions PASS; duplicate-segment-across-slots from W5 issue caught correctly
-- Gate A exposed subject_discontinuity firing on 3/3 real storyboards — load-bearing architectural finding (see below)
-
-**W6.5 — Planner subject stance + conditional Critic check** (merge `370db5e`):
-- Single-gate mid-stream tuning iteration. Prompt-only edits to `planner-v2.md` + `coherence-critic.md`; no schema changes; no new code paths
-- Addressed followup `w6-subject-discontinuity-prevalence-at-director`
-- Planner learns when to commit to `single-subject` / `prefer-same` / `mixed` per idea-seed signals (first-person possessive → single-subject; "vibes/aesthetic/compilation" → mixed; authority framing → single-subject-teacher)
-- Critic's `subject_discontinuity` becomes conditional: fires on `single-subject`, fires at low severity on `prefer-same`, does not fire on `mixed`
-- Agent added proactive note-length cap to Critic prompt after first smoke hit Zod overflow; observable wins (faster latency, shorter notes, no correctness loss)
-- Validated end-to-end via one spot-check invocation (Planner seed 3 → W4 → W5 → Critic on a `mixed` aesthetic storyboard with 5 unique parents across 5 picks): Critic did NOT fire subject_discontinuity; conditional path validated
+- Read this doc, then `docs/MVP_PROGRESS_17.md`, then the Project Context Primer if loaded, then whatever's most relevant.
+- Verify state matches expectations before moving: query brand_configs (all phase35?), shadow_runs (empty?), jobs.pipeline_override (all NULL?), main branch SHA matches `2548a81`.
+- For W9 kickoff, expect ~10-12 questions covering: ramp cadence, operator review workflow, dual-run threshold, signal calibration for cutover, pause/rollback triggers, W10 sequencing.
+- Follow the W7 + W8 brief structure as a template — it works, Domis has internalized it, no reason to deviate.
+- If Domis pushes back strategically on a decision, treat it as a design signal, not a tactical objection. Reframe.
 
 ---
 
-## The subject_discontinuity arc — worth understanding
-
-This was the most architecturally consequential thread in the session. Understanding it is load-bearing for W7 onward.
-
-**Initial state (post-W5 Gate A):** Director picked cross-parent on primary slots 29% of the time. Logged as soft-enforcement violation via reasoning-append. At the individual pick level, each deviation was justified in reasoning (posture fit, body_focus fit). Seemed acceptable.
-
-**W6 Gate A finding:** Critic flagged `subject_discontinuity` on 3/3 real storyboards. The compound math that W5 Gate A missed: per-slot 29% cross-parent becomes ~82% probability of at least one cross-parent pick in a 5-slot primary-only video. Individual-pick judgment aggregated to near-universal storyboard-level continuity breaks.
-
-**Initial recommendation (mine):** log + wait for W9 shadow mode. Orchestrator retry loops would either converge on these or exhaust retry budget; shadow data was needed to tune.
-
-**Domis's reframe:** subject continuity is not a universal brand rule; it's a per-video creative decision that depends on the idea. "My morning routine" needs single-subject; "pilates girls summer compilation" works better with mixed subjects. The Planner — which sees the idea seed — is the right agent to commit to a stance per video. The `subject_consistency` schema field already existed; Planner wasn't using it.
-
-**W6.5 outcome:** Planner now picks stance per idea (validated canary on seed 3 "soft golden-hour pilates aesthetic, no teaching" → `mixed`); Critic's subject_discontinuity is conditional on that stance. Architectural fix rather than reactive tuning. False-positive verdicts on mixed-subject ideas eliminated; genuine continuity breaks on single-subject ideas still caught.
-
-**Architectural pattern this established:** problems surfaced at agent N can be solved at agent N-K where a better creative decision lives. Don't reflexively patch at the point of failure; trace the decision chain upstream.
-
----
-
-## Architectural rules added or relevant
-
-**Rule 42 (new, added this session in CLAUDE.md):** Mid-stream tuning iterations follow a single-gate protocol when the iteration is schema-additive, code-path-unchanged, and validated by existing test scripts. Example: W6.5 subject-stance tuning.
-
-**Rules 40 + 41 (from MVP_PROGRESS_15, still load-bearing):** Creative variance lives upstream in persona + Planner, not in segment taxonomy. Form + posture are orthogonal axes.
-
-**Rule 38 (confabulation awareness, exercised heavily this session):** validation failures throw, not silently correct. Applied to Planner semantic validation, Director segment_id confabulation check, Critic approve-with-high-severity self-contradiction check.
-
----
-
-## Known state for next chat to verify
-
-- **Sprint 2 progress:** query `SELECT COUNT(*), MAX(created_at) FROM assets WHERE brand_id='nordpilates'`. Library was 215 parents / 866 segments when session started (2026-04-22 mid-morning), 241 / 969 during W3, 1116 segments during W4 (aggregator pagination fix revealed the true count), ongoing through W6.5. If count stable for >1hr, Sprint 2 meaningfully complete; unblocks the final taxonomy readiness-flag refresh (most ⚠️ already refreshed in this session's docs batch to v1.1).
-
-- **No production-consumer state changes:** W2 through W6.5 are all unwired. No feature flag has been flipped to route traffic to Part B. Phase 3.5 (Creative Director → Curator → Copywriter) is still the production pipeline.
-
-- **VPS operational stashes:** up to 6 stashes now (pre-W2, pre-W3, pre-W4, pre-W5, pre-W6, pre-W6.5 lockfile drift). Consistent with pattern from prior sessions; not new tech debt.
-
-- **Pre-existing npm audit findings (3 high, 5 critical):** remain unaddressed. Not introduced by any W-work this session; out-of-scope.
-
----
-
-## Open followups (from `docs/followups.md`)
-
-Active (top of file, most recent first):
-
-- **w5-subject-role-all-primary-in-planner** — partially resolved by W6.5 (Planner now emits `subject_role: 'any'` on mixed-subject videos). Followup stays active until W9 shadow confirms full-rate single-subject assignment is correctly varied.
-- **w5-duplicate-segment-across-slots-in-director** — addressed by W6's `duplicate_segment_across_slots` issue type; Critic catches it. Revisit if W6 misses it in practice.
-- **w6-subject-discontinuity-prevalence-at-director** — partially resolved by W6.5. Load-bearing for W9 shadow-mode measurement: how often orchestrator revise-loop converges vs exhausts retries.
-- **v1-curator-flash-nulls-if-emergency-rollback** — informational; only relevant if `ENABLE_CURATOR_V2=false` flipped.
-- **part-a-classification-noise-spotcheck** — deferred unless W5/W6 show signal.
-- **w1-raw-fallback-crop** — deferred; hypothetical.
-- **part-a-test-segment-uuid-drift** — docs-only.
-- **w3-naive-singularization-es-words** (`crunches → crunche`, `sunglasses → sunglasse`) — deferred; not affecting Planner decisions.
-
-All eight active. None blocking. W9 shadow is the natural revisit point for the top three.
-
----
-
-## Creative direction commitments (still current)
-
-1. **Segment taxonomy (Part A) accepted as fixed.** Rule 40.
-2. **Form × Aesthetic Posture two-axis model.** Rule 41.
-3. **Hook mechanism as first-class Planner output** (7 mechanism types).
-4. **Subject stance as per-video Planner commitment** (W6.5 addition — not yet a formal rule but architecturally treated as one).
-5. **Success criterion: organic-creator-plausibility + form diversity + subject-stance-appropriateness over auto-QA pass rate.** Measured at shadow + ramp phases.
-6. **W10 voice generation deferred to post-shadow-mode.** Brand persona schema has `voice_config: null` reserved.
-
----
-
-## Where W7 work lives (next brief)
-
-W7 Copywriter reads:
-- `PlannerOutput` (form, hook_mechanism, subject_consistency, narrative_beats per slot)
-- `StoryboardPicks` from W5 (final clip picks with in/out points)
-- `BrandPersona` (voice tenets + prose body)
-- Optionally: segment_v2 metadata on picked clips (via same snapshot pattern Critic uses)
-
-W7 produces:
-- Per-slot overlay text + timing
-- Hook text + CTA
-- Platform captions + hashtags
-- `voiceover_script: null` field reserved for W10
-
-Single Gemini text-only call per video (not per-slot — W7 has full storyboard context, writes coherently across slots).
-
-Estimated brief size: similar to W3 (~400-500 lines). Temperature likely 0.5-0.6 (Copywriter is creative, needs more variance than Critic).
-
-Does NOT depend on W6 or W6.5 runtime — Copywriter and Critic are parallel at orchestrator level, both consume picks independently.
-
----
-
-## Anti-patterns reminder (unchanged from prior handoff, reinforced this session)
-
-1. File-based brief delivery, never inline paste for long docs.
-2. Git rules in GIT_WORKFLOW.md — don't restate in briefs.
-3. Model names: `gemini-3.1-pro-preview`. SDK: `@google/genai` for new code, `@google/generative-ai` legacy coexists.
-4. Max stack depth 1.
-5. Zod validation always on Gemini output.
-6. One scope per branch.
-7. Don't refactor Phase 3.5 — it's still production.
-8. Rule 38 confabulation awareness on LLM output.
-9. Rule 39 soft-rule-in-refine avoidance.
-10. Rule 40 creative-variance-in-persona-not-taxonomy.
-11. Rule 41 form×posture orthogonality preserved.
-12. Strategic concerns from Domis during tactical work = strategic response, not tactical dismissal. (Reinforced this session: subject-stance reframe was exactly this pattern.)
-13. **Rule 42 (new): mid-stream tuning iterations follow single-gate protocol.**
-14. **Apply `stripSchemaBounds()` to all Gemini `responseSchema` calls in new code.** Pattern established in W3, reused in W5 + W6.
-15. **Naming-conflict guards at branch-start on every new agent file.** Pattern established in W3 (`library-inventory-v2.ts`), reused in W4 (`candidate-retrieval-v2.ts`), W5 (`r2-fetch.ts` reused existing helper).
-16. **Preserve smoke outputs to non-ephemeral paths.** Pattern: `docs/smoke-runs/w{N}-gate-a-YYYYMMDD.txt`. Established W5 Gate A onward.
-
----
-
-## Context on Domis (unchanged, still accurate)
-
-Lithuanian, Vilnius. Runs 30+ brands. Stack-fluent: n8n, Supabase, Sheets, Hetzner. Direct communication, spelling occasionally loose (parse for intent, don't correct), prefers quick decisions, "I don't care" means "stop optimizing around this, move on." Rewards: fast iteration, clean execution, agent handling git autonomously. Frustrations: commands that don't work, re-litigating decisions, hedging language.
-
-**This session specifically:**
-- Domis pushed back on the "wait for W9" recommendation when W6 surfaced subject_discontinuity prevalence. Correct pushback — the architectural fix (W6.5) was strictly better than the reactive tuning path. Preserve this pattern: Domis's strategic pushback during tactical work is signal to reframe, not to defend.
-- Domis asked for plain-language explanation of "cross-parents" when the buzzwords got dense. Good sign that communication was getting too jargony; the ensuing plain-language explanation led directly to the architectural reframe. Don't over-anchor on technical vocabulary when discussing creative direction.
-- Domis approved single-gate workstreams and shortened kickoffs readily. Respects velocity when the risk profile justifies it.
-
----
-
-## Session close metadata
-
-- Session duration: ~2 calendar days of active work (2026-04-22 morning through 2026-04-23 late)
-- Total ships: 7 (6 W-workstreams + Legacy Flash removal + W6.5 tuning iteration)
-- Docs batch at close (this): HANDOFF (this doc), MVP_PROGRESS_16.md, PHASE_4_PART_B_PIPELINE.md updates, w2-content-form-taxonomy.md v1.1 refresh, CLAUDE.md Rule 42 addition.
-- No production cutover. Phase 3.5 still serves all traffic.
-
----
-
-*Handoff written 2026-04-23 at session close. Supersedes prior handoff (2026-04-22). Next planning chat reads this first, verifies Sprint 2 state + no issues from latest ships, then drafts W7 Copywriter brief.*
+*Session-close handoff authored 2026-04-24 evening. Two ships (W7, W8) + one critical Gate B fix + Phase 3.5 unaffected verification. Part B now exists end-to-end as runtime code, dormant pending W9 shadow rollout. Next brief is operational, not architectural.*
