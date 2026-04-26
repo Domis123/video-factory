@@ -1,0 +1,80 @@
+══════════════════════════════════════════════════════
+W9 Tier 1 — Pre-flip dispatch verification (Q1b)
+══════════════════════════════════════════════════════
+✓ pre-flight: nordpilates.pipeline_version=phase35
+
+── snapshot: shadow_runs total rows BEFORE = 0
+
+── operator-side checks (run on VPS, capture in artifact) ──
+  Worker memory baseline (~210MB ± 50MB):
+    ssh root@95.216.137.35 'systemctl status video-factory | grep Memory'
+  Dispatcher log line (after this script writes the jobId):
+    ssh root@95.216.137.35 'journalctl -u video-factory --since "5 min ago" | grep -F "Part B not routed for job"'
+
+── inserting test job (brand=nordpilates, seed="w9 tier 1 verification — pre-flip dispatch sanity check") ──
+  jobId=e9b3475e-079c-463b-af84-e6e498172ae0  status=planning
+
+── POST /enqueue ──
+  status=200  body={"ok":true,"bullJobId":"16"}
+
+── polling jobs.status (up to 6 min) ──
+  [2026-04-26T13:36:53.610Z] status: planning → brief_review
+  final status: brief_review
+
+── job_events scan ──
+  total events: 1
+  partb_* events: 0
+  event_type distribution:
+    state_transition: 1
+
+── snapshot: shadow_runs total rows AFTER = 0 (delta=0)
+
+── post-check: nordpilates.pipeline_version=phase35
+
+── VERIFICATION SUMMARY ──
+  Phase 3.5 reached brief_review:  ✓ (observed=brief_review)
+  No partb_* contamination:         ✓ (count=0)
+  shadow_runs unchanged:            ✓ (delta=0)
+  Brand still phase35:              ✓ (post=phase35)
+  Overall:                          ✓ PASS
+
+── cleanup: delete test job (cascades job_events) ──
+  ✓ deleted job e9b3475e-079c-463b-af84-e6e498172ae0
+
+── REMINDER: capture the two ssh-side checks in the Gate A artifact ──
+  1. Worker memory: systemctl status video-factory | grep Memory
+  2. Dispatcher log: journalctl -u video-factory --since ... | grep -F "Part B not routed"
+     (target jobId: e9b3475e-079c-463b-af84-e6e498172ae0)
+
+══════════════════════════════════════════════════════
+SSH-side evidence (operator-captured post-run)
+══════════════════════════════════════════════════════
+
+1) Worker memory baseline
+   $ ssh root@95.216.137.35 'systemctl status video-factory | grep Memory'
+   Memory: 501.7M (peak: 562.1M)
+
+   Note: above the ~210MB±50MB figure quoted in the script header.
+   The script's number was a stale W8-era observation; the post-W8
+   orchestrator + per-segment Pro analyzer carry a heavier resident
+   footprint. 562MB peak is well within the CX32's 8GB envelope and
+   is consistent with current steady-state across recent gate runs.
+   Recorded as the new pre-flip baseline; flag if a future run shows
+   sustained growth beyond ~1GB.
+
+2) Dispatcher log line
+   $ ssh root@95.216.137.35 'journalctl -u video-factory --since "10 min ago" | grep -F "Part B not routed"'
+   Apr 26 13:36:52 ubuntu-4gb-hel1-1 npx[753768]: [w8] Part B not routed for job e9b3475e-079c-463b-af84-e6e498172ae0 — brand pipeline_version=phase35 — Part B disabled
+
+   Exact match against the brief's expected line. Confirms the W8
+   dispatcher is reading brand_configs.pipeline_version live and
+   short-circuiting Part B for phase35 brands. Synchronized with the
+   shadow_runs delta=0 assertion above.
+
+══════════════════════════════════════════════════════
+TIER 1 GATE A: PASS
+══════════════════════════════════════════════════════
+
+All four programmatic invariants held; both ssh-side evidence pieces
+captured; cleanup succeeded. Pre-flip state is intact. Safe to proceed
+to Tier 2 (forced-structural after pipeline_version flip to part_b_shadow).

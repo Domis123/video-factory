@@ -1,0 +1,221 @@
+══════════════════════════════════════════════════════
+W9 Tier 2 — Forced-structural synthetic seed (Q8c)
+══════════════════════════════════════════════════════
+
+✓ pre-flight: nordpilates.pipeline_version=part_b_shadow
+  (operator must also have set PART_B_ROLLOUT_PERCENT=0 + restarted worker)
+
+── seed coverage: 1 segment(s) for "fire hydrant"
+
+── inserting test job (brand=nordpilates, override=force) ──
+  seed: "30-second fire hydrant deep dive — show progression from beginner setup to glute burn"
+  jobId=31f0ed09-45e6-44ae-8247-106d6c2e9e08  override=force
+
+── POST /enqueue ──
+  status=200  body={"ok":true,"bullJobId":"17"}
+
+── polling for shadow_runs row + partb_* terminal (up to 15 min) ──
+  [2026-04-26T13:43:18.410031+00:00] partb_planning_started
+  [2026-04-26T13:43:42.94593+00:00] partb_planning_completed
+  [2026-04-26T13:43:43.051163+00:00] partb_retrieval_started
+  [2026-04-26T13:43:43.571892+00:00] partb_retrieval_completed
+  [2026-04-26T13:43:43.622946+00:00] partb_director_started
+  [2026-04-26T13:44:54.133512+00:00] partb_director_completed
+  [2026-04-26T13:44:54.277518+00:00] partb_snapshot_started
+  [2026-04-26T13:44:54.40396+00:00] partb_snapshot_completed
+  [2026-04-26T13:44:54.454125+00:00] partb_fanout_started
+  [2026-04-26T13:45:23.09739+00:00] partb_revise_slots
+  [2026-04-26T13:45:23.264319+00:00] partb_fanout_completed
+  [2026-04-26T13:45:23.359351+00:00] partb_director_started
+  [2026-04-26T13:46:38.201853+00:00] partb_director_completed
+  [2026-04-26T13:46:38.421687+00:00] partb_snapshot_started
+  [2026-04-26T13:46:38.670408+00:00] partb_snapshot_completed
+  [2026-04-26T13:46:38.767919+00:00] partb_fanout_started
+  [2026-04-26T13:47:33.273669+00:00] partb_revise_slots
+  [2026-04-26T13:47:33.432504+00:00] partb_fanout_completed
+  [2026-04-26T13:47:33.47914+00:00] partb_director_started
+  [2026-04-26T13:48:38.07624+00:00] partb_director_completed
+  [2026-04-26T13:48:38.236121+00:00] partb_snapshot_started
+  [2026-04-26T13:48:38.357688+00:00] partb_snapshot_completed
+  [2026-04-26T13:48:38.434087+00:00] partb_fanout_started
+  ✓ shadow_runs row written at 2026-04-26T13:49:18.960131+00:00
+
+── full job_events trace (partb_*) ──
+  total partb_* events: 26
+  2026-04-26T13:43:18.410031+00:00  partb_planning_started  details={"to":"PLANNING","from":"QUEUED"}
+  2026-04-26T13:43:42.94593+00:00  partb_planning_completed  details={"to":"RETRIEVING","from":"PLANNING"}
+  2026-04-26T13:43:43.051163+00:00  partb_retrieval_started  details={"to":"RETRIEVING","from":"PLANNING"}
+  2026-04-26T13:43:43.571892+00:00  partb_retrieval_completed  details={"to":"DIRECTING","from":"RETRIEVING"}
+  2026-04-26T13:43:43.622946+00:00  partb_director_started  details={"to":"DIRECTING","from":"RETRIEVING"}
+  2026-04-26T13:44:54.133512+00:00  partb_director_completed  details={"to":"SNAPSHOT_BUILDING","from":"DIRECTING"}
+  2026-04-26T13:44:54.277518+00:00  partb_snapshot_started  details={"to":"SNAPSHOT_BUILDING","from":"DIRECTING"}
+  2026-04-26T13:44:54.40396+00:00  partb_snapshot_completed  details={"to":"PARALLEL_FANOUT","from":"SNAPSHOT_BUILDING"}
+  2026-04-26T13:44:54.454125+00:00  partb_fanout_started  details={"to":"PARALLEL_FANOUT","from":"SNAPSHOT_BUILDING"}
+  2026-04-26T13:45:23.09739+00:00  partb_revise_slots  details={"to":"REVISING_SLOTS","from":"PARALLEL_FANOUT"}
+  2026-04-26T13:45:23.264319+00:00  partb_fanout_completed  details={"to":"REVISING_SLOTS","from":"PARALLEL_FANOUT"}
+  2026-04-26T13:45:23.359351+00:00  partb_director_started  details={"to":"DIRECTING","from":"REVISING_SLOTS"}
+  2026-04-26T13:46:38.201853+00:00  partb_director_completed  details={"to":"SNAPSHOT_BUILDING","from":"DIRECTING"}
+  2026-04-26T13:46:38.421687+00:00  partb_snapshot_started  details={"to":"SNAPSHOT_BUILDING","from":"DIRECTING"}
+  2026-04-26T13:46:38.670408+00:00  partb_snapshot_completed  details={"to":"PARALLEL_FANOUT","from":"SNAPSHOT_BUILDING"}
+  2026-04-26T13:46:38.767919+00:00  partb_fanout_started  details={"to":"PARALLEL_FANOUT","from":"SNAPSHOT_BUILDING"}
+  2026-04-26T13:47:33.273669+00:00  partb_revise_slots  details={"to":"REVISING_SLOTS","from":"PARALLEL_FANOUT"}
+  2026-04-26T13:47:33.432504+00:00  partb_fanout_completed  details={"to":"REVISING_SLOTS","from":"PARALLEL_FANOUT"}
+  2026-04-26T13:47:33.47914+00:00  partb_director_started  details={"to":"DIRECTING","from":"REVISING_SLOTS"}
+  2026-04-26T13:48:38.07624+00:00  partb_director_completed  details={"to":"SNAPSHOT_BUILDING","from":"DIRECTING"}
+  2026-04-26T13:48:38.236121+00:00  partb_snapshot_started  details={"to":"SNAPSHOT_BUILDING","from":"DIRECTING"}
+  2026-04-26T13:48:38.357688+00:00  partb_snapshot_completed  details={"to":"PARALLEL_FANOUT","from":"SNAPSHOT_BUILDING"}
+  2026-04-26T13:48:38.434087+00:00  partb_fanout_started  details={"to":"PARALLEL_FANOUT","from":"SNAPSHOT_BUILDING"}
+  2026-04-26T13:49:18.648728+00:00  partb_revise_exhausted  details={"to":"ESCALATING_TO_HUMAN","from":"PARALLEL_FANOUT","failureReason":"revise budget exhausted after 2 cycles; final verdict: The storyboard is narratively strong, hits the target duration, and perfect
+  2026-04-26T13:49:18.818235+00:00  partb_fanout_completed  details={"to":"ESCALATING_TO_HUMAN","from":"PARALLEL_FANOUT","failureReason":"revise budget exhausted after 2 cycles; final verdict: The storyboard is narratively strong, hits the target duration, and perfect
+  2026-04-26T13:49:18.867221+00:00  partb_pipeline_escalated  details={"to":"ESCALATING_TO_HUMAN","from":"PARALLEL_FANOUT","failureReason":"revise budget exhausted after 2 cycles; final verdict: The storyboard is narratively strong, hits the target duration, and perfect
+
+── Critic verdict trace ──
+  [2026-04-26T13:45:23.09739+00:00] partb_revise_slots
+    verdict: {"to":"REVISING_SLOTS","from":"PARALLEL_FANOUT"}
+  [2026-04-26T13:47:33.273669+00:00] partb_revise_slots
+    verdict: {"to":"REVISING_SLOTS","from":"PARALLEL_FANOUT"}
+
+── shadow_runs row summary ──
+  run_id: cb87d32c-53d2-49d1-aeb9-2e362091fbcb
+  terminal_state: failed_after_revise_budget
+  failure_reason: revise budget exhausted after 2 cycles; final verdict: The storyboard is narratively strong, hits the target duration, and perfectly captures the brand's warm, lived-practice aesthetic. However, there is a strict subject discontinuity in the final slot. The planner committed to a single-subject deep dive, but Slot 3 switches to a different parent asset and outfit, breaking the illusion of a continuous session.
+  revise_loop_iterations: 2
+  total_agent_invocations: 11
+  wall_time_ms: 361532
+  cost_usd: $0.0000
+  planner.form_id: single_exercise_deep_dive
+  storyboard_picks slot count: 3
+  final critic_verdict: "revise"
+
+── Q8c GATE A ASSERTION ──
+  ⚠ partb_revise_structural NOT emitted in this run.
+    Per brief, this is "evidence not conclusion" — valid Gate A signal.
+    INTERPRETATION: Planner committed deep-dive form but Critic accepted the picks.
+    Either the seed-coverage of `fire hydrant` was higher than expected, or
+    the Critic teaching needs strengthening (W9.5 prompt-tuning candidate).
+
+── REMINDER: capture this output into a Gate A artifact ──
+  npx tsx src/scripts/test-forced-structural.ts | tee \
+    docs/smoke-runs/w9-forced-structural-$(date -u +%Y%m%d).txt
+  jobId for retrospective lookup: 31f0ed09-45e6-44ae-8247-106d6c2e9e08
+
+
+══════════════════════════════════════════════════════
+SSH-side evidence (operator-captured post-run)
+══════════════════════════════════════════════════════
+
+VPS dispatcher log for jobId 31f0ed09-45e6-44ae-8247-106d6c2e9e08:
+
+   $ ssh root@95.216.137.35 'journalctl -u video-factory --since "20 min ago" | grep -E "(Part B routed|31f0ed09|w8\] revise|critic_verdict)"'
+   Apr 26 13:40:00 [api] Enqueued 31f0ed09... → planning (bull job 17)
+   Apr 26 13:40:00 [worker:planning] Processing job 31f0ed09...
+   Apr 26 13:40:00 [pipeline] Planning job 31f0ed09...
+   Apr 26 13:43:17 [pipeline] Planning complete for 31f0ed09... → brief_review
+   Apr 26 13:43:17 [worker:planning] Completed: 31f0ed09...
+   Apr 26 13:43:17 [w8] Dispatching Part B shadow for job 31f0ed09... — job pipeline_override='force' — dual-run forced
+   Apr 26 13:49:19 [w8] Part B shadow complete for job 31f0ed09... — terminal=failed_after_revise_budget runId=cb87d32c... walltime=361728ms
+
+The two W8 lines are the bookends of the Part B run and confirm:
+  - Dispatch routed via pipeline_override='force' (Tier 2 job-level override),
+    NOT via Tier 3 percentage gating. Matches the feature-flags.ts decision
+    table for { part_b_shadow + force }: isDualRun=true, runPartB=true.
+  - Wall-time alignment: orchestrator reports 361728ms, shadow_runs row
+    captured 361532ms — within ~200ms of each other (telemetry skew at
+    completion-event boundary).
+
+══════════════════════════════════════════════════════
+Q8c GATE A: PASS-with-evidence
+══════════════════════════════════════════════════════
+
+The narrow Q8c assertion (`partb_revise_structural` emitted) did NOT
+fire. Per the brief's "evidence not conclusion" framing this is a
+valid Gate A signal — Tier 2's job is to surface what the production
+revise loop actually does on a deliberately-under-covered seed, not to
+manufacture a green pass.
+
+WHAT THE RUN PROVED (positive evidence collected):
+
+  ✓ W8 dispatch correctly routes part_b_shadow + pipeline_override='force'
+    into a dual-run with runPartB=true (VPS log + reason string match).
+  ✓ Part B state machine progressed through all 7 expected phases:
+    PLANNING → RETRIEVING → DIRECTING → SNAPSHOT_BUILDING →
+    PARALLEL_FANOUT → REVISING_SLOTS (×2) → ESCALATING_TO_HUMAN.
+  ✓ Planner correctly committed form_id='single_exercise_deep_dive' —
+    the seed shape "30-second X deep dive — show progression…" pulled
+    Planner toward deep-dive form on its own, no biasing required.
+  ✓ The Critic-revise code path is ALIVE: partb_revise_slots fired
+    twice, each with a substantive Director→Critic→Revise cycle (~2 min
+    each). Total agent invocations = 11 across the run.
+  ✓ The Critic's final-cycle verdict identified a structural-shaped
+    issue in plain English: "single-subject deep dive, but Slot 3
+    switches to a different parent asset and outfit, breaking the
+    illusion of a continuous session." It detected the under-coverage
+    consequence (only 1 `fire hydrant` segment forces Slot 3 onto a
+    different parent) without being told.
+  ✓ Terminal state captured correctly: `failed_after_revise_budget`
+    after 2 revise cycles → `partb_pipeline_escalated` event fired →
+    ESCALATING_TO_HUMAN reached. The escalation path is exercised.
+  ✓ shadow_runs row was written with full agent trace
+    (planner_output, storyboard_picks, critic_verdict, terminal_state,
+    revise_loop_iterations=2, total_agent_invocations=11). Run ID
+    cb87d32c-53d2-49d1-aeb9-2e362091fbcb is preserved as the Q8c
+    calibration marker (NOT cleaned up — distinctive idea_seed +
+    pipeline_override='force' make it grep-able).
+
+WHAT DIDN'T FIRE (the open question this surfaces):
+
+  - `partb_revise_structural` was not emitted in either revise cycle.
+    Both cycles used revise_scope='slot_level' → REVISING_SLOTS.
+  - The Critic correctly recognized the structural-shaped problem in
+    its verdict prose but classified the revise_scope as slot-level.
+  - Slot-level revise then exhausts (the library still only has 1
+    fire-hydrant segment, so re-picking can't help) and escalates.
+
+INTERPRETATION:
+
+  The structural-revise code path is present in the state machine
+  (orchestrator-v2.ts maps partb_revise_structural → REPLANNING) but
+  the W6 Critic prompt did not classify "deep-dive form +
+  library-coverage-forced subject discontinuity in slot 3" as a
+  structural-scope problem. The Critic's mental model in this run
+  appears to be: "the picks are individually wrong, try again," rather
+  than "the form commitment is unsupportable on this library, replan."
+
+  This is a Critic-prompt-quality observation, NOT a dispatch or
+  orchestration regression:
+    - Dispatch infra works (W8 confirmed-alive)
+    - Shadow_runs writes work (full payload captured)
+    - Revise loop works (fired and exhausted as designed)
+    - Escalation path works (terminal=failed_after_revise_budget,
+      partb_pipeline_escalated emitted)
+    - The Critic CAN detect and reject; it just classifies rejections
+      below the structural threshold on this seed.
+
+  The fix is W6 Critic prompt-tuning (decide-when-to-escalate-to-
+  structural rule), NOT a W9 dispatch fix. W9's job is to ramp the
+  shadow infrastructure into operations and collect comparison
+  signal; Critic-prompt iteration is a separate workstream.
+
+FOLLOWUP TO LOG POST-MERGE:
+
+  - w9-q8c-structural-classification-not-exercised
+    Concrete evidence available: this run + run_id
+    cb87d32c-53d2-49d1-aeb9-2e362091fbcb.
+    Action: design a W6 Critic prompt instruction that escalates to
+    revise_scope='structural' when (a) repeated slot-level revises hit
+    the same root cause and (b) the underlying gap is library
+    coverage, not picker quality. The Critic's verdict prose in this
+    run is the in-distribution example to build the prompt against.
+
+══════════════════════════════════════════════════════
+Tier 2 acceptance for W9 ramp:
+
+The test surfaces a real prompt-tuning observation as a side-effect of
+proving dispatch / orchestration / revise / escalation are all alive.
+That is exactly what Q8c was designed to do — the brief explicitly
+framed this as "evidence not conclusion" so a non-firing structural
+event would not block the Gate.
+
+Gate A (Tier 1 + Tier 2) clear. Proceed to Gate B (migration 012 apply
++ merge + deploy + Phase 0 ramp prep) per the brief's commit sequence.
+══════════════════════════════════════════════════════
