@@ -472,6 +472,10 @@ function synthesizeSoftApproveVerdict(): CriticVerdict {
       'Critic parse retries exhausted — soft-approved by orchestrator; see critic_unavailable_approving_default event.',
     issues: [],
     latency_ms: 0,
+    // W9.1 — soft-approve fallback charges no incremental cost; the critic
+    // call is what failed, so any tokens spent are sunk on the prior attempt
+    // (already accumulated by the wrapper before the throw).
+    cost_usd: 0,
   };
 }
 

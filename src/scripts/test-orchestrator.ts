@@ -171,6 +171,7 @@ function stubPlannerOutput(): PlannerOutput {
     ],
     music_intent: 'warm-acoustic',
     posture: 'P1',
+    cost_usd: 0,
   };
 }
 
@@ -227,10 +228,12 @@ function stubPicks(): StoryboardPicks {
         was_relaxed_match: false,
         same_parent_as_primary: i === 0 ? null : true,
         latency_ms: 25,
+        cost_usd: 0,
       };
     }),
     total_latency_ms: 75,
     parallel_speedup_ratio: 2.5,
+    cost_usd: 0,
   };
 }
 
@@ -260,6 +263,7 @@ function stubCriticVerdict(
             },
           ],
     latency_ms: 15,
+    cost_usd: 0,
   };
 }
 
@@ -290,6 +294,7 @@ function stubCopyPackage(): CopyPackage {
     hashtags: ['#pilates', '#mobility', '#morningroutine'],
     voiceover_script: null,
     metadata: { copywriter_version: 'w7-v1', temperature: 0.7, retry_count: 0 },
+    cost_usd: 0,
   };
 }
 

@@ -38,6 +38,8 @@ export const SlotPickSchema = z.object({
   was_relaxed_match: z.boolean(),
   same_parent_as_primary: z.boolean().nullable(),
   latency_ms: z.number().int().nonnegative(),
+  // W9.1 — per-slot Gemini USD spend (this slot's pick call). Wrapper-populated.
+  cost_usd: z.number().min(0).default(0),
 });
 
 export type SlotPick = z.infer<typeof SlotPickSchema>;
@@ -46,6 +48,9 @@ export const StoryboardPicksSchema = z.object({
   picks: z.array(SlotPickSchema),
   total_latency_ms: z.number().int().nonnegative(),
   parallel_speedup_ratio: z.number(),
+  // W9.1 — sum of per-slot cost_usd. Convenience aggregate so the orchestrator
+  // doesn't have to re-sum on every revise loop.
+  cost_usd: z.number().min(0).default(0),
 });
 
 export type StoryboardPicks = z.infer<typeof StoryboardPicksSchema>;
