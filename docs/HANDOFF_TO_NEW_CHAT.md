@@ -10,9 +10,9 @@ Video Factory is a pipeline that produces ~150-300 short-form videos per week ac
 
 The bigger architectural arc this session continued: **Phase 3.5 is the production pipeline today (Creative Director → Asset Curator → Copywriter → render). Part B is the rebuild that exploits richer segment metadata + multimodal pick + post-select copy.** Part B's creative goal — *retention through pleasure, not persuasion; videos that feel organic, not like ads* — is the entire reason the rebuild exists.
 
-**As of this session close: Part B is complete as runtime code, end-to-end, deployed and dormant.** All five creative agents (Planner, Retrieval, Director, Critic, Copywriter) are shipped. The Orchestrator that wires them is shipped. Shadow-mode infrastructure (shadow_runs table, 3-tier feature flag composition, dual-run dispatch) is deployed. **Zero brands are flipped to shadow mode yet.** Phase 3.5 still serves 100% of production, exactly as it has all session.
+**As of 2026-04-26: Part B is complete as runtime code, W9 deployed, awaiting Phase 1 calibration flip.** All five creative agents (Planner, Retrieval, Director, Critic, Copywriter) are shipped. The Orchestrator that wires them is shipped. Shadow-mode infrastructure (shadow_runs table, 3-tier feature flag composition, dual-run dispatch) is deployed. **W9's measurement surface (Q5d cutover-rule scaffold, shadow_review view, runbooks, n8n+Sheet integration spec) is now also deployed.** All 5 brands still on `pipeline_version='phase35'`; `PART_B_ROLLOUT_PERCENT=0`. Phase 3.5 still serves 100% of production.
 
-The next brief is **W9 Shadow Rollout** — the workstream that operates the flags W8 built, ramps Part B from 0% to 100% on nordpilates first, then expands.
+**W9 has shipped.** The next operator-track step is the Phase 1 calibration flip on nordpilates (`PART_B_ROLLOUT_PERCENT=100` for the first ~10 jobs, then drop to 30 for steady-state Phase 2), gated on diagnosing the `shadow_runs.cost_usd=$0` gap surfaced at W9 Gate A Tier 2. See "What's next" below.
 
 ---
 
@@ -32,20 +32,20 @@ The next brief is **W9 Shadow Rollout** — the workstream that operates the fla
 | Coherence Critic | — | — | ✅ W6 shipped + W6.5 tuned + W8 lib-inv |
 | Copywriter | ✅ Production (Claude) | — | ✅ W7 shipped |
 | Orchestrator | ✅ Phase 3.5 worker | — | ✅ **W8 shipped 2026-04-24** |
-| Shadow rollout | — | — | 🔴 **W9 NEXT BRIEF** |
+| Shadow rollout | — | — | ✅ **W9 shipped 2026-04-26** |
 | Audio generation | — | — | 🔴 W10 post-shadow |
 | Remotion render | ✅ Production | — | (unchanged) |
 | Platform export | ✅ Production | — | (unchanged) |
 
 Legend: ✅ shipped · 🔴 not started · — not applicable
 
-**Production state right now:** Phase 3.5 serves every job. All 5 brands have `brand_configs.pipeline_version = 'phase35'`. `PART_B_ROLLOUT_PERCENT = 0` (or unset). `jobs.pipeline_override` is NULL on every row. Part B code is loaded into the worker process (memory baseline rose from ~142MB to ~210MB on W8 deploy), but no job ever routes to it.
+**Production state right now:** Phase 3.5 serves every job. All 5 brands have `brand_configs.pipeline_version = 'phase35'` (nordpilates was flipped to `part_b_shadow` for the W9 Q8c synthetic Tier 2 run on 2026-04-26 and immediately restored). `PART_B_ROLLOUT_PERCENT = 0` (or unset). `jobs.pipeline_override` is NULL on every steady-state row (one historical row carries `'force'` from the Q8c synthetic seed and is terminal). `shadow_runs` holds one row — `cb87d32c-53d2-49d1-aeb9-2e362091fbcb` — preserved as the Q8c calibration marker. Part B code is loaded into the worker process (memory baseline ~210MB idle post-W8 deploy; observed peak ~500-562MB during a sustained shadow run, returns to baseline post-run), but no job ever routes to it under steady state.
 
 ---
 
 ## What shipped this session
 
-Two ships and one critical bugfix. Both ships were full Part B workstreams; the bugfix was W8 commit 13 closing the `job_events` observability gap pre-merge.
+Two ships and one critical bugfix at the W7+W8 close (2026-04-24). Both W7 and W8 were full Part B workstreams; the bugfix was W8 commit 13 closing the `job_events` observability gap pre-merge. **W9 (operations + measurement surface, no new agent code paths) shipped 2026-04-26 in a follow-on session and is captured here for continuity.**
 
 ### W7 — Copywriter (shipped 2026-04-24, merged at SHA 73ad155)
 
@@ -110,26 +110,48 @@ Submitted test job `cbd6d445-...` against nordpilates after W8 deploy. Phase 3.5
 
 The fire-and-forget invariant held. Phase 3.5's job lifecycle is genuinely unaffected by Part B code being loaded.
 
+### W9 — Shadow Rollout (shipped 2026-04-26, merged at SHA `005f9cb`)
+
+The operational layer atop W8's dispatch infrastructure. Migration 012 (`shadow_review` view + 3 nullable creative_quality columns on `shadow_runs`) + `src/lib/cutover-status.ts` (Q5d 5-signal composite cutover rule) + three runbooks (`W9_SHADOW_OPERATIONS.md`, `W9_BRAND_EXPANSION_CRITERIA.md`, `W9_N8N_SHEET_INTEGRATION_SPEC.md`) + two Gate A verification scripts. **No new agent code paths and no Phase 3.5 modifications** — operator-facing measurement surface plus Q5d cutover-rule scaffold.
+
+**Key architectural commitments locked in W9 brief Q&A:**
+- Q1b pre-flip Tier 1 dispatch verification — synthetic Phase 3.5 job through the live BullMQ planning worker against a `pipeline_version=phase35` brand, four invariants asserted (reaches `brief_review`, no `partb_*` contamination, `shadow_runs` count unchanged, brand still phase35).
+- Q3a Sheet-native operator review surface — Sheet column extensions + two n8n workflows (read every 5 min; write event-driven). Implementation track is operator/n8n; spec at `docs/runbooks/W9_N8N_SHEET_INTEGRATION_SPEC.md`.
+- Q5d composite cutover rule — five signals over ≥30 verdicts, with a creative-quality veto. Implemented in `src/lib/cutover-status.ts` reading from the `shadow_review` view.
+- Q8c forced-structural synthetic seed — `pipeline_override='force'` + sparse-library exercise seed exercises the structural-revise path independent of natural-seed Planner commitments.
+- Q11b brand-expansion criteria locked at `docs/runbooks/W9_BRAND_EXPANSION_CRITERIA.md` — eligibility for the second-brand flip is post-evidence, not pre-committed.
+- W9 deliberately ships **NO Critic prompt tuning** and **NO cost-tracking fix**. Tier 2's structural-classification observation and the cost-tracking gap are filed as followups, not addressed in-branch.
+
+**11 commits on the W9 branch.** No Gate B fixes were needed; merged on first try after Gate A Tier 2.
+
+**Migration 012 applied to remote Supabase before merge.** Adds `shadow_review` view (joins shadow_runs + jobs + brand_configs) + three nullable columns on shadow_runs (`creative_quality_feels_organic` BOOLEAN, `creative_quality_tags` TEXT[] with CHECK subset constraint, `creative_quality_notes` TEXT). Used by `cutover-status.ts` and the planned n8n write workflow.
+
+**Gate A Tier 1 — pre-flip dispatch verification.** Synthetic Phase 3.5 job through live BullMQ worker against nordpilates (still on phase35). 4/4 invariants PASS. Dispatcher logged the expected "Part B not routed" line. Evidence at `docs/smoke-runs/w9-pre-flip-verification-20260424.txt`. Cost ~$0. JobId `e9b3475e-079c-463b-af84-e6e498172ae0` cleaned up.
+
+**Gate A Tier 2 — forced-structural synthetic seed.** Flipped nordpilates to `part_b_shadow`, ran the Q8c "fire hydrant deep dive" seed with `pipeline_override='force'`, restored nordpilates to `phase35` immediately post-run. Result: 26 `partb_*` events, Planner committed `form_id='single_exercise_deep_dive'`, 2 `partb_revise_slots` cycles, terminal_state=`failed_after_revise_budget`. Critic verdict text identified the structural-shaped problem on slot 3 ("single-subject deep dive, but Slot 3 switches to a different parent asset and outfit") but classified as `revise_scope='slot_level'`. Zero `partb_revise_structural` events. shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb` preserved as the Q8c calibration marker (intentionally not cleaned up). Evidence at `docs/smoke-runs/w9-forced-structural-20260424.txt`.
+
+**Two load-bearing followups surfaced at Gate A Tier 2:**
+- `w9-q8c-structural-classification-not-exercised` — Critic emitted `slot_level` on a structurally-shaped seed; Q5d signal quality depends on the `revise_scope` distribution being meaningful. Revisit during shadow ramp; likely Critic prompt tuning.
+- `w9-cost-tracking-unwired` — `shadow_runs.cost_usd=$0` across all rows despite 11 agent invocations on the Q8c seed. Q5d cutover rule effectively 4-of-5 until fixed. **Phase 1 calibration can run with this gap; Phase 2 ramp cannot.**
+
 ---
 
-## What's next — W9 Shadow Rollout
+## What's next — diagnose cost tracking, then Phase 1 calibration flip
 
-This is operational, not architectural. The flags W8 built get operated. The shadow_runs table starts populating. Operator verdicts accumulate. Eventually a brand flips from `part_b_shadow` to `part_b_primary` and Part B serves production for that brand.
+W9 ships the measurement surface. The agent path forward, in priority order:
 
-**Decisions W9 will need to make:**
+1. **Diagnose `shadow_runs.cost_usd=$0`.** Followup `w9-cost-tracking-unwired` is load-bearing for Q5d cutover signal quality. Q5d composite cutover rule has five signals; with cost dead, the rule is currently 4-of-5. Phase 1 calibration can run with this gap, Phase 2 steady-state ramp cannot. Likely Rule 42 single-gate eligible — re-check the three criteria when scoping the brief (schema-additive? code-path-unchanged? existing tests validate?).
+2. **Apply the cost-tracking fix.**
+3. **Phase 1 calibration flip on nordpilates.** Set `brand_configs.pipeline_version='part_b_shadow'` for nordpilates and `PART_B_ROLLOUT_PERCENT=100` (calibration window — first ~10 jobs only). Observe signal stability. After ~10 jobs, drop `PART_B_ROLLOUT_PERCENT=30` for Phase 2 steady-state. Operator runbook at `docs/runbooks/W9_SHADOW_OPERATIONS.md` is authoritative for the ramp protocol and pause/rollback triggers.
+4. **(Independent / parallel)** Operator implements n8n Workflow A+B and the Sheet column extensions per `docs/runbooks/W9_N8N_SHEET_INTEGRATION_SPEC.md`. Sheet review is convenient but not strictly gating — operators can hand-query `shadow_review` view directly during early calibration. This track does NOT block the cost-tracking diagnostic or Phase 1 flip.
 
-- When to flip nordpilates to `part_b_shadow` (probably immediately — it's the canary brand)
-- Initial `PART_B_ROLLOUT_PERCENT` value (probably low, e.g. 10-20%, given Tier 2's revise-exhaustion baseline)
-- How operator reviews dual-run output in practice — Sheet view? Direct Supabase query? Something else?
-- Cadence for ramp decisions (weekly review? when N comparisons accumulate?)
-- Signals that decide `part_b_primary` cutover (operator verdict ratio, escalation rate, cost per video, organic-creator-plausibility)
-- Pause / rollback thresholds (what makes us roll back to phase35?)
-- When to flip dual-run mode off (Q7 said "after signal stabilizes" — what's the concrete threshold?)
-- W10 sequencing — does voice generation get scheduled relative to shadow's progress on a brand-by-brand basis?
+After Phase 1 calibration (~10 jobs at 100%, signal stability assessed), the brand-expansion criteria at `docs/runbooks/W9_BRAND_EXPANSION_CRITERIA.md` decide the second brand to flip. That decision is post-evidence, not pre-committed — five-brand portfolio (carnimeat, highdiet, ketoway, nodiet, nordpilates) yields four candidates after nordpilates cutover; eligibility is library size, persona/form coverage, production volume, persona-prose readiness.
 
-W9 will probably be a shorter brief than W8 (less code, more measurement framework + decision cadence). Expect ~300-400 lines vs W8's 797.
+**Decisions deferred to follow-on briefs (do NOT pre-commit in W9 scope):**
 
-**The decisions in W9 are different in character from W1-W8.** W1-W8 were "build this thing, validate with Gate A, ship." W9 is "operate the thing, measure, decide cutover." Less code, more operational protocol. The planning chat for W9 should expect to spend more time on measurement-framework design and less time on agent prompt engineering or schema migration.
+- When to flip dual-run mode off (Q7 said "after signal stabilizes" — concrete threshold pending Phase 1 evidence).
+- W10 voice-generation sequencing relative to shadow's progress.
+- Whether revise budget should widen from 2 to 3 (W8 followup `w8-nordpilates-revise-exhaustion-rate-tier-2-baseline` measures this in shadow).
 
 ---
 
@@ -150,29 +172,30 @@ Rules that bound this session's decisions most:
 
 ## Open followups at session close
 
-`docs/followups.md` has 14 active entries. Ranked by W9 relevance:
+`docs/followups.md` has 15 active entries (14 from W7+W8 minus 2 resolved by W9, plus 3 new W9 entries). Ranked by relevance to the upcoming Phase 1 calibration:
 
-**Load-bearing for W9 (top of mind):**
+**Load-bearing for Phase 1 calibration (top of mind):**
 
-1. **`w8-q5-signal-validation-not-exercised-in-gate-a`** — does library-inventory-at-Critic actually change `revise_scope` distribution? W9 measures.
-2. **`w8-nordpilates-revise-exhaustion-rate-tier-2-baseline`** — 2 of 3 Gate A seeds exhausted. Shadow rate measurement is the calibration signal for whether budget=3 is needed.
-3. **`w8-slot-level-revise-thrashing-without-convergence`** — Director re-picks identical candidates. Is Critic mis-classifying as slot-level? Is retrieval pool too sparse? W9 measurement disambiguates.
-4. **`w7-slot0-homogenization-metric-treats-none-as-collision`** — test-harness metric tuning; resolve when shadow has real slot-0-non-null cases.
-5. **`gemini-3.1-pro-preview-stability-with-rich-response-schemas`** — cross-agent (W5 + W7 + possibly W8). W9 measures parse-exhaustion rate per agent.
+1. **`w9-cost-tracking-unwired`** — `shadow_runs.cost_usd=$0` across all rows. Q5d cutover rule effectively 4-of-5 until fixed. Phase 1 can run degraded; Phase 2 ramp cannot. Likely Rule 42 single-gate eligible.
+2. **`w9-q8c-structural-classification-not-exercised`** — Critic emitted `slot_level` on a structurally-shaped synthetic seed; supersedes the resolved `w8-q5-signal-validation-not-exercised-in-gate-a` followup. Q5d signal quality depends on the `revise_scope` distribution being meaningful.
+3. **`w8-nordpilates-revise-exhaustion-rate-tier-2-baseline`** — 2 of 3 Gate A seeds exhausted. Shadow rate measurement is the calibration signal for whether budget=3 is needed.
+4. **`w8-slot-level-revise-thrashing-without-convergence`** — Director re-picks identical candidates. Is Critic mis-classifying as slot-level? Is retrieval pool too sparse? Phase 1 measurement disambiguates.
+5. **`w7-slot0-homogenization-metric-treats-none-as-collision`** — test-harness metric tuning; resolve when shadow has real slot-0-non-null cases.
+6. **`gemini-3.1-pro-preview-stability-with-rich-response-schemas`** — cross-agent (W5 + W7 + possibly W8). Phase 1 measures parse-exhaustion rate per agent.
 
-**Carried from prior sessions, may surface in W9:**
+**Carried from prior sessions, may surface in Phase 1 shadow:**
 
-6. **`w6-subject-discontinuity-prevalence-at-director`** — partially resolved by W6.5; full validation at W9 shadow.
-7. **`w5-subject-role-all-primary-in-planner`** — Planner emits primary on ~100% of slots; observe in shadow whether mixed videos feel monotonous.
-8. **`w5-duplicate-segment-across-slots-in-director`** — addressed by W6 issue type; revisit only if W6 misses it.
+7. **`w6-subject-discontinuity-prevalence-at-director`** — partially resolved by W6.5; full validation at Phase 1 shadow.
+8. **`w5-subject-role-all-primary-in-planner`** — Planner emits primary on ~100% of slots; observe in shadow whether mixed videos feel monotonous.
+9. **`w5-duplicate-segment-across-slots-in-director`** — addressed by W6 issue type; revisit only if W6 misses it.
 
 **Lower priority / informational:**
 
-9. **`w7-parse-retry-headroom-in-production`** — 3-attempt ceiling held with headroom at Gate A; widen if shadow exhausts.
-10. **`w7-stripAggressiveBounds-kept-distinct-from-stripSchemaBounds`** — design documentation; future agent extending stripAggressive path list rather than widening global strip.
-11. **`w8-copywriter-parse-fragility-seed-c`** — observed once at Gate A; linked to gemini stability followup.
-12. **`w8-phase-3-5-unaffected-check-via-worker-harness`** — resolved at deploy time via manual verification; automated harness still owed if W9 wants belt-and-suspenders.
-13. **`w8-job-events-to-status-varchar-30-ceiling`** — cosmetic; migration 012 if W10+ overflows again.
+10. **`w7-parse-retry-headroom-in-production`** — 3-attempt ceiling held with headroom at Gate A; widen if shadow exhausts.
+11. **`w7-stripAggressiveBounds-kept-distinct-from-stripSchemaBounds`** — design documentation; future agent extending stripAggressive path list rather than widening global strip.
+12. **`w8-copywriter-parse-fragility-seed-c`** — observed once at W8 Gate A; linked to gemini stability followup.
+13. **`w8-job-events-to-status-varchar-30-ceiling`** — cosmetic; migration 013+ if W10+ overflows again (W9's migration 012 is unrelated, adds shadow_review view).
+14. **`w9-verify-worker-dispatch-baseline-stale`** — `verify-worker-dispatch.ts` header comment quotes pre-W8 ~210MB baseline; current idle is ~210MB but observed peak during a sustained shadow run was ~500-562MB. Cosmetic, sweep-during-next-touch.
 
 **Inactive backlog:**
 
@@ -216,7 +239,11 @@ The Q5 flip from (b) to (a) on W8 was a textbook example. Domis surfaced "calibr
 `main` only. All feature branches merged + deleted.
 
 ```
-main: 2548a81 docs: post-w8-merge status + 6 followups
+main: <post-w9-merge docs commit — see latest git log>
+        ↑
+        005f9cb merge feat/phase4-w9-shadow-rollout (2026-04-26)
+        ↑
+        2548a81 docs: post-w8-merge status + 6 followups
         ↑
         89c886f merge feat/phase4-w8-orchestrator
         ↑
@@ -227,17 +254,17 @@ main: 2548a81 docs: post-w8-merge status + 6 followups
         ... earlier session-close commits ...
 ```
 
-11+ unmerged origin branches still sitting (hygiene cleanup deferred). Stash count on VPS likely up to 7-8 (W7 + W8 lockfile drift). Anti-pattern #10 (no `git add -A`) honored throughout the session.
+11+ unmerged origin branches still sitting (hygiene cleanup deferred). Stash count on VPS likely up to 7-8 (W7 + W8 lockfile drift). Anti-pattern #10 (no `git add -A`) honored throughout.
 
 ### Database state
 
-Supabase migration 011 applied. All 5 brands on `pipeline_version='phase35'`. Zero rows in `shadow_runs`. Zero rows in `jobs` with `pipeline_override` set.
+Supabase migrations 011 + 012 applied. All 5 brands on `pipeline_version='phase35'`. **One row in `shadow_runs`** — `cb87d32c-53d2-49d1-aeb9-2e362091fbcb`, the W9 Q8c calibration marker (intentionally preserved). **One job in `jobs` with `pipeline_override='force'`** — the W9 Q8c synthetic seed, terminal. Other jobs have `pipeline_override=NULL`.
 
 W3 library inventory shows 1116+ segments on nordpilates with v2 coverage near-100%. Sprint 2 confirmed complete by operator.
 
 ### VPS state
 
-Service restarted on W8 deploy (2026-04-24 13:00:50 UTC). Memory baseline ~210MB (up from ~142MB pre-W8). 4 queues running: ingestion, planning, rendering, export. API on :3000.
+Service restarted on W8 deploy (2026-04-24 13:00:50 UTC) and again on W9 deploy (2026-04-26). Memory baseline ~210MB idle post-W8. Observed peak ~500-562MB during the W9 Q8c sustained shadow run (returns to baseline post-run). 4 queues running: ingestion, planning, rendering, export. API on :3000.
 
 ### Files added/modified this session
 
@@ -250,6 +277,8 @@ W6 modified additively: `src/types/critic-verdict.ts`, `src/agents/critic-v2.ts`
 W7 refactored: `src/agents/copywriter-v2.ts` (now consumes pre-built snapshots), `src/scripts/test-copywriter.ts` (snapshot setup external).
 
 `src/index.ts` modified: added fire-and-forget Part B dispatch alongside Phase 3.5 planning.
+
+W9 created (2026-04-26): `src/scripts/migrations/012_shadow_review_view.sql`, `src/lib/cutover-status.ts`, `docs/runbooks/W9_SHADOW_OPERATIONS.md`, `docs/runbooks/W9_BRAND_EXPANSION_CRITERIA.md`, `docs/runbooks/W9_N8N_SHEET_INTEGRATION_SPEC.md`, `src/scripts/verify-worker-dispatch.ts`, `src/scripts/test-forced-structural.ts`, plus 2 Gate A artifacts in `docs/smoke-runs/`.
 
 Phase 3.5 code: untouched. Rule 36 honored throughout.
 

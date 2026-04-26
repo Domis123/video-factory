@@ -204,7 +204,7 @@ ssh root@95.216.137.35 "cd /home/video-factory && git pull && npm install && npm
 
 ### Resource usage
 
-- **Memory**: ~142MB idle (8GB available on CX32 — plenty of headroom for concurrent renders + Gemini downscale)
+- **Memory**: ~210MB idle post-W8 deploy (up from ~142MB pre-W8 due to Part B agent code loading); observed peak ~500-562MB during a sustained Part B shadow run, returns to baseline post-run. 8GB available on CX32 — plenty of headroom for concurrent renders + Gemini downscale.
 - **CPU**: 4 vCPU on CX32. Spikes during FFmpeg encoding and Remotion rendering, idle otherwise.
 - **Disk**: 80GB SSD. Temp files cleaned after each job. R2 is the permanent store.
 - **Redis**: ~6.5K commands/day idle with drainDelay 120s (Upstash free tier: 500K/month). Was 26K/day at drainDelay 30s.

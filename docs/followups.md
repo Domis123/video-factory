@@ -6,22 +6,60 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
-## w8-q5-signal-validation-not-exercised-in-gate-a — Critic revise_scope library-inventory logic untested at Gate A
+## w9-q8c-structural-classification-not-exercised — Critic emitted slot_level on a structurally-shaped synthetic seed
 
 **Status:** Active, load-bearing for W9 signal quality.
-**Discovered:** 2026-04-24, W8 Gate A Tier 2.
+**Discovered:** 2026-04-26, W9 Gate A Tier 2 (Q8c synthetic forced-structural seed).
 
-**Pattern:** Gate A Tier 2 Seed C was designed to trigger Critic's revise_scope='structural' via library-inventory injection (Q5 option a). Seed C did not reach that logic: Critic approved on first fanout (either Planner didn't commit to single_exercise_deep_dive as intended, or 2 library matches + Critic tolerance was enough). Copywriter-v2 then died on parse retry (separate W7 issue). Net: library-inventory injection is live in code but unvalidated as a behavioral change.
+**Pattern:** Tier 2 ran the Q8c "fire hydrant deep dive" synthetic seed against `pipeline_override='force'` with nordpilates flipped to `part_b_shadow`. Dispatch + revise + escalation infrastructure all behaved correctly: Planner committed `form_id='single_exercise_deep_dive'`, 26 partb_* events emitted, 2 partb_revise_slots fired, terminal_state=`failed_after_revise_budget`. The Critic's final verdict text DID identify the structural-shaped problem ("single-subject deep dive, but Slot 3 switches to a different parent asset and outfit") but classified it as `revise_scope: 'slot_level'` — not 'structural'. Zero `partb_revise_structural` events emitted in Gate A.
 
-**Tried:** Seed C natural seed "bulgarian split squat deep dive." Insufficient trigger — sparse library exists but not sparse enough, or Planner didn't commit to deep-dive form.
+**Tried:** ran the synthetic seed designed in W8 followup `w8-q5-signal-validation-not-exercised-in-gate-a`. The infrastructure path is now exercised end-to-end; what's not exercised is the Critic's structural classification when the structural pattern is present.
 
-**Not tried:** hand-assembled Planner commitment forcing form_id='single_exercise_deep_dive' against an exercise with ≤2 library segments. This requires a synthetic test fixture that injects Planner output rather than running Planner from seed.
+**Not tried:** (a) inspect Critic's reasoning trace on this verdict to see whether library-inventory was actually consulted in the slot_level/structural decision, (b) widen the synthetic test fixtures to seeds where structural is the only plausible classification, (c) Critic prompt tuning to nudge structural emission when Planner's form commitment is contradicted by the Director's pick distribution.
 
-**Revisit:** add to W9 shadow measurement surface. If shadow produces no structural revises in first 20 jobs, construct synthetic test. Alternative: measure Critic's revise_scope distribution across real shadow jobs and see if structural ever emits.
+**Revisit:** during W9 shadow ramp. Concrete evidence: shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb` is the Q8c calibration marker (intentionally not cleaned up). Compare future shadow runs' `revise_scope` distribution against this baseline. If structural never emits across first 20-30 shadow verdicts, file as a Critic prompt tuning brief (likely Rule 42 single-gate eligible).
 
-**Affected data:** none. Code path is live; behavior unverified.
+**Affected data:** shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb` — preserve as Q8c reference.
 
-**Owner hint:** W9 shadow-mode brief author + Critic prompt tuner.
+**Owner hint:** W9 shadow analyst + Critic prompt tuner.
+
+---
+
+## w9-cost-tracking-unwired — shadow_runs.cost_p95_usd returns $0 across all rows
+
+**Status:** Active, load-bearing for Q5d cutover signal quality.
+**Discovered:** 2026-04-26, W9 Gate A Tier 2.
+
+**Pattern:** The Q8c synthetic seed ran 11 agent invocations through the orchestrator (Planner + Director + Critic + Copywriter across 1 expected-pass path + 2 revise cycles) and shadow_runs reports `cost_usd=$0.0000`. Q5d composite cutover rule has five signals; `cost_p95_usd ≤ $1.20/video` is one of them. With cost returning $0 across all rows, that signal is currently dead — the cutover rule is effectively 4-of-5, not 5-of-5.
+
+**Tried:** nothing yet — surfaced at W9 Gate A Tier 2.
+
+**Not tried:** (a) trace where each agent's per-call cost is or isn't reported back to the orchestrator, (b) check whether shadow-writer is reading a cost field that the agent functions never populate, (c) verify whether `@google/genai` response objects expose token counts that would let us compute cost server-side.
+
+**Revisit:** before steady-state ramp Phase 2. Phase 1 (calibration window, ~10 jobs at PART_B_ROLLOUT_PERCENT=100) can run with the cutover rule degraded to 4-of-5; the ramp to 30% steady-state should NOT proceed until cost tracking is wired and Q5d is fully observable.
+
+**Affected data:** every shadow_runs row currently in the table reports cost_usd=0; will continue to do so until fix lands.
+
+**Owner hint:** likely Rule 42 single-gate eligible (schema-additive at most, code-path-localized, existing test scripts validate). Whoever takes this should re-check the three Rule 42 criteria before scoping the brief.
+
+---
+
+## w9-verify-worker-dispatch-baseline-stale — Tier 1 script header quotes pre-W8 memory baseline
+
+**Status:** Active, cosmetic.
+**Discovered:** 2026-04-26, W9 Gate A Tier 1.
+
+**Pattern:** `src/scripts/verify-worker-dispatch.ts` header comment instructs the operator to confirm "Worker memory baseline: ~210MB ± 50MB" as part of Tier 1 evidence. Actual VPS reading at W9 Gate A Tier 1 was ~501MB idle and peaked at ~562MB during the shadow run (post-W8 deploy + Part B agent code loaded). The ~210MB figure was the W8 deploy-time baseline before sustained Part B agent loading. Future operators reading this script header in isolation could misread normal idle memory as a regression.
+
+**Tried:** the Tier 1 artifact at `docs/smoke-runs/w9-pre-flip-verification-20260424.txt` records the corrected reading inline.
+
+**Not tried:** updating the script header comment.
+
+**Revisit:** next time a W9-related script gets touched, fix the header comment to "Worker memory baseline: ~500-560MB on idle/peak, post-W8" with a note that the original ~210MB figure was W8-deploy-time only.
+
+**Affected data:** none — cosmetic.
+
+**Owner hint:** unowned, sweep-during-next-touch.
 
 ---
 
@@ -83,25 +121,6 @@ Two possibilities, not yet distinguished:
 **Affected data:** shadow_runs rows where Copywriter failed will have terminal_state=failed_agent_error; check part_b_failure_reason field in shadow for parse exhaustion attribution.
 
 **Owner hint:** W9 shadow analyst.
-
----
-
-## w8-phase-3-5-unaffected-check-via-worker-harness — Gate A harness bypassed BullMQ worker
-
-**Status:** Resolved at deploy-time (manual verification).
-**Discovered:** 2026-04-24, W8 Gate A Tier 2.
-
-**Pattern:** test-orchestrator.ts called runPipelineV2 directly, bypassing the BullMQ planning worker. Automated verification that Phase 3.5 dispatch is unaffected by Part B code loading was not in Gate A scope. Risk: Part B code loading could have caused side effects at worker startup that Gate A couldn't catch.
-
-**Tried:** post-deploy manual verification on 2026-04-24: submitted verification job cbd6d445 against pipeline_version=phase35 brand; Phase 3.5 reached brief_review on schedule; dispatcher correctly logged "Part B disabled"; zero partb_* events emitted; job_events shape matched Phase 3.5 baseline.
-
-**Not tried:** automated worker-harness test. Deferred as W8.1 or W9 pre-shadow check if desired.
-
-**Revisit:** W9 brief decides whether to add automated worker-harness test before first brand flip, or rely on ongoing manual verification during shadow ramp.
-
-**Affected data:** none. Phase 3.5 verified unaffected.
-
-**Owner hint:** W9 brief author.
 
 ---
 
@@ -388,3 +407,19 @@ Combining into one global helper would risk destabilizing W3/W5/W6 responseSchem
 ## Resolved
 
 *(Entries moved here once closed, with a "resolved on <date>" note. Optional — can just remove entries instead.)*
+
+---
+
+## w8-q5-signal-validation-not-exercised-in-gate-a — Critic revise_scope library-inventory logic untested at Gate A
+
+**Resolved:** 2026-04-26 by W9 Gate A Tier 2 (Q8c synthetic forced-structural seed; shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb`).
+
+The infrastructure path is now exercised end-to-end. The Critic was reached and library-inventory was injected per the W8 commit; what was observed is that the Critic emitted `revise_scope: 'slot_level'` on a structurally-shaped problem rather than 'structural'. That observation supersedes this followup as a Critic prompt-tuning concern, tracked at `w9-q8c-structural-classification-not-exercised`.
+
+---
+
+## w8-phase-3-5-unaffected-check-via-worker-harness — Gate A harness bypassed BullMQ worker
+
+**Resolved:** 2026-04-26 by W9 Gate A Tier 1 (`src/scripts/verify-worker-dispatch.ts`).
+
+The Tier 1 script submits a synthetic Phase 3.5 job through the live BullMQ planning worker against a `pipeline_version=phase35` brand and asserts four invariants: Phase 3.5 reaches `brief_review`, zero `partb_*` events emitted, shadow_runs row count unchanged, brand still on phase35 post-run. Live run on 2026-04-26 returned 4/4 PASS (jobId `e9b3475e-079c-463b-af84-e6e498172ae0`; full evidence at `docs/smoke-runs/w9-pre-flip-verification-20260424.txt`).
