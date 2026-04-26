@@ -24,6 +24,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { env } from '../config/env.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
+import { computeGeminiCost } from '../lib/llm-cost.js';
 import { fetchKeyframeGrid } from '../lib/r2-fetch.js';
 import {
   GeminiPickResponseSchema,
@@ -117,7 +118,7 @@ export async function pickClipForSlot(
   const parts = buildParts(prompt, withGrids);
 
   // 3. Gemini call, Zod-parse, 2-attempt retry on parse failure only.
-  const picked = await callGemini(parts, slot.slot_index);
+  const { picked, cost_usd } = await callGemini(parts, slot.slot_index);
 
   // 4. Semantic validation — throws on confabulated segment_id or bounds.
   const matchedCandidate = validatePick(picked, withGrids, slot);
@@ -156,6 +157,7 @@ export async function pickClipForSlot(
     was_relaxed_match: matchedCandidate.relaxation_applied.length > 0,
     same_parent_as_primary: samePrimary,
     latency_ms,
+    cost_usd,
   });
 }
 
@@ -223,10 +225,15 @@ export async function pickClipsForStoryboard(
   const parallel_speedup_ratio =
     total_latency_ms > 0 ? +(perSlotSum / total_latency_ms).toFixed(3) : 0;
 
+  // W9.1 — aggregate per-slot costs into the storyboard total. Each slot's
+  // cost was computed wrapper-side from that slot's Gemini call usageMetadata.
+  const cost_usd = +allPicks.reduce((a, p) => a + p.cost_usd, 0).toFixed(6);
+
   return StoryboardPicksSchema.parse({
     picks: allPicks,
     total_latency_ms,
     parallel_speedup_ratio,
+    cost_usd,
   });
 }
 
@@ -381,7 +388,7 @@ async function callGemini(
     | { inlineData: { mimeType: string; data: string } }
   >,
   slotIndex: number,
-): Promise<GeminiPickResponse> {
+): Promise<{ picked: GeminiPickResponse; cost_usd: number }> {
   const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
   const maxParseAttempts = 2;
@@ -405,7 +412,12 @@ async function callGemini(
       const text = response.text ?? '';
       if (!text) throw new Error('Gemini visual-director returned empty text');
       const raw = JSON.parse(text);
-      return GeminiPickResponseSchema.parse(raw);
+      const picked = GeminiPickResponseSchema.parse(raw);
+      // W9.1 — only the successful attempt's cost is charged. Parse-retry
+      // attempts that threw before reaching here have their tokens sunk
+      // (Gemini billed them but they're not surfaced through this path).
+      const usage = computeGeminiCost(DIRECTOR_MODEL, response);
+      return { picked, cost_usd: usage.cost_usd };
     } catch (err) {
       lastErr = err;
       // Empty-text is a transient multimodal flake — retry inside the same

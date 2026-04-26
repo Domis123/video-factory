@@ -19,6 +19,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { env } from '../config/env.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
+import { computeGeminiCost } from '../lib/llm-cost.js';
 import { loadBrandPersona } from './brand-persona.js';
 import { getLibraryInventory } from './library-inventory-v2.js';
 import { PlannerOutputSchema, type PlannerOutput } from '../types/planner-output.js';
@@ -137,7 +138,12 @@ async function callPlannerLLM(
       const text = response.text ?? '';
       if (!text) throw new Error('Gemini Planner returned empty text');
       const raw = JSON.parse(text);
-      return PlannerOutputSchema.parse(raw);
+      const parsed = PlannerOutputSchema.parse(raw);
+      // W9.1 — override the schema-default 0 with the actual computed cost.
+      // computeGeminiCost throws loudly (Rule 38) if usageMetadata is absent.
+      const usage = computeGeminiCost(PLANNER_MODEL, response);
+      parsed.cost_usd = usage.cost_usd;
+      return parsed;
     } catch (err) {
       lastErr = err;
       const isParseErr =
