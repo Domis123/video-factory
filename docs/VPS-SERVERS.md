@@ -165,8 +165,10 @@ src/index.ts (entry point)
 | Supabase | Read/write jobs, assets, brands, music_tracks | Service key in .env |
 | Upstash Redis | BullMQ job queue (TLS required) | Redis URL in .env |
 | Cloudflare R2 | Store/retrieve video clips, rendered videos, music | S3 access keys in .env |
-| Claude API (Anthropic) | 3 AI agents for creative planning | API key in .env |
+| Claude API (Anthropic) | 3 AI agents for creative planning (CD + Copywriter in Phase 3.5; Part B is Gemini-only) | API key in .env |
 | Gemini API (Google) | Video clip analysis during ingestion | API key in .env |
+
+**Watch item — Claude API consumption under dual-run mode (added 2026-04-27):** Phase 3.5 uses Claude Sonnet 4.6 at Creative Director and Copywriter steps (both blocking). Part B uses Gemini exclusively. When a brand is on `pipeline_version='part_b_shadow'` and `PART_B_ROLLOUT_PERCENT=100` (current Phase 1 calibration state for nordpilates), each job runs both pipelines in parallel — Phase 3.5's Claude calls fire alongside Part B's Gemini calls. Effective Claude consumption per dual-run nordpilates job is ~2x what it would be on Phase 3.5 alone (CD + Copywriter both Sonnet × 2 pipelines). 2026-04-27: Anthropic limit was hit during the first calibration run; operator raised it; no production impact (job completed before throttle). Revisit if Anthropic 429s start firing under sustained dual-run load. Logged as `claude-api-limit-watchitem` in followups.
 
 ### Systemd service
 
@@ -204,7 +206,13 @@ ssh root@95.216.137.35 "cd /home/video-factory && git pull && npm install && npm
 
 ### Resource usage
 
-- **Memory**: ~210MB idle post-W8 deploy (up from ~142MB pre-W8 due to Part B agent code loading); observed peak ~500-562MB during a sustained Part B shadow run, returns to baseline post-run. 8GB available on CX32 — plenty of headroom for concurrent renders + Gemini downscale.
+- **Memory:**
+  - Idle baseline: ~196MB cold start, ~210MB warm
+  - Phase 3.5 only (Curator V2 + clip-prep peak): ~250-350MB
+  - Dual-run peak (Phase 3.5 + Part B simultaneous): ~574MB (during Phase 3.5 Curator V2 holding 15 Gemini Files concurrently per slot)
+  - Render peak: ~1.6G during clip-prep with multiple .mov files in flight + ffmpeg encoding
+  - Returns to idle baseline post-render
+  - 8GB available on CX32 — ~5x headroom even at render peak; comfortable
 - **CPU**: 4 vCPU on CX32. Spikes during FFmpeg encoding and Remotion rendering, idle otherwise.
 - **Disk**: 80GB SSD. Temp files cleaned after each job. R2 is the permanent store.
 - **Redis**: ~6.5K commands/day idle with drainDelay 120s (Upstash free tier: 500K/month). Was 26K/day at drainDelay 30s.
@@ -296,6 +304,7 @@ API_PORT=3000
 | Supabase | $0 | Free tier |
 | Upstash Redis | $0 | Free tier (500K cmds/month, using ~26K/day) |
 | Cloudflare R2 | ~$0-1 | Free 10GB storage, zero egress |
-| Claude API | ~$4 | ~150 videos/week × 3 agents |
+| Claude API | ~$8 | ~150 videos/week × 2 Sonnet calls (CD + Copywriter); doubles during dual-run on shadow brands |
 | Gemini API | ~$0.60 | ~150 clips/week × $0.001 |
-| **Total** | **~$18/month** | At full 150 videos/week scale (CX32) |
+| Gemini API (Part B agents) | ~$3-5 | ~10-20 nordpilates jobs/week × ~$0.55/run during Phase 1 calibration; scales with brand expansion |
+| **Total (steady state, 1 brand on shadow)** | **~$22-26/month** | At full 150 videos/week + nordpilates dual-run on CX32 |
