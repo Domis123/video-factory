@@ -97,10 +97,25 @@ Key architectural decisions:
 | W6.5 | Planner subject stance + conditional Critic | ✅ shipped 2026-04-23 (tuning iteration) | W6 |
 | W7 | Copywriter rebuild | ✅ shipped 2026-04-24 | W5 (parallel to W6) |
 | W8 | Orchestrator | ✅ shipped 2026-04-24 | W3–W7 |
-| W9 | Shadow mode rollout | 🔴 not started | W8 |
-| **W10** | **Audio generation (NEW)** | 🔴 **not started, POST-shadow** | **W9 validation** |
+| W9 | Shadow mode rollout | ✅ shipped 2026-04-25 | W8 |
+| W9.1 | Cost tracking wireup | ✅ shipped 2026-04-26 (single-gate) | W9 |
+| Phase 1 calibration flip | ✅ live 2026-04-27 | W9.1 |
+| **Production Polish Sprint** | 🔴 **headline next workstream** | Phase 1 calibration first real seed |
+| W9.2 | Demo render bridge | 🔴 deferred behind Polish Sprint | Polish Sprint |
+| W10 | Audio generation | 🔴 deferred, post-cutover | First brand cutover |
 
-Estimated timeline: W9 remaining in ~1-2 weeks. W10 adds ~1 week post-shadow.
+**Estimated timeline (revised 2026-04-27):**
+- W9 ✅ shipped (2026-04-25)
+- W9.1 cost tracking ✅ shipped (2026-04-26)
+- Phase 1 calibration flip ✅ live (2026-04-27)
+- Production Polish Sprint: ~1-2 weeks (next)
+- W9.2 Demo render bridge: ~1 week (after Polish Sprint)
+- First Part B video rendered: shortly after W9.2 Gate A (rendering one shadow_runs row)
+- Phase 1 calibration steady-state: ramp PART_B_ROLLOUT_PERCENT down from 100 to 30 once Critic stops over-flagging
+- Cutover decision: ≥30 verdicts on Q5d signals + operator confirmation
+- W10 voice: post-first-cutover
+
+Total to first nordpilates Part B video on TikTok: realistically 4-8 weeks from today, depending on Polish Sprint duration + cutover signal stabilization.
 
 ---
 
@@ -220,6 +235,16 @@ See `docs/briefs/w1-keyframe-grids.md` (archived) and `src/lib/keyframe-grid.ts`
 
 (Spec unchanged. Input includes keyframe grids from W1.)
 
+### W5 — Known architectural limits (observed 2026-04-27)
+
+**Per-slot independent picking.** The Visual Director invokes per-slot picks via `Promise.all` — each slot's pick has no visibility into other slots' picks. When Planner commits `subject_consistency: single-subject` against a library where the most-represented parent has fewer segments than `slot_count`, the constraint is unfulfillable at the per-slot level. The Director picks the highest-similarity candidate per slot independently; this is deterministic given the candidate pool, so revise cycles produce near-identical re-picks.
+
+**Operator-Critic calibration mismatch (4 sightings):** When this happens, Critic correctly flags `subject_discontinuity` at severity high; revise budget exhausts; job terminates `failed_after_revise_budget`. Sightings: W6 Gate A, W8 Tier 2 Seed B, W9.1 Gate A (forced-structural), W9 Phase 1 first real seed. **Reframed conclusion:** the architectural limit is real but the Critic threshold is the binding constraint, not the architecture. Phase 3.5's curator picks cross-parent on the same library and ships operator-acceptable output. Loosening Critic's `subject_discontinuity` threshold is the cheaper fix and is Polish Sprint pillar 1.
+
+**Future-conditional architecture rebuild.** If Polish Sprint loosens Critic and the resulting Part B output reveals genuine cross-parent quality regression in production (e.g., outfits jarringly off-brand, identity changes mid-video that operators or audience flag), the Director architecture rebuild becomes a real workstream. Two viable shapes: (a) sequential picks anchored on slot 0's parent, (b) parent-locking at retrieval (W4 returns candidates pre-filtered to one parent when stance is single-subject). Estimated 5-7 days, two-gate brief if needed.
+
+**Primary evidence:** `docs/diagnostics/W9_CALIBRATION_RUN_DIAGNOSTIC.md`
+
 ### W6 — Coherence Critic
 
 **Purpose:** review full storyboard before render. Catches mistakes the per-slot Director missed.
@@ -311,6 +336,35 @@ Composition logic in `src/orchestrator/feature-flags.ts`. All three default to o
 
 ### W9 — Shadow mode rollout — unchanged from original spec
 
+### Production Polish Sprint — headline next workstream
+
+**Purpose:** Bundle 6 operator-named production-polish observations into a single sprint that gates the demo render bridge and first-Part-B-video moment. Surfaced from first real-seed calibration run (2026-04-27).
+
+**Pillars:**
+
+| # | Pillar | Surface | Estimated effort |
+|---|---|---|---|
+| 1 | **Critic calibration** | W6 Critic prompt — loosen `subject_discontinuity` severity or stance-conditional thresholds | 2-3 days, single-gate per Rule 42 |
+| 2 | **Music library expansion** | S7 ingestion + music_tracks table + brand mood/energy config | Operator-bound (ingestion), agent ~0.5d on harness |
+| 3 | **Render text placement** | Remotion composition + caption_preset config | 2-3 days, visual-judgment heavy |
+| 4 | **Brand assets / logo wiring** | Render template watermark logic + brand_config wiring | 0.5-1 day, likely small fix |
+| 5 | **Body composition ingestion filter** | S7 + Gemini analyze step extension | 2-3 days, ethically delicate (frame as off-brand fit) |
+| 6 | **Transitions library cleanup** | Transition definitions in render template | 0.5-1 day |
+
+**Sprint structure decision (Polish Sprint kickoff Q&A):** single brief covering all 6 pillars vs sequence of small briefs per pillar. Single brief is the lean.
+
+**Total sprint duration estimate:** 1-2 weeks, depending on pillar count and gate strategy.
+
+**What unblocks at sprint completion:**
+- Critic verdicts stop over-flagging operator-acceptable output (4-of-4 escalation rate should drop substantially)
+- Demo render bridge becomes worth building (bridges to good-enough output, not flawed output)
+- First Part B video can render with: appropriate music, correct text placement, brand logo, body-composition-filtered clips, simple cuts as transitions
+
+**What still doesn't unblock:**
+- Cutover decision rule still requires ≥30 dual-run comparisons + Q5d signals
+- W10 voice generation still post-cutover
+- Brand expansion still post-first-cutover
+
 ### W10 — Audio generation (NEW, added 2026-04-21)
 
 **Purpose:** enable voiceover-led content for forms currently text-only. Unlocks ~30% of form taxonomy gated by talking-head scarcity.
@@ -346,7 +400,7 @@ Composition logic in `src/orchestrator/feature-flags.ts`. All three default to o
 
 ---
 
-## Cost & latency projections (revised)
+## Cost & latency projections (revised 2026-04-27)
 
 | Stage | Cost | Wall time |
 |---|---|---|
@@ -355,13 +409,21 @@ Composition logic in `src/orchestrator/feature-flags.ts`. All three default to o
 | Visual Director (×N slots, parallel) | $0.30-0.40 | 30-45s |
 | Copywriter | $0.03 | 6s |
 | Coherence Critic | $0.05 | 10s |
-| **Total LLM cost (W2-W9)** | **~$0.50/video** | ~75s |
+| **Subtotal Part B happy-path** | **~$0.45-0.55/video** | ~75s |
+| Revise loop (×2 max) | +$0.10-0.15 per cycle | +30s per cycle |
+| **Subtotal Part B with full revise** | **~$0.55-0.85/video** | ~135s |
+| **Phase 3.5 (Sonnet × 2 calls)** | **~$0.10-0.20/video** | ~240s |
+| **Dual-run total per nordpilates job** | **~$0.65-1.05/video** | ~480s wall (parallel) |
+| Remotion render | $0.00 | ~60s + variable on clip count |
 | W10 voice generation (when shipped) | +$0.02 | +5s |
-| Remotion render | $0.00 | ~60s |
 
-Production target: $0.50/video all-in during credits period (W2-W9). $0.52/video steady state with W10.
+**Real measured:** W9.1 Gate A + W9 Phase 1 calibration both ran $0.55-0.56/Part-B-run (full revise to exhaustion).
 
-**Actual session cost tracking (2026-04-22 + 2026-04-23):** ~$4 total in Gemini usage across all test-script smokes (W3 iterations + W4 no-LLM + W5 multimodal + W6 Critic + W6.5 revalidation). Production projection unchanged: $0.50/video all-in through W9, $0.52 with W10.
+**Operator cost ceiling:** $1/video accepted, even higher if necessary. Current cost is well within ceiling.
+
+**Production target post-cutover:** $0.50-0.55/Part-B-video happy-path; $0.85 worst-case with full revise. With W10 voice: +$0.02. Production at $0.52/video happy-path post-W10.
+
+**Watch item:** dual-run mode is current state through Phase 1 calibration window. Doubles Claude consumption per nordpilates job (Sonnet × 2 in Phase 3.5). Logged as `claude-api-limit-watchitem`.
 
 ---
 

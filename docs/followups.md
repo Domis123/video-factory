@@ -6,22 +6,89 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
-## w9-q8c-structural-classification-not-exercised — Critic emitted slot_level on a structurally-shaped synthetic seed
+## w9-q8c-structural-classification-not-exercised — Active
 
-**Status:** Active, load-bearing for W9 signal quality.
-**Discovered:** 2026-04-26, W9 Gate A Tier 2 (Q8c synthetic forced-structural seed).
+**Discovered:** 2026-04-27, W9 Gate A Tier 2 forced-structural seed
+**Pattern:** Critic verbalizes structural issues in verdict prose ("single-subject deep dive, but Slot 3 switches to a different parent asset and outfit") but emits `revise_scope: slot_level` instead of `structural`. Recognition without classification mapping.
+**Evidence:** shadow_runs row cb87d32c-53d2-49d1-aeb9-2e362091fbcb
+**Owner:** Polish Sprint pillar 1 (Critic calibration). May resolve incidentally if calibration changes also tighten classification mapping.
 
-**Pattern:** Tier 2 ran the Q8c "fire hydrant deep dive" synthetic seed against `pipeline_override='force'` with nordpilates flipped to `part_b_shadow`. Dispatch + revise + escalation infrastructure all behaved correctly: Planner committed `form_id='single_exercise_deep_dive'`, 26 partb_* events emitted, 2 partb_revise_slots fired, terminal_state=`failed_after_revise_budget`. The Critic's final verdict text DID identify the structural-shaped problem ("single-subject deep dive, but Slot 3 switches to a different parent asset and outfit") but classified it as `revise_scope: 'slot_level'` — not 'structural'. Zero `partb_revise_structural` events emitted in Gate A.
+---
 
-**Tried:** ran the synthetic seed designed in W8 followup `w8-q5-signal-validation-not-exercised-in-gate-a`. The infrastructure path is now exercised end-to-end; what's not exercised is the Critic's structural classification when the structural pattern is present.
+## w9-music-library-needs-expansion — Active
 
-**Not tried:** (a) inspect Critic's reasoning trace on this verdict to see whether library-inventory was actually consulted in the slot_level/structural decision, (b) widen the synthetic test fixtures to seeds where structural is the only plausible classification, (c) Critic prompt tuning to nudge structural emission when Planner's form commitment is contradicted by the Director's pick distribution.
+**Discovered:** 2026-04-27, operator observation from first real render
+**Pattern:** Music selection feels limited; same fallback tracks recur. Today's job fell back to "Gigi Perez Sailor Song" through emotional → meditative cascade.
+**Surface:** S7 ingestion workflow + music_tracks table + brand-allowed mood/energy combinations in brand_configs
+**Owner:** Polish Sprint pillar 2
 
-**Revisit:** during W9 shadow ramp. Concrete evidence: shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb` is the Q8c calibration marker (intentionally not cleaned up). Compare future shadow runs' `revise_scope` distribution against this baseline. If structural never emits across first 20-30 shadow verdicts, file as a Critic prompt tuning brief (likely Rule 42 single-gate eligible).
+---
 
-**Affected data:** shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb` — preserve as Q8c reference.
+## w9-render-text-placement-suboptimal — Active
 
-**Owner hint:** W9 shadow analyst + Critic prompt tuner.
+**Discovered:** 2026-04-27, operator observation from first real render
+**Pattern:** Overlay positioning in Remotion composition doesn't sit cleanly against visual content in some compositions.
+**Surface:** Remotion composition + caption_preset config in brand_configs
+**Owner:** Polish Sprint pillar 3
+
+---
+
+## w9-brand-logo-not-rendering — Active
+
+**Discovered:** 2026-04-27, operator observation from first real render
+**Pattern:** nordpilates.json has `logo_r2_key` populated but operator reports no logo on shipped video. Either render template doesn't read the field, or watermark_position/opacity defaults are wrong, or the field isn't wired.
+**Surface:** Remotion composition + brand_config wiring path
+**Owner:** Polish Sprint pillar 4 (likely small fix)
+
+---
+
+## w9-ingestion-needs-body-composition-filter — Active
+
+**Discovered:** 2026-04-27, operator-required brand standard
+**Pattern:** No ingestion-level filter for body composition; off-brand fit clips pass through. Operator standard: "never use overweight people in our videos."
+**Frame:** "off-brand fit" classifier, not body-shape value judgment in prompts
+**Surface:** S7 ingestion workflow + asset_segments analysis at ingest time
+**Owner:** Polish Sprint pillar 5 (most ethically delicate; framing matters in implementation)
+
+---
+
+## w9-transitions-library-too-animated — Active
+
+**Discovered:** 2026-04-27, operator observation from first real render
+**Pattern:** Current transition library includes long animations that don't fit the soft-aesthetic-cinema register. Operator wants simple clean cuts as default + minimal subtle transitions only; no long animations.
+**Surface:** Transition definitions in render template / Remotion composition
+**Owner:** Polish Sprint pillar 6
+
+---
+
+## w9-color-grade-needs-per-posture-presets — Active
+
+**Discovered:** 2026-04-27, operator observation
+**Pattern:** Current `warm-vibrant` LUT does its job but doesn't fully nail the soft-pastel nordpilates aesthetic across all postures.
+**Surface:** Color-grade preset config in brand_configs + Remotion composition
+**Owner:** Polish Sprint (sub-scope of pillar 3 or its own pillar — sprint brief decides)
+
+---
+
+## w9-demo-render-bridge-deferred-behind-polish-sprint — Active
+
+**Discovered:** 2026-04-27, render-bridge diagnostic
+**Pattern:** Part B's shadow_runs.context_packet_v2 cannot reach the renderer. `prepareContextForRender` is a null-safety stub, not a translator. Render worker reads jobs.context_packet exclusively (never shadow_runs). Remotion composition is hardwired to Phase 3.5 CopyPackage shape. Multiple required fields missing from context_packet_v2: composition_id, creative_direction.color_treatment, clips[].r2_key/trim, music_selection, brand_config, brief.audio.music, brief.segments[].text_overlay/transition_in/cut_duration_target_s.
+**Sized:** MEDIUM-leaning-LARGE workstream
+**Files touched:** src/orchestrator/render-prep.ts (rewrite as translator), src/orchestrator/orchestrator-v2.ts (enrich context_packet_v2), src/workers/pipeline.ts (route Part B jobs), new src/orchestrator/music-selector-partb.ts or shared helper, possibly src/types/orchestrator-state.ts extensions
+**Estimated commits:** 4-6
+**Owner:** Future workstream after Polish Sprint stabilizes Critic verdicts and renders look right
+**Diagnostic note:** docs/diagnostics/w9-2-render-bridge-state-20260427.md
+
+---
+
+## claude-api-limit-watchitem — Active
+
+**Discovered:** 2026-04-27, during W9 Phase 1 calibration first real-seed run
+**Pattern:** Anthropic Claude API limit hit during today's calibration run. Operator raised limit; no production impact (demo seed completed before throttle bit).
+**Watch:** Dual-run mode roughly doubles Claude consumption per nordpilates job (CD + Copywriter both Sonnet × 2 pipelines, since Phase 3.5 uses Sonnet for both Creative Director and Copywriter while Part B is Gemini-only).
+**Revisit if:** jobs fail with Anthropic 429s under sustained dual-run load, OR billing/credit alerts fire, OR production volume meaningfully scales.
+**Owner:** Production Polish Sprint planning chat to keep visible. May need budget review at Polish Sprint deploy.
 
 ---
 
@@ -44,50 +111,36 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
-## w8-nordpilates-revise-exhaustion-rate-tier-2-baseline — 2 of 3 Gate A seeds exhausted revise budget
+## w8-nordpilates-revise-exhaustion-rate-tier-2-baseline — Active (REFRAMED 2026-04-27)
 
-**Status:** Active, load-bearing for W9 operator capacity planning.
-**Discovered:** 2026-04-24, W8 Gate A Tier 2.
+**Original baseline (W8 Tier 2):** 2-of-3 nordpilates seeds exhausted revise budget.
+**Updated baseline (W9.1 + W9 Phase 1):** 4-of-4 real-seed Part B runs terminate `failed_after_revise_budget`.
 
-**Pattern:** Seeds A (aesthetic-ambient) and B (routine-sequence hip mobility) both exhausted the 2-cycle revise budget and escalated to human. Seed C failed on Copywriter parse. Zero seeds completed to shadow_runs.part_b_terminal_state='completed'. At this rate, shadow mode will produce heavy operator escalation load.
+**Reframed:** This is not "calibration tells us what natural distribution looks like" anymore. 4-of-4 is the steady-state behavior of the current Critic threshold against the current library. The signal stable enough that we can act on it.
 
-**Tried:** nothing at W8 — brief called this exact pattern acceptable and named W9 shadow as the measurement surface.
+**Reframed action:** Rather than widening revise budget from 2 to 3 (the original consideration), the action is loosening Critic's subject_discontinuity threshold. Widening budget without loosening Critic still produces 5-of-5 cycle exhaustions deterministically.
 
-**Not tried:** (a) widening revise budget from 2 to 3, (b) investigating whether escalated jobs are genuinely unfixable vs Director-retrieval-thrashing (see next followup).
-
-**Revisit:** W9 shadow measurement. Track brief_review escalation rate on part_b_shadow jobs. If exhaustion rate >30% sustained, widen budget to 3. If escalated jobs, on operator review, would have shipped with a 3rd revise cycle but not 4th — budget=3 is the right answer. If operator rejects escalated jobs regardless of cycle count — structural issue with retrieval or Critic prompt.
-
-**Affected data:** shadow_runs rows will skew heavily toward failed_after_revise_budget terminal state in early shadow.
-
-**Owner hint:** W9 shadow operator.
+**Owner:** Polish Sprint pillar 1
 
 ---
 
-## w8-slot-level-revise-thrashing-without-convergence — Director re-picks same candidates on revise-loop
+## w8-slot-level-revise-thrashing-without-convergence — Active (REFRAMED 2026-04-27)
 
-**Status:** Active, load-bearing for Q5 calibration.
-**Discovered:** 2026-04-24, W8 Gate A Tier 2 Seed B.
+**Pattern:** Director picks 5 different parent assets on single-subject Planner commitments; Critic flags subject_discontinuity at severity high; revise instructions sent; Director re-picks ~5 different parents again (deterministic given same candidate pool, only 1 slot changes per cycle); revise budget exhausts.
 
-**Pattern:** Seed B's first Critic verdict flagged subject_discontinuity on slots 2+4 as slot_level. Orchestrator re-invoked Director on those slots. Director's re-picks produced identical (or near-identical) clips; Critic flagged the same issue again. Second re-invocation same result. Revise budget exhausted.
+**Sightings:** 4 total
+- W6 Gate A
+- W8 Tier 2 Seed B
+- W9.1 Gate A (forced-structural seed) — shadow_runs ff67fc55-1fc1-472f-8ef6-aec36e87a9c1
+- W9 Phase 1 first real seed — shadow_runs cf104600-5a05-436a-932e-a2473a50dc4a
 
-Two possibilities, not yet distinguished:
-(a) Critic should have flagged structural, not slot_level (library-inventory teaching didn't catch this case well enough)
-(b) Retrieval returned identical candidate pools across re-invocations (Director is deterministic given same candidates)
+**Prior reading (2026-04-23 to 2026-04-27 morning):** Director architecture limit. Per-slot parallel picks can't honor cross-slot continuity. Implied fix: W11 Director Architecture Rebuild (sequential picks anchored on slot 0's parent OR parent-locking at retrieval).
 
-**Tried:** nothing — observed at Gate A, not blocking.
+**Reframed reading (2026-04-27 post-operator-pushback):** Critic calibration mismatch, not architecture. Phase 3.5 picks cross-parent on the same library and ships operator-acceptable output weekly. Critic's `subject_discontinuity` threshold is over-strict relative to operator's quality criterion. Director architecture isn't the binding constraint right now.
 
-**Not tried:** (a) inspect candidate pool diversity across revise-cycle Director calls (log the candidate_ids fetched), (b) manually inspect seed B's library availability for the flagged slots' body_focus to determine if structural was warranted.
+**Owner:** Polish Sprint pillar 1 (Critic calibration). Director architecture rebuild deferred as future-conditional workstream — only resurrects if Polish Sprint output reveals genuine quality regression after looser Critic threshold.
 
-**Revisit:** W9 shadow. When slot_level revise exhausts, retrospectively query library inventory and ask: "does form × library actually support this commitment?" Informs Critic prompt tuning on library-inventory teaching.
-
-**Sightings:**
-- 2026-04-24, W8 Gate A Tier 2 Seed B (initial discovery, slots 2+4 subject_discontinuity)
-- 2026-04-26, W9 Gate A Tier 2 Q8c synthetic (shadow_runs row `cb87d32c`, slot 3 subject continuity classified as slot_level)
-- 2026-04-26, W9.1 Gate A run (shadow_runs row `ff67fc55-1fc1-472f-8ef6-aec36e87a9c1`, Tier 2 seed A "slow sunday stretching", terminal_state=`failed_after_revise_budget` on subject_discontinuity). Pattern stable across multiple seeds; calibration window will measure steady-state rate.
-
-**Affected data:** shadow_runs rows where revise_loop_iterations=2 and terminal_state=failed_after_revise_budget. Candidate pool logging not yet captured (would need orchestrator instrumentation).
-
-**Owner hint:** W9 shadow analyst + Critic prompt tuner.
+**Primary evidence document:** docs/diagnostics/w9-2-render-bridge-state-20260427.md and W9_CALIBRATION_RUN_DIAGNOSTIC.md
 
 ---
 
@@ -396,24 +449,24 @@ Combining into one global helper would risk destabilizing W3/W5/W6 responseSchem
 
 ---
 
-## w8-q5-signal-validation-not-exercised-in-gate-a — Critic revise_scope library-inventory logic untested at Gate A
+## w8-q5-signal-validation-not-exercised-in-gate-a — RESOLVED 2026-04-27
 
-**Resolved:** 2026-04-26 by W9 Gate A Tier 2 (Q8c synthetic forced-structural seed; shadow_runs row `cb87d32c-53d2-49d1-aeb9-2e362091fbcb`).
-
-The infrastructure path is now exercised end-to-end. The Critic was reached and library-inventory was injected per the W8 commit; what was observed is that the Critic emitted `revise_scope: 'slot_level'` on a structurally-shaped problem rather than 'structural'. That observation supersedes this followup as a Critic prompt-tuning concern, tracked at `w9-q8c-structural-classification-not-exercised`.
-
----
-
-## w8-phase-3-5-unaffected-check-via-worker-harness — Gate A harness bypassed BullMQ worker
-
-**Resolved:** 2026-04-26 by W9 Gate A Tier 1 (`src/scripts/verify-worker-dispatch.ts`).
-
-The Tier 1 script submits a synthetic Phase 3.5 job through the live BullMQ planning worker against a `pipeline_version=phase35` brand and asserts four invariants: Phase 3.5 reaches `brief_review`, zero `partb_*` events emitted, shadow_runs row count unchanged, brand still on phase35 post-run. Live run on 2026-04-26 returned 4/4 PASS (jobId `e9b3475e-079c-463b-af84-e6e498172ae0`; full evidence at `docs/smoke-runs/w9-pre-flip-verification-20260424.txt`).
+**Resolved by:** W9 Q8c synthetic forced-structural seed at Gate A Tier 2 (commit at 005f9cb).
+**Active synthetic seed exercised the code path. Critic emitted `slot_level` (not `structural`) on the test run; revise budget exhausted as designed.**
+**Successor followup:** `w9-q8c-structural-classification-not-exercised` — captures the observation that Critic verbalizes structural issues in prose but emits slot_level classification. Polish Sprint pillar 1 may resolve this incidentally.
 
 ---
 
-## w9-cost-tracking-unwired — shadow_runs.part_b_cost_usd returns $0 across all rows
+## w8-phase-3-5-unaffected-check-via-worker-harness — RESOLVED 2026-04-27
 
-**Resolved:** 2026-04-26 by W9.1 cost-tracking wireup (merge SHA `940c75a`).
+**Resolved by:** W9 Tier 1 verify-worker-dispatch.ts at Gate A (commit at 005f9cb).
+**Worker-harness verified Phase 3.5 dispatch unaffected: 4/4 invariants held — brand stayed phase35, no partb_* events on phase35 brand, shadow_runs delta=0, dispatcher emitted exact "Part B not routed" log line.**
 
-Cost path wired emit→accumulate→persist: `src/lib/llm-cost.ts` computes Gemini cost from `usageMetadata`; four Part B agents (Planner, Visual Director, Coherence Critic, Copywriter) emit `cost_usd` after Zod parse (Rule 38 loud throw on missing usageMetadata); orchestrator's `CostAccumulator` aggregates per-agent totals; shadow-writer persists `totalCost(ctx.costAccumulator)` as `part_b_cost_usd`. Q5d cost signal alive at $0.0114 / $0.1566 / $0.0123 / $0.0152 per-agent baseline (planner / picks / critic / copy) on a Tier 2 orchestrator seed (shadow_runs row `ff67fc55-1fc1-472f-8ef6-aec36e87a9c1`, cumulative `part_b_cost_usd=$0.5635` across 11 invocations + 2 revise cycles). Q5d cutover rule restored to 5-of-5; Phase 2 ramp no longer cost-blocked. Full evidence at `docs/smoke-runs/w9-1-cost-tracking-20260426.txt`.
+---
+
+## w9-cost-tracking-unwired — RESOLVED 2026-04-27
+
+**Resolved by:** W9.1 single-gate fix at 940c75a.
+**Cost path now wired emit→accumulate→persist. Q5d cost signal alive.**
+**Per-agent baseline established (forced-structural seed):** planner $0.0114, picks $0.1566, critic $0.0123, copy $0.0152.
+**Total per shadow run baseline:** ~$0.55-0.56 (forced-structural seed including 2 revise loops).
