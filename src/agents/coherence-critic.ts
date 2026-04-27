@@ -31,6 +31,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { env } from '../config/env.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
+import { computeGeminiCost } from '../lib/llm-cost.js';
 import {
   GeminiCriticResponseSchema,
   CriticVerdictSchema,
@@ -157,7 +158,7 @@ export async function reviewStoryboard(
     precompute,
     input.libraryInventory,
   );
-  const response = await callGemini(prompt);
+  const { response, cost_usd } = await callGemini(prompt);
 
   // 4. Semantic validation — throws on self-contradiction.
   validateVerdict(response, plannerOutput);
@@ -169,6 +170,7 @@ export async function reviewStoryboard(
     overall_reasoning: response.overall_reasoning,
     issues: response.issues,
     latency_ms,
+    cost_usd,
   });
 }
 
@@ -506,7 +508,9 @@ function formatPersonaTenets(persona: BrandPersona): string {
 // Gemini call + parse retry
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function callGemini(prompt: string): Promise<GeminiCriticResponse> {
+async function callGemini(
+  prompt: string,
+): Promise<{ response: GeminiCriticResponse; cost_usd: number }> {
   const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
   const maxParseAttempts = 2;
@@ -529,7 +533,12 @@ async function callGemini(prompt: string): Promise<GeminiCriticResponse> {
       const text = response.text ?? '';
       if (!text) throw new Error('Gemini coherence-critic returned empty text');
       const raw = JSON.parse(text);
-      return GeminiCriticResponseSchema.parse(raw);
+      const parsed = GeminiCriticResponseSchema.parse(raw);
+      // W9.1 — only the successful attempt's cost is charged. Parse-retry
+      // attempts that failed before reaching this line are sunk (their
+      // tokens were consumed but we have no clean way to surface them).
+      const usage = computeGeminiCost(CRITIC_MODEL, response);
+      return { response: parsed, cost_usd: usage.cost_usd };
     } catch (err) {
       lastErr = err;
       const isParseErr =

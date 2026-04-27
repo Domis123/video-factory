@@ -87,6 +87,8 @@ export const CriticVerdictSchema = z.object({
   issues: z.array(CriticIssueSchema),
   // Diagnostic — populated wrapper-side.
   latency_ms: z.number().int().nonnegative(),
+  // W9.1 — Gemini USD spend on this critic call. Wrapper-populated.
+  cost_usd: z.number().min(0).default(0),
 });
 
 export type CriticVerdict = z.infer<typeof CriticVerdictSchema>;

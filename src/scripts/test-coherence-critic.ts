@@ -36,7 +36,6 @@ import type { LibraryInventory } from '../types/library-inventory.js';
 import type { CandidateMetadataSnapshot } from '../agents/coherence-critic.js';
 
 const BRAND_ID = 'nordpilates';
-const CRITIC_COST_USD = 0.06;
 
 const SEEDS: string[] = [
   'morning pilates routine for hip mobility',
@@ -473,7 +472,10 @@ async function main(): Promise<void> {
   }
   const totalCriticCalls =
     realPassed + (synthA.ok ? 1 : 0) + (synthB.ok ? 1 : 0) + (synthC.ok ? 1 : 0);
-  const estCriticCost = totalCriticCalls * CRITIC_COST_USD;
+  // W9.1 — actual cost from per-verdict cost_usd (sum across real + synthetic).
+  const actualCriticCost = allVerdicts
+    .filter((v): v is CriticVerdict => !!v)
+    .reduce((a, v) => a + (v.cost_usd ?? 0), 0);
   const criticLatencies = [
     ...realResults.map((r) => r.verdict?.latency_ms ?? 0),
     synthA.verdict?.latency_ms ?? 0,
@@ -491,17 +493,29 @@ async function main(): Promise<void> {
   console.log(`  synthetic_C_assertion:     ${synthC.assertion_pass ? 'PASS' : 'FAIL'}  ${synthC.assertion_detail}`);
   console.log(`  total_wall_ms:             ${totalWall}`);
   console.log(`  total_critic_calls:        ${totalCriticCalls}`);
-  console.log(`  est_critic_cost_usd:       $${estCriticCost.toFixed(2)}  (@ ~$${CRITIC_COST_USD}/call)`);
+  console.log(`  actual_critic_cost_usd:    $${actualCriticCost.toFixed(6)}  (sum of CriticVerdict.cost_usd)`);
   console.log(`  avg_critic_latency_ms:     ${avgLatency}`);
   console.log(`  verdict_distribution:      ${JSON.stringify(verdictDist)}`);
   console.log(`  revise_scope_distribution: ${JSON.stringify(reviseScopeDist)}`);
   console.log(`  issue_type_distribution:   ${JSON.stringify(issueDist)}`);
 
+  // W9.1 — hard assertion: every successful Critic verdict must report cost_usd > 0.
+  const zeroCostVerdicts = allVerdicts
+    .filter((v): v is CriticVerdict => !!v)
+    .filter((v) => (v.cost_usd ?? 0) <= 0);
+  const cw91Pass = zeroCostVerdicts.length === 0 && actualCriticCost > 0;
+  if (!cw91Pass) {
+    console.log(`  ✗ W9.1 cost-tracking assertion FAILED: ${zeroCostVerdicts.length} verdict(s) with cost_usd<=0; total=$${actualCriticCost.toFixed(6)}`);
+  } else {
+    console.log(`  ✓ W9.1 cost-tracking assertion PASS: all ${totalCriticCalls} verdicts reported cost_usd > 0`);
+  }
+
   const allPass =
     realPassed === realResults.length &&
     synthA.assertion_pass &&
     synthB.assertion_pass &&
-    synthC.assertion_pass;
+    synthC.assertion_pass &&
+    cw91Pass;
   if (!allPass) process.exitCode = 1;
 }
 

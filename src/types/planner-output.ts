@@ -78,6 +78,10 @@ export const PlannerOutputSchema = z.object({
   slots: z.array(PlannerSlotSchema).min(1).max(12),
   music_intent: z.enum(MUSIC_INTENT_VALUES),
   posture: z.enum(POSTURE_VALUES),
+  // W9.1 — wrapper attaches the computed Gemini cost after parse. Default 0
+  // keeps old fixtures parsing cleanly; the model's emit may include or omit
+  // the field — either way the wrapper overrides post-parse.
+  cost_usd: z.number().min(0).default(0),
 });
 
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;

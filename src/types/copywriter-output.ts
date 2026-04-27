@@ -73,6 +73,10 @@ export const CopyPackageSchema = z.object({
     temperature: z.number(),
     retry_count: z.number().int().min(0),
   }),
+
+  // W9.1 — Gemini USD spend on this copywriter call (whichever attempt
+  // succeeded — parse-retry attempts are not summed). Wrapper-populated.
+  cost_usd: z.number().min(0).default(0),
 });
 
 export type CopyPackage = z.infer<typeof CopyPackageSchema>;

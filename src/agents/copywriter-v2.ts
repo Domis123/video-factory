@@ -30,6 +30,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import { env } from '../config/env.js';
 import { withLLMRetry } from '../lib/retry-llm.js';
+import { computeGeminiCost } from '../lib/llm-cost.js';
 import {
   buildSegmentSnapshots,
   type SegmentSnapshot,
@@ -211,13 +212,17 @@ export async function writeCopyForStoryboard(
 
   const prompt = renderPrompt(plannerOutput, picks, brandPersona, snapshots);
 
-  const { parsed, retryCount } = await callGemini(prompt);
+  const { parsed, retryCount, cost_usd } = await callGemini(prompt);
 
   // Stamp metadata with true retry count + temperature before semantic checks.
   // Zod has already validated, so we mutate the parsed object rather than
   // re-parsing.
   parsed.metadata.retry_count = retryCount;
   parsed.metadata.temperature = TEMPERATURE;
+  // W9.1 — attach the computed cost to the package. Like retry_count above,
+  // this is post-Zod mutation; the schema's `.default(0)` filled in 0 during
+  // parse and we override with the real value here.
+  parsed.cost_usd = cost_usd;
 
   // Semantic validation — throws distinct error classes (Rule 38, no silent
   // correct). Order: slot-level first (fail fast on the most common prompt
@@ -283,7 +288,7 @@ function slotIdFor(slot: PlannerSlot): string {
 
 async function callGemini(
   prompt: string,
-): Promise<{ parsed: CopyPackage; retryCount: number }> {
+): Promise<{ parsed: CopyPackage; retryCount: number; cost_usd: number }> {
   const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
   const maxParseAttempts = 3;
@@ -314,7 +319,11 @@ async function callGemini(
       // can enforce the full contract.
       raw.voiceover_script = null;
       const parsed = CopyPackageSchema.parse(raw);
-      return { parsed, retryCount: parseRetries };
+      // W9.1 — only the successful attempt's tokens are charged. Parse-retry
+      // attempts that threw before reaching here are sunk (their tokens
+      // were billed by Gemini but we can't surface them cleanly).
+      const usage = computeGeminiCost(COPYWRITER_MODEL, response);
+      return { parsed, retryCount: parseRetries, cost_usd: usage.cost_usd };
     } catch (err) {
       lastErr = err;
       const isParseErr =
