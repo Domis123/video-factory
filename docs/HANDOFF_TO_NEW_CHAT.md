@@ -10,9 +10,9 @@ Video Factory is a pipeline that produces ~150-300 short-form videos per week ac
 
 The bigger architectural arc this session continued: **Phase 3.5 is the production pipeline today (Creative Director → Asset Curator → Copywriter → render). Part B is the rebuild that exploits richer segment metadata + multimodal pick + post-select copy.** Part B's creative goal — *retention through pleasure, not persuasion; videos that feel organic, not like ads* — is the entire reason the rebuild exists.
 
-**As of 2026-04-26: Part B is complete as runtime code, W9 deployed, awaiting Phase 1 calibration flip.** All five creative agents (Planner, Retrieval, Director, Critic, Copywriter) are shipped. The Orchestrator that wires them is shipped. Shadow-mode infrastructure (shadow_runs table, 3-tier feature flag composition, dual-run dispatch) is deployed. **W9's measurement surface (Q5d cutover-rule scaffold, shadow_review view, runbooks, n8n+Sheet integration spec) is now also deployed.** All 5 brands still on `pipeline_version='phase35'`; `PART_B_ROLLOUT_PERCENT=0`. Phase 3.5 still serves 100% of production.
+**As of 2026-04-26: Part B is complete as runtime code, W9 + W9.1 deployed, awaiting Phase 1 calibration flip.** All five creative agents (Planner, Retrieval, Director, Critic, Copywriter) are shipped. The Orchestrator that wires them is shipped. Shadow-mode infrastructure (shadow_runs table, 3-tier feature flag composition, dual-run dispatch) is deployed. **W9's measurement surface (Q5d cutover-rule scaffold, shadow_review view, runbooks, n8n+Sheet integration spec) is deployed.** **W9.1 cost-tracking wireup is deployed** — `shadow_runs.part_b_cost_usd` now reflects real per-run cost; Q5d signal is 5-of-5. All 5 brands still on `pipeline_version='phase35'`; `PART_B_ROLLOUT_PERCENT=0`. Phase 3.5 still serves 100% of production.
 
-**W9 has shipped.** The next operator-track step is the Phase 1 calibration flip on nordpilates (`PART_B_ROLLOUT_PERCENT=100` for the first ~10 jobs, then drop to 30 for steady-state Phase 2), gated on diagnosing the `shadow_runs.cost_usd=$0` gap surfaced at W9 Gate A Tier 2. See "What's next" below.
+**W9.1 has shipped — cost-tracking gap closed; Phase 1 calibration is no longer cost-blocked.** The next operator-track step is the Phase 1 calibration flip on nordpilates (`PART_B_ROLLOUT_PERCENT=100` for the first ~10 jobs, then drop to 30 for steady-state Phase 2). See "What's next" below.
 
 ---
 
@@ -136,14 +136,12 @@ The operational layer atop W8's dispatch infrastructure. Migration 012 (`shadow_
 
 ---
 
-## What's next — diagnose cost tracking, then Phase 1 calibration flip
+## What's next — Phase 1 calibration flip on operator signal
 
-W9 ships the measurement surface. The agent path forward, in priority order:
+W9 + W9.1 are shipped. Cost-tracking gap closed (Q5d cost signal alive at $0.0114 / $0.1566 / $0.0123 / $0.0152 per-agent baseline on a Tier 2 orchestrator seed; cumulative `part_b_cost_usd=$0.5635` on shadow_runs row `ff67fc55-1fc1-472f-8ef6-aec36e87a9c1`). The path forward, in priority order:
 
-1. **Diagnose `shadow_runs.cost_usd=$0`.** Followup `w9-cost-tracking-unwired` is load-bearing for Q5d cutover signal quality. Q5d composite cutover rule has five signals; with cost dead, the rule is currently 4-of-5. Phase 1 calibration can run with this gap, Phase 2 steady-state ramp cannot. Likely Rule 42 single-gate eligible — re-check the three criteria when scoping the brief (schema-additive? code-path-unchanged? existing tests validate?).
-2. **Apply the cost-tracking fix.**
-3. **Phase 1 calibration flip on nordpilates.** Set `brand_configs.pipeline_version='part_b_shadow'` for nordpilates and `PART_B_ROLLOUT_PERCENT=100` (calibration window — first ~10 jobs only). Observe signal stability. After ~10 jobs, drop `PART_B_ROLLOUT_PERCENT=30` for Phase 2 steady-state. Operator runbook at `docs/runbooks/W9_SHADOW_OPERATIONS.md` is authoritative for the ramp protocol and pause/rollback triggers.
-4. **(Independent / parallel)** Operator implements n8n Workflow A+B and the Sheet column extensions per `docs/runbooks/W9_N8N_SHEET_INTEGRATION_SPEC.md`. Sheet review is convenient but not strictly gating — operators can hand-query `shadow_review` view directly during early calibration. This track does NOT block the cost-tracking diagnostic or Phase 1 flip.
+1. **Phase 1 calibration flip on nordpilates** (operator signal). Set `brand_configs.pipeline_version='part_b_shadow'` for nordpilates and `PART_B_ROLLOUT_PERCENT=100` (calibration window — first ~10 jobs only), restart `video-factory` service. Observe signal stability across all five Q5d signals. After ~10 jobs, drop `PART_B_ROLLOUT_PERCENT=30` for Phase 2 steady-state. Operator runbook at `docs/runbooks/W9_SHADOW_OPERATIONS.md` is authoritative for the ramp protocol and pause/rollback triggers.
+2. **(Independent / parallel)** Operator implements n8n Workflow A+B and the Sheet column extensions per `docs/runbooks/W9_N8N_SHEET_INTEGRATION_SPEC.md`. Sheet review is convenient but not strictly gating — operators can hand-query `shadow_review` view directly during early calibration. This track does NOT block the Phase 1 flip.
 
 After Phase 1 calibration (~10 jobs at 100%, signal stability assessed), the brand-expansion criteria at `docs/runbooks/W9_BRAND_EXPANSION_CRITERIA.md` decide the second brand to flip. That decision is post-evidence, not pre-committed — five-brand portfolio (carnimeat, highdiet, ketoway, nodiet, nordpilates) yields four candidates after nordpilates cutover; eligibility is library size, persona/form coverage, production volume, persona-prose readiness.
 

@@ -25,25 +25,6 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
-## w9-cost-tracking-unwired — shadow_runs.cost_p95_usd returns $0 across all rows
-
-**Status:** Active, load-bearing for Q5d cutover signal quality.
-**Discovered:** 2026-04-26, W9 Gate A Tier 2.
-
-**Pattern:** The Q8c synthetic seed ran 11 agent invocations through the orchestrator (Planner + Director + Critic + Copywriter across 1 expected-pass path + 2 revise cycles) and shadow_runs reports `cost_usd=$0.0000`. Q5d composite cutover rule has five signals; `cost_p95_usd ≤ $1.20/video` is one of them. With cost returning $0 across all rows, that signal is currently dead — the cutover rule is effectively 4-of-5, not 5-of-5.
-
-**Tried:** nothing yet — surfaced at W9 Gate A Tier 2.
-
-**Not tried:** (a) trace where each agent's per-call cost is or isn't reported back to the orchestrator, (b) check whether shadow-writer is reading a cost field that the agent functions never populate, (c) verify whether `@google/genai` response objects expose token counts that would let us compute cost server-side.
-
-**Revisit:** before steady-state ramp Phase 2. Phase 1 (calibration window, ~10 jobs at PART_B_ROLLOUT_PERCENT=100) can run with the cutover rule degraded to 4-of-5; the ramp to 30% steady-state should NOT proceed until cost tracking is wired and Q5d is fully observable.
-
-**Affected data:** every shadow_runs row currently in the table reports cost_usd=0; will continue to do so until fix lands.
-
-**Owner hint:** likely Rule 42 single-gate eligible (schema-additive at most, code-path-localized, existing test scripts validate). Whoever takes this should re-check the three Rule 42 criteria before scoping the brief.
-
----
-
 ## w9-verify-worker-dispatch-baseline-stale — Tier 1 script header quotes pre-W8 memory baseline
 
 **Status:** Active, cosmetic.
@@ -98,6 +79,11 @@ Two possibilities, not yet distinguished:
 **Not tried:** (a) inspect candidate pool diversity across revise-cycle Director calls (log the candidate_ids fetched), (b) manually inspect seed B's library availability for the flagged slots' body_focus to determine if structural was warranted.
 
 **Revisit:** W9 shadow. When slot_level revise exhausts, retrospectively query library inventory and ask: "does form × library actually support this commitment?" Informs Critic prompt tuning on library-inventory teaching.
+
+**Sightings:**
+- 2026-04-24, W8 Gate A Tier 2 Seed B (initial discovery, slots 2+4 subject_discontinuity)
+- 2026-04-26, W9 Gate A Tier 2 Q8c synthetic (shadow_runs row `cb87d32c`, slot 3 subject continuity classified as slot_level)
+- 2026-04-26, W9.1 Gate A run (shadow_runs row `ff67fc55-1fc1-472f-8ef6-aec36e87a9c1`, Tier 2 seed A "slow sunday stretching", terminal_state=`failed_after_revise_budget` on subject_discontinuity). Pattern stable across multiple seeds; calibration window will measure steady-state rate.
 
 **Affected data:** shadow_runs rows where revise_loop_iterations=2 and terminal_state=failed_after_revise_budget. Candidate pool logging not yet captured (would need orchestrator instrumentation).
 
@@ -423,3 +409,11 @@ The infrastructure path is now exercised end-to-end. The Critic was reached and 
 **Resolved:** 2026-04-26 by W9 Gate A Tier 1 (`src/scripts/verify-worker-dispatch.ts`).
 
 The Tier 1 script submits a synthetic Phase 3.5 job through the live BullMQ planning worker against a `pipeline_version=phase35` brand and asserts four invariants: Phase 3.5 reaches `brief_review`, zero `partb_*` events emitted, shadow_runs row count unchanged, brand still on phase35 post-run. Live run on 2026-04-26 returned 4/4 PASS (jobId `e9b3475e-079c-463b-af84-e6e498172ae0`; full evidence at `docs/smoke-runs/w9-pre-flip-verification-20260424.txt`).
+
+---
+
+## w9-cost-tracking-unwired — shadow_runs.part_b_cost_usd returns $0 across all rows
+
+**Resolved:** 2026-04-26 by W9.1 cost-tracking wireup (merge SHA `940c75a`).
+
+Cost path wired emit→accumulate→persist: `src/lib/llm-cost.ts` computes Gemini cost from `usageMetadata`; four Part B agents (Planner, Visual Director, Coherence Critic, Copywriter) emit `cost_usd` after Zod parse (Rule 38 loud throw on missing usageMetadata); orchestrator's `CostAccumulator` aggregates per-agent totals; shadow-writer persists `totalCost(ctx.costAccumulator)` as `part_b_cost_usd`. Q5d cost signal alive at $0.0114 / $0.1566 / $0.0123 / $0.0152 per-agent baseline (planner / picks / critic / copy) on a Tier 2 orchestrator seed (shadow_runs row `ff67fc55-1fc1-472f-8ef6-aec36e87a9c1`, cumulative `part_b_cost_usd=$0.5635` across 11 invocations + 2 revise cycles). Q5d cutover rule restored to 5-of-5; Phase 2 ramp no longer cost-blocked. Full evidence at `docs/smoke-runs/w9-1-cost-tracking-20260426.txt`.
