@@ -18,7 +18,7 @@
 | BRAND_MAP correctness | `node` JSON parse + entry count | ✓ 33 entries, 32 unique brand_ids (CL + CD both → cyclediet); no full-name fallback; no lowercased keys. |
 | IF + Quarantine + Log nodes present | JSON inspection | ✓ Skip Filter (`n8n-nodes-base.if`, typeVersion 2), Move to Quarantine (Drive move to `1kTfzVzeyUms-rYSLSh9f7IPk_MlaN5Hi`), Log Quarantine (Sheets append to "Ingestion Log" tab). |
 | `INGESTION_NAMING.md` written | File at `docs/INGESTION_NAMING.md` | ✓ Present; 33-prefix table, valid/invalid examples, post-ingestion walkthrough, troubleshooting. |
-| VPS endpoint validation (c6) | `src/index.ts` /ugc-ingest patch | _will be filled in at c6 commit_ |
+| VPS endpoint validation (c6) | `src/index.ts` /ugc-ingest patch | ✓ Filename-fallback path now consults a brand_configs Set cache (5-min TTL, refresh on cache-miss) and 400s on unknown brand_id. Header-path stays permissive per Decision 2. Fail-open on cache-load error to match rest-of-endpoint posture. +43 lines net (~30 lines code + ~13 comment); no refactor. |
 
 ---
 
@@ -115,7 +115,7 @@ These steps run AFTER the chore is merged and deployed to the agent's branch. Or
 | c3 | `a1f8970` | updated S8 workflow JSON (`n8n-workflows/S8_UGC_Ingest_v2.json`) |
 | c4 | `a900d9c` | `docs/INGESTION_NAMING.md` operator reference |
 | c5 | _this commit_ | Gate A artifact + operator handoff (this file) |
-| c6 | _next commit_ | VPS endpoint validation hardening (filename-fallback brand_id check) |
+| c6 | _this commit_ | VPS endpoint validation hardening (filename-fallback brand_id check + brand_configs Set cache) |
 
 ---
 
