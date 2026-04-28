@@ -166,14 +166,37 @@ This is the same count the Polish Sprint Pillar 1 pre-work check 5 produced (~1,
 
 ---
 
+## Decisions confirmed by operator (2026-04-28)
+
+| Decision | Choice | Notes |
+|---|---|---|
+| R2 migration (c2) | **SKIP** | No `NP/` rows exist anywhere; migration would be a no-op. Verified via direct R2 ListObjectsV2 (0 keys) AND paginated Supabase query over all 1,173 nordpilates segments (0 with `clip_r2_key LIKE 'NP/%'`). Cross-source agreement; nothing to migrate. |
+| Missing brand_configs rows (27) | **DEFER (lazy population)** | Operator activates `brand_configs` per brand when committing to ingest for that brand. Filed as followup `s8-brand-configs-lazy-population`. Files for non-configured brands route through S8 cleanly (BRAND_MAP resolves prefix → brand_id) and create asset rows with brand_ids that don't have configs yet — these rows are unrenderable until the brand_configs row is added but are otherwise inert. |
+| c6 VPS endpoint validation | **FIX IN-CHORE** | Strict scope: validate the parsed filename-prefix-fallback brand_id against `brand_configs.brand_id` and 400 if not found. Implementation: in-memory `Set<string>` brand_id cache populated at server start, refreshed on cache-miss against DB. ~10 lines net change. If fix grows beyond ~30 min / ~30 lines, pause and report — don't refactor. |
+| QUARANTINE_FOLDER_ID | `1kTfzVzeyUms-rYSLSh9f7IPk_MlaN5Hi` | Operator-created, relayed via Drive URL `https://drive.google.com/drive/folders/1kTfzVzeyUms-rYSLSh9f7IPk_MlaN5Hi`. Embedded in c3 workflow JSON. |
+
+## Operator-named brand priority for first ingestion wave (informational)
+
+The chore enables all 33 prefixes simultaneously. Operator has named the following brands as priority for the first ingestion wave this week:
+
+| Order | Brand ID | Prefix | Notes |
+|---|---|---|---|
+| 1 | nordpilates | NP | Already live; existing 1,173 segments + 298 assets |
+| 2 | cyclediet | CL or CD | Menstrual-cycle diet + exercises |
+| 3 | carnimeat | CM | Carnivore diet + exercises (brand_configs row exists) |
+| 4 | nodiet | ND | Mediterranean diet (brand_configs row exists) |
+
+This is informational sequencing context — **NOT a brand_configs population task in this chore.** Configs stay deferred per Decision 2 above. When operator decides to commit to ingestion for `cyclediet`, the `brand_configs` row for `cyclediet` will be added at that time. Until then, `cyclediet` files dropped in Drive will route correctly through S8 (BRAND_MAP['CL']='cyclediet') and create assets rows with `brand_id='cyclediet'`, but those rows won't be processable by Phase 3.5 / Part B / Simple Pipeline because `loadBrandPersona('cyclediet')` will fail without a `brand_configs` row.
+
+The above list is the order in which operator expects to add configs + start ingesting. Documented here for cross-reference if anyone reads the audit later and wonders why some brands are configured while others aren't.
+
 ## What ships next
 
-Pending operator decisions:
-- **c2 R2 migration:** SKIP (recommended; awaiting confirm)
-- **c3 workflow JSON:** PROCEED. Blocked on operator providing `QUARANTINE_FOLDER_ID`.
+- **c2:** SKIPPED. This commit captures the no-migration decision + brand priority context as audit-doc updates instead.
+- **c3 workflow JSON:** PROCEED. `QUARANTINE_FOLDER_ID = 1kTfzVzeyUms-rYSLSh9f7IPk_MlaN5Hi` available; no longer blocked.
 - **c4 `docs/INGESTION_NAMING.md`:** PROCEED.
 - **c5 Gate A artifact + operator handoff:** PROCEED.
-- **c6 VPS endpoint validation:** awaiting operator decision. If yes, +~30 minutes of agent work. If no, file as `s8-vps-endpoint-validation` followup.
+- **c6 VPS endpoint validation:** PROCEED (fix in-chore, strict scope).
 
 ---
 

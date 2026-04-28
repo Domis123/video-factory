@@ -25,6 +25,17 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 ---
 
+## s8-brand-configs-lazy-population — Active
+
+**Discovered:** 2026-04-28 during S8 multi-brand ingestion routing chore pre-work
+**Pattern:** The 33-prefix BRAND_MAP routes to 32 unique `brand_id` values. Only 5 (carnimeat, highdiet, ketoway, nodiet, nordpilates) have `brand_configs` rows; 27 brands have no config (airdiet, brainway, cortisoldetox, cyclediet, effecto, flamediet, glpdiet, greendiet, harmonydiet, koiyoga, lastdiet, lastingchange, liverdetox, manifestationparadox, menletics, mindway, moongrade, nomorediet, nordastro, nordletics, nordyoga, novahealth, offdiet, raisingdog, taiyoga, walkingyoga, welcomebaby).
+**Operator decision (2026-04-28):** lazy population — add a `brand_configs` row for a brand only when committing to ingest + render for it. Files for non-configured brands routed through S8 (with `x-asset-meta` set by S8's BRAND_MAP) will ingest successfully and create `assets` rows with `brand_id` matching the prefix's brand value, even if `brand_configs` has no row for that brand_id; those rows accumulate as inert until the brand_configs row is added. The c6 fix tightens only the filename-fallback path (when `x-asset-meta` is missing); files reaching VPS without `x-asset-meta` but with a prefix-shaped filename will now 400 instead of silently creating orphan-brand rows. Net: S8-routed ingestion is permissive; non-S8-routed ingestion is restrictive.
+**Operator-named priority order for first ingestion wave (2026-04-28):** nordpilates (live) → cyclediet → carnimeat → nodiet.
+**Action:** operator adds `brand_configs` rows on commit-to-ingest. No agent action needed; reference this followup if drift between BRAND_MAP and brand_configs surfaces in production.
+**Owner:** Domis, on per-brand commit-to-ingest
+
+---
+
 ## w9-q8c-structural-classification-not-exercised — Active
 
 **Discovered:** 2026-04-27, W9 Gate A Tier 2 forced-structural seed
