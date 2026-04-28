@@ -46,6 +46,7 @@ const mockBrand: BrandConfig = {
   cta_text_color: null,
   transition_style: 'cut',
   voice_guidelines: 'Warm, encouraging, fitness-positive. Avoid aggressive sales language.',
+  aesthetic_description: null,
   hook_style_preference: ['pov', 'question', 'challenge'],
   content_pillars: ['pilates', 'flexibility', 'wellness', 'daily routine'],
   allowed_video_types: ['workout-demo', 'tips-listicle', 'transformation'],

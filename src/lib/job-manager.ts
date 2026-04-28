@@ -19,6 +19,14 @@ export const VALID_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
   human_qa:        ['delivered', 'queued', 'planning'], // approve, re-render, re-plan
   delivered:       [],
   failed:          ['planning'],                     // manual retry
+  // Simple Pipeline (added 2026-04-28 c1):
+  simple_pipeline_pending:   ['simple_pipeline_rendering', 'simple_pipeline_failed'],
+  simple_pipeline_rendering: ['human_qa', 'simple_pipeline_failed'],
+  simple_pipeline_failed:    ['simple_pipeline_pending'], // manual retry
+  simple_pipeline_blocked:   ['simple_pipeline_pending'], // re-attempt after readiness fixed
+  // Note: human_qa → simple_pipeline_pending intentionally NOT added here.
+  // If c10 testing surfaces a need to re-render a rejected Simple Pipeline job
+  // through the same flow, add the edge then. For now operators can create a new job.
 };
 
 export class TransitionError extends Error {

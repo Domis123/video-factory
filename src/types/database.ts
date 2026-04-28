@@ -15,7 +15,11 @@ export type JobStatus =
   | 'auto_qa'
   | 'human_qa'
   | 'delivered'
-  | 'failed';
+  | 'failed'
+  | 'simple_pipeline_pending'
+  | 'simple_pipeline_rendering'
+  | 'simple_pipeline_failed'
+  | 'simple_pipeline_blocked';
 
 // ── Database Row Types ──
 
@@ -38,6 +42,7 @@ export interface BrandConfig {
   cta_text_color: string | null;
   transition_style: string;
   voice_guidelines: string | null;
+  aesthetic_description: string | null;
   hook_style_preference: string[];
   content_pillars: string[];
   allowed_video_types: string[];
