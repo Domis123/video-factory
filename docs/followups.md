@@ -6,6 +6,25 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## docs-residue-cleanup-from-session-18 — Active
+
+**Discovered:** 2026-04-27 during Polish Sprint pre-work
+**Pattern:** Local agent sandbox at sprint kickoff had ~12 deleted-but-unstaged tracked files + ~21 untracked files, residue from incomplete cleanup work in session-18-close-rule-43 or earlier. Stashed at `stash@{0}` with message `pre-polish-sprint-residue-2026-04-27`. Includes:
+ - planned root→docs/ moves never committed (`GIT_WORKFLOW.md`)
+ - planned version bumps (`VIDEO_PIPELINE_ARCHITECTURE` v5_1 → v6)
+ - planned `MVP_PROGRESS_11.md`, `PHASE_4_ADDENDUM.md`
+ - `W8_ORCHESTRATOR_BRIEF.md` (should already be in repo per W8 ship)
+ - `PENDING_CLAUDE_RESTRUCTURE.patch` (incomplete CLAUDE.md restructure)
+ - 6 src/scripts/* (`w9-prework-*`, `w0d/`, `diagnose-cost-evidence.ts`, `probe-live-jobs.ts`, `verify-phase35-post-w8.ts`)
+
+The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-state-20260427.md`, referenced by `W9_CALIBRATION_RUN_DIAGNOSTIC.md`) was pulled out and committed on `chore/restore-w9-2-render-bridge-diagnostic`. Everything else stays in stash.
+
+**Action:** operator reviews `stash@{0}` contents at convenience, decides per-file what gets committed, what gets dropped. Not Polish Sprint scope. Stash persists on agent sandbox — operator should pull it down to laptop if sandbox is ephemeral.
+
+**Owner:** Domis, post-sprint
+
+---
+
 ## w9-q8c-structural-classification-not-exercised — Active
 
 **Discovered:** 2026-04-27, W9 Gate A Tier 2 forced-structural seed
