@@ -8,4 +8,11 @@ env.video-factory
 video/
 music-tracks/
 .cache/transformers/
-docs/briefs/
+# Briefs stay local-only by default — they're workstream-scoped
+# drafts that get superseded as work evolves. Exception:
+# handoff-load-bearing briefs are explicitly allowed below.
+# (Pattern note: must be docs/briefs/* not docs/briefs/ — git cannot
+# re-include a file via negation if the parent directory itself is
+# excluded.)
+docs/briefs/*
+!docs/briefs/SIMPLE_PIPELINE_BRIEF_v2.md
