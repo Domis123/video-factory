@@ -25,6 +25,27 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 ---
 
+## s8-v2-json-config-binary-encoding-and-routing — Active
+
+**Discovered:** 2026-04-28 during Gate A smoke testing
+**Pattern:** c3 of `chore/s8-multi-brand-ingestion-routing` shipped `n8n-workflows/S8_UGC_Ingest_v2.json` that diverges from the working operator-side configuration in three places:
+
+1. **Send to VPS body:** JSON has `Body Content Type: Raw + Body: {{ $binary.data }}`. In n8n expression mode, `$binary.data` evaluates to the binary metadata reference object (`{ mimeType, fileType, ... }`), not the actual bytes. VPS received 0-byte requests; ffprobe failed with "exit 1" on empty file. Working config is `Body Content Type: n8n Binary File` + `inputDataFieldName=data` (no Body field, no Content-Type field).
+2. **Skip Filter routing:** the IF node downstream of Prep Metadata strips binary attachments from items passing through it. Working config replaces the IF node with two parallel Code nodes from Download File:
+   - "Prep Metadata - Valid" → filters to recognized prefixes, returns array WITH binary attached, feeds Send to VPS path
+   - "Prep Metadata - Skipped" → filters to skip:true items, returns array without binary, feeds Quarantine + Log path
+
+   Multi-output return from a single Code node (`return [validResults, skippedResults]`) was tried first; n8n rejected with "Code doesn't return items properly. Please return an array of objects."
+3. **Send to VPS retry:** not in JSON. VPS `/ugc-ingest` is single-threaded by design (returns 503 when an ingestion is already in progress). For multi-file drops, files 2-N fail without retry. Working config adds `Retry On Fail = true, Max Tries = 3, Wait Between Tries = 60s` on the Send to VPS node.
+
+**Action:** agent re-exports working v2 from operator's n8n at next convenient session, updates the repo artifact at `n8n-workflows/S8_UGC_Ingest_v2.json`. Not blocking; n8n production state is correct, the divergence is purely between repo artifact and the live workflow.
+
+**Brief-process observation (operator-flagged 2026-04-28):** the c3 JSON looked structurally correct in code review — correct nodes, correct connections, correct expressions. The bugs only surfaced via end-to-end testing against real binary streams. Future briefs that involve n8n workflow updates should require operator runs a real-file smoke test before Gate A closes, not just "JSON is committed and importable." Filed as observation; not a blocker; informs the Simple Pipeline brief if it touches n8n.
+
+**Owner:** agent (next session touching n8n workflows OR Simple Pipeline brief execution if it touches S8)
+
+---
+
 ## s8-brand-configs-lazy-population — Active
 
 **Discovered:** 2026-04-28 during S8 multi-brand ingestion routing chore pre-work
