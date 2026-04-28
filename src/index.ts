@@ -139,6 +139,28 @@ const API_PORT = env.API_PORT;
 // in parallel. Reject overlapping ingestion requests with 503.
 let ugcIngesting = false;
 
+// S8 multi-brand chore (c6): cache of known brand_ids from brand_configs.
+// Populated lazily on first /ugc-ingest filename-fallback path; refreshed
+// after TTL or on cache-miss. Header-path requests (S8 normal flow) are
+// permissive per "lazy population" decision and don't consult this cache.
+let knownBrandIdsCache: Set<string> | null = null;
+let knownBrandIdsLoadedAt = 0;
+const BRAND_IDS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getKnownBrandIds(forceRefresh = false): Promise<Set<string> | null> {
+  const stale = !knownBrandIdsCache || Date.now() - knownBrandIdsLoadedAt > BRAND_IDS_CACHE_TTL_MS;
+  if (stale || forceRefresh) {
+    const { data, error } = await supabaseAdmin.from('brand_configs').select('brand_id');
+    if (error) {
+      console.warn(`[ugc-ingest] brand_configs cache load failed: ${error.message}`);
+      return null;
+    }
+    knownBrandIdsCache = new Set((data ?? []).map((r) => r.brand_id as string));
+    knownBrandIdsLoadedAt = Date.now();
+  }
+  return knownBrandIdsCache;
+}
+
 const server = createServer(async (req, res) => {
   // CORS + JSON headers
   res.setHeader('Content-Type', 'application/json');
@@ -248,6 +270,7 @@ const server = createServer(async (req, res) => {
       // Parse filename and brand_id from header or filename convention
       const filename = String(meta.filename || `clip-${Date.now()}.mp4`).replace(/[^a-zA-Z0-9._-]/g, '_');
       let brandId = String(meta.brand_id || '');
+      const fromFilenameFallback = brandId === '';
       let description = String(meta.description || '');
 
       // Fallback: parse brand_id from filename ({brand_id}_{description}.ext)
@@ -265,6 +288,26 @@ const server = createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'Missing brand_id in header and filename' }));
         req.destroy();
         return;
+      }
+
+      // S8 multi-brand chore (c6): validate filename-fallback brand_id against
+      // brand_configs. Header-path requests stay permissive (S8 sends a routed
+      // brand_id; lazy-population means brand_configs may not have a row yet).
+      // Fail-open if the cache itself can't be loaded — matches the rest of
+      // the endpoint's posture on Supabase errors.
+      if (fromFilenameFallback) {
+        let known = await getKnownBrandIds();
+        if (known && !known.has(brandId)) {
+          known = await getKnownBrandIds(true);
+          if (known && !known.has(brandId)) {
+            res.writeHead(400);
+            res.end(JSON.stringify({
+              error: `Unknown brand_id '${brandId}' parsed from filename prefix; not in brand_configs`,
+            }));
+            req.destroy();
+            return;
+          }
+        }
       }
 
       // Idempotency check BEFORE reading body — duplicates never touch disk

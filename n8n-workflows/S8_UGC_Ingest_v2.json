@@ -1,0 +1,208 @@
+{
+  "name": "S8 v2: UGC Ingest (Drive → VPS, multi-brand prefix routing + Quarantine)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "s8-trigger",
+      "name": "Every 5min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1120, 112]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "1n0-vMRq0ckgAugGxUlOtY9e942ARpCyZ",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "s8-download",
+      "name": "Download UGC Folder Files",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-896, 112],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      },
+      "notes": "Drive folder used as the unified UGC drop folder. Currently the existing nordpilates folder ID; operator may rename or repoint at import time."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Multi-brand prefix routing for UGC ingest.\n// Filenames must follow: <PREFIX>_<description>.<ext>\n// Files without a recognized prefix are flagged skip:true and routed to Quarantine.\nconst items = $input.all();\nconst results = [];\n\nconst BRAND_MAP = {\n  'EF': 'effecto',\n  'LC': 'lastingchange',\n  'WB': 'welcomebaby',\n  'ND': 'nodiet',\n  'CL': 'cyclediet',\n  'HD': 'highdiet',\n  'LD': 'lastdiet',\n  'BW': 'brainway',\n  'WY': 'walkingyoga',\n  'GD': 'greendiet',\n  'NH': 'novahealth',\n  'MG': 'moongrade',\n  'OD': 'offdiet',\n  'AT': 'airdiet',\n  'CM': 'carnimeat',\n  'NY': 'nordyoga',\n  'NP': 'nordpilates',\n  'CD': 'cyclediet',\n  'NM': 'nomorediet',\n  'KD': 'ketoway',\n  'HY': 'harmonydiet',\n  'KY': 'koiyoga',\n  'ML': 'menletics',\n  'RD': 'raisingdog',\n  'MW': 'mindway',\n  'NA': 'nordastro',\n  'NL': 'nordletics',\n  'MP': 'manifestationparadox',\n  'GL': 'glpdiet',\n  'CX': 'cortisoldetox',\n  'TA': 'taiyoga',\n  'FD': 'flamediet',\n  'LX': 'liverdetox'\n};\n\nfor (const item of items) {\n  const name = item.json.name || Object.keys(item.binary || {})[0] || 'unknown.mp4';\n  const sanitized = name.replace(/[^a-zA-Z0-9._-]/g, '_');\n  const nameWithoutExt = sanitized.replace(/\\.[^.]+$/, '');\n  const underscoreIdx = nameWithoutExt.indexOf('_');\n\n  let brandId = null;\n  let description = '';\n  let skip = false;\n  let reason = '';\n\n  if (underscoreIdx <= 0) {\n    skip = true;\n    reason = 'no_prefix_underscore';\n  } else {\n    const prefix = nameWithoutExt.slice(0, underscoreIdx);\n    if (!Object.prototype.hasOwnProperty.call(BRAND_MAP, prefix)) {\n      skip = true;\n      reason = 'unknown_prefix:' + prefix;\n    } else {\n      brandId = BRAND_MAP[prefix];\n      description = nameWithoutExt.slice(underscoreIdx + 1);\n    }\n  }\n\n  results.push({\n    json: {\n      driveFileId: item.json.id || '',\n      driveName: name,\n      sanitizedName: sanitized,\n      brandId: brandId,\n      description: description,\n      skip: skip,\n      reason: reason,\n      timestamp: new Date().toISOString()\n    },\n    binary: item.binary\n  });\n}\n\nreturn results;"
+      },
+      "id": "s8-prep",
+      "name": "Prep Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-672, 112]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "s8-skip-filter",
+      "name": "Skip Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-448, 112],
+      "notes": "True branch (output 0) → file skipped; routes to Quarantine + Log. False branch (output 1) → normal ingest path."
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.driveFileId }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "value": "1kTfzVzeyUms-rYSLSh9f7IPk_MlaN5Hi",
+          "mode": "id"
+        }
+      },
+      "id": "s8-move-quarantine",
+      "name": "Move to Quarantine",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-224, -64],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      },
+      "notes": "Quarantine folder ID 1kTfzVzeyUms-rYSLSh9f7IPk_MlaN5Hi (operator-created 2026-04-28)."
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Ingestion Log",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $('Prep Metadata').item.json.timestamp }}",
+            "Filename": "={{ $('Prep Metadata').item.json.driveName }}",
+            "Reason": "={{ $('Prep Metadata').item.json.reason }}",
+            "Drive File ID": "={{ $('Prep Metadata').item.json.driveFileId }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s8-log-quarantine",
+      "name": "Log Quarantine",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [0, -64],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      },
+      "notes": "Operator must create the 'Ingestion Log' tab in the Video Pipeline sheet before activating this workflow. Columns: Timestamp, Filename, Reason, Drive File ID."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://95.216.137.35:3000/ugc-ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-asset-meta",
+              "value": "={{ JSON.stringify({ filename: $json.sanitizedName, brand_id: $json.brandId, description: $json.description }) }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/octet-stream"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ $binary.data }}",
+        "options": { "timeout": 1800000 }
+      },
+      "id": "s8-send-vps",
+      "name": "Send to VPS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-224, 240],
+      "notes": "Timeout 30 min — pre-normalize + Gemini Pro segment analysis on long parents can take 15+ min."
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Prep Metadata').item.json.driveFileId }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "value": "1IMQwMD902e2ps7UYZnz1RQhRs3ZEUIhN",
+          "mode": "id"
+        }
+      },
+      "id": "s8-move-processed",
+      "name": "Move to Processed",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [0, 240],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      },
+      "notes": "Existing Processed folder. Multi-brand inheritance — operator may rename to a unified label after this v2 ships."
+    }
+  ],
+  "connections": {
+    "Every 5min": { "main": [[{ "node": "Download UGC Folder Files", "type": "main", "index": 0 }]] },
+    "Download UGC Folder Files": { "main": [[{ "node": "Prep Metadata", "type": "main", "index": 0 }]] },
+    "Prep Metadata": { "main": [[{ "node": "Skip Filter", "type": "main", "index": 0 }]] },
+    "Skip Filter": {
+      "main": [
+        [{ "node": "Move to Quarantine", "type": "main", "index": 0 }],
+        [{ "node": "Send to VPS", "type": "main", "index": 0 }]
+      ]
+    },
+    "Move to Quarantine": { "main": [[{ "node": "Log Quarantine", "type": "main", "index": 0 }]] },
+    "Send to VPS": { "main": [[{ "node": "Move to Processed", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}
