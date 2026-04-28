@@ -104,18 +104,41 @@ The app starts as a single process that runs everything:
 ```
 src/index.ts (entry point)
 ├── Planning Worker (BullMQ, concurrency: 1)
-│   └── Runs 3 AI agents → produces Context Packet
+│   └── Runs Phase 3.5 + Part B (when shadow brand) AI agents → produces Context Packet
 ├── Rendering Worker (BullMQ, concurrency: 2)
 │   └── clip-prep → transcribe → render → audio-mix → sync-check → export → QA
 ├── Ingestion Worker (BullMQ)
-│   └── FFprobe + Gemini analyze → R2 upload → Supabase insert
+│   └── FFprobe + Gemini Pro analyze → R2 upload → Supabase insert (single-threaded by design; serializes via /ugc-ingest)
+├── [PLANNED] Simple Pipeline Worker (BullMQ, concurrency: 2)
+│   └── Match-Or-Match agent → overlay generation → music select → ffmpeg render → R2 upload
+│       (Pending Simple Pipeline brief implementation)
 └── HTTP API (port 3000)
-    ├── POST /enqueue      — n8n adds jobs to BullMQ queues
-    ├── POST /music-ingest — n8n sends audio file for processing
-    └── GET  /health       — Health check
+    ├── POST /enqueue            — n8n adds jobs to BullMQ queues (planning, simple_pipeline)
+    ├── POST /ugc-ingest         — n8n S8 sends UGC video file with x-asset-meta + binary stream
+    ├── POST /music-ingest       — n8n sends audio file for processing
+    └── GET  /health             — Health check
 ```
 
 ### How a video gets made (VPS perspective)
+
+**Ingestion phase** (triggered by S8 workflow with multi-brand routing — added 2026-04-28):
+```
+1. n8n S8 polls UGC Drive folder every 20 minutes (single folder, multi-brand via filename prefix)
+2. For each file: parse prefix (e.g., NP_ → nordpilates, CM_ → carnimeat, KD_ → ketoway)
+3. Files with valid prefix → Send to VPS with binary stream + x-asset-meta header
+4. Files with unknown/missing prefix → Move to Quarantine folder + log to "Ingestion Log" Sheet tab
+5. VPS /ugc-ingest validates x-asset-meta + checks brand_id against in-memory brand_configs cache
+   (cache loads lazily on first request; fail-open on cache-load error)
+6. ffprobe → ffmpeg pre-normalize → Gemini Pro segment analysis (Pass 1: 8-12 segments; Pass 2: per-segment ~200s)
+7. Each segment → asset_segments insert with parent_asset_id reference + brand_id
+8. R2 upload of normalized parent file + per-segment keyframes + grids
+9. /ugc-ingest is single-threaded by design (rejects concurrent requests with HTTP 503 'ingestion already in progress')
+10. n8n S8 retry-on-failure (3 tries, 60s wait) handles 503 race naturally
+```
+
+**Multi-brand prefix mapping (33 brands):** see `docs/INGESTION_NAMING.md` for canonical table.
+
+**Anti-pattern caught during S8 chore (2026-04-28):** if /ugc-ingest receives a request with no x-asset-meta header but a filename matching a known prefix-shaped pattern, it falls back to filename-based brand_id parsing. The c6 fix in S8 chore (commit `9b4a2ce`, merged in main `f4ae06c`) added validation: parsed brand_id must match an entry in brand_configs.brand_id; otherwise HTTP 400. Cache populates on first fallback request (lazy-load, 5-min TTL).
 
 **Planning phase** (triggered by S1 workflow):
 ```
@@ -299,12 +322,14 @@ API_PORT=3000
 
 | Service | Cost/month | Notes |
 |---------|-----------|-------|
-| VPS (video-factory-01) | ~$8.50 | Hetzner CX32 (upgraded from CX22 on 2026-04-10) |
+| VPS (video-factory-01) | ~$8.50 | Hetzner CX32 (4 vCPU, 8GB RAM, 80GB SSD) |
 | n8n server | ~$4.50 | Hetzner (shared with other projects) |
 | Supabase | $0 | Free tier |
 | Upstash Redis | $0 | Free tier (500K cmds/month, using ~26K/day) |
 | Cloudflare R2 | ~$0-1 | Free 10GB storage, zero egress |
-| Claude API | ~$8 | ~150 videos/week × 2 Sonnet calls (CD + Copywriter); doubles during dual-run on shadow brands |
-| Gemini API | ~$0.60 | ~150 clips/week × $0.001 |
-| Gemini API (Part B agents) | ~$3-5 | ~10-20 nordpilates jobs/week × ~$0.55/run during Phase 1 calibration; scales with brand expansion |
-| **Total (steady state, 1 brand on shadow)** | **~$22-26/month** | At full 150 videos/week + nordpilates dual-run on CX32 |
+| Claude API (Sonnet) | ~$8 | ~150 videos/week × 2 Sonnet calls (CD + Copywriter); doubles during dual-run on shadow brands |
+| Gemini API (Phase 3.5 ingestion + clip analysis) | ~$0.60 | ~150 clips/week × $0.001 |
+| Gemini API (Part B agents on nordpilates dual-run) | ~$3-5 | ~10-20 nordpilates jobs/week × ~$0.55/run during Phase 1 calibration |
+| Gemini API (Simple Pipeline — both products) | ~$1-2 | Estimated ~50-80 simple pipeline videos/week × ~$0.025/video |
+| **Total (steady state, current)** | **~$22-26/month** | At ~150 videos/week through Phase 3.5 + nordpilates dual-run |
+| **Projected (post-Simple-Pipeline-ship, multi-brand)** | **~$25-32/month** | Adds Simple Pipeline at ~$0.025/video × 50-80 videos/week + ingestion compute for new brands |

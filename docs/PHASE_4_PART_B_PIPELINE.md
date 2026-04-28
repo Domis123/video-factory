@@ -100,22 +100,36 @@ Key architectural decisions:
 | W9 | Shadow mode rollout | ✅ shipped 2026-04-25 | W8 |
 | W9.1 | Cost tracking wireup | ✅ shipped 2026-04-26 (single-gate) | W9 |
 | Phase 1 calibration flip | ✅ live 2026-04-27 | W9.1 |
-| **Production Polish Sprint** | 🔴 **headline next workstream** | Phase 1 calibration first real seed |
-| W9.2 | Demo render bridge | 🔴 deferred behind Polish Sprint | Polish Sprint |
+| **Production Polish Sprint** | 🟡 **paused mid-Pillar-1, c1-c4 parked at cebfc46** | Phase 1 calibration first real seed |
+| Polish Sprint Pillar 1 | 🟡 paused at c4 (charter rewrite shipped, calibration seeds not run) | Production Polish Sprint |
+| **S8 multi-brand ingestion routing** | ✅ shipped 2026-04-28 | (parallel chore, unblocks Simple Pipeline multi-brand) |
+| **Simple Pipeline (next workstream)** | 🔴 **headline next workstream — two products** | S8 chore + brand_configs lazy population |
+| Simple Pipeline — routine videos (slot_count 2-5) | 🔴 not started | Simple Pipeline brief |
+| Simple Pipeline — meme videos (slot_count 1) | 🔴 not started | Simple Pipeline brief |
+| W9.2 | Demo render bridge | 🔴 deferred behind Polish Sprint resumption | Polish Sprint |
 | W10 | Audio generation | 🔴 deferred, post-cutover | First brand cutover |
 
-**Estimated timeline (revised 2026-04-27):**
+**Estimated timeline (revised 2026-04-28):**
 - W9 ✅ shipped (2026-04-25)
 - W9.1 cost tracking ✅ shipped (2026-04-26)
 - Phase 1 calibration flip ✅ live (2026-04-27)
-- Production Polish Sprint: ~1-2 weeks (next)
-- W9.2 Demo render bridge: ~1 week (after Polish Sprint)
-- First Part B video rendered: shortly after W9.2 Gate A (rendering one shadow_runs row)
-- Phase 1 calibration steady-state: ramp PART_B_ROLLOUT_PERCENT down from 100 to 30 once Critic stops over-flagging
+- Polish Sprint Pillar 1 c1-c4 ✅ parked unmerged (2026-04-28, branch cebfc46)
+- S8 multi-brand ingestion routing ✅ shipped (2026-04-28, main at f4ae06c → 98d85b5)
+- **Simple Pipeline v1 (both products): ~3-4 days agent work, next workstream**
+- First nordpilates Simple Pipeline video uploadable to TikTok: shortly after Simple Pipeline Gate A close
+- Cyclediet/carnimeat/nodiet first videos: depends on ingestion velocity (operator-bound)
+- **Polish Sprint resumption: post-Simple-Pipeline-ship, Pillar 1 c5 onwards**
+- W9.2 Demo render bridge: ~1 week (after Polish Sprint resumption + completion)
+- First Part B advanced-pipeline video on TikTok: post-W9.2 Gate A
+- Phase 1 calibration steady-state: ramp PART_B_ROLLOUT_PERCENT down from 100 to 30 once Critic stops over-flagging (post-Pillar-1-resumption)
 - Cutover decision: ≥30 verdicts on Q5d signals + operator confirmation
 - W10 voice: post-first-cutover
 
-Total to first nordpilates Part B video on TikTok: realistically 4-8 weeks from today, depending on Polish Sprint duration + cutover signal stabilization.
+Total to first Simple Pipeline nordpilates video on TikTok: realistically 4-7 days from today (2026-04-28).
+
+Total to first Part B advanced-pipeline nordpilates video on TikTok: realistically 6-10 weeks from today (Polish Sprint resumption + completion + W9.2 + cutover decision).
+
+The two timelines are decoupled: Simple Pipeline ships first, advanced pipeline follows. Operator can ship content via Simple Pipeline while advanced pipeline matures.
 
 ---
 
@@ -336,34 +350,80 @@ Composition logic in `src/orchestrator/feature-flags.ts`. All three default to o
 
 ### W9 — Shadow mode rollout — unchanged from original spec
 
-### Production Polish Sprint — headline next workstream
+### Production Polish Sprint — PAUSED MID-PILLAR-1 (2026-04-28)
 
-**Purpose:** Bundle 6 operator-named production-polish observations into a single sprint that gates the demo render bridge and first-Part-B-video moment. Surfaced from first real-seed calibration run (2026-04-27).
+**Status:** Pillar 1 c1-c4 shipped to feat branch, parked unmerged. Pillars 2-6 untouched.
 
-**Pillars:**
+**Why paused:** Business pressure for shippable nordpilates videos this week shifted priority to Simple Pipeline parallel architecture. Polish Sprint stays parked until Simple Pipeline ships and operator content cadence stabilizes.
 
-| # | Pillar | Surface | Estimated effort |
-|---|---|---|---|
-| 1 | **Critic calibration** | W6 Critic prompt — loosen `subject_discontinuity` severity or stance-conditional thresholds | 2-3 days, single-gate per Rule 42 |
-| 2 | **Music library expansion** | S7 ingestion + music_tracks table + brand mood/energy config | Operator-bound (ingestion), agent ~0.5d on harness |
-| 3 | **Render text placement** | Remotion composition + caption_preset config | 2-3 days, visual-judgment heavy |
-| 4 | **Brand assets / logo wiring** | Render template watermark logic + brand_config wiring | 0.5-1 day, likely small fix |
-| 5 | **Body composition ingestion filter** | S7 + Gemini analyze step extension | 2-3 days, ethically delicate (frame as off-brand fit) |
-| 6 | **Transitions library cleanup** | Transition definitions in render template | 0.5-1 day |
+**Resumption point:** Polish Sprint Pillar 1 c5 (running calibration harness scripts, writing CALIBRATION_REPORT.md, writing Tier 1 verification artifact). Branch `feat/polish-sprint-pillar-1-critic-calibration` at HEAD `cebfc46`, 6 commits ahead of main, pushed to origin. Q1+Q2 answers locked from c4 close: production VPS path-A confirmed; calibration jobs left in `brief_review` post-termination.
 
-**Sprint structure decision (Polish Sprint kickoff Q&A):** single brief covering all 6 pillars vs sequence of small briefs per pillar. Single brief is the lean.
+**Unchanged from session 18 brief:**
+- Pillar order remains 1 → 2 → 4 → 3 → 6 → 5 with three Gate A tiers
+- Critic charter rewrite + stance-conditional thresholds shipped on parked branch (c1-c2)
+- Planner audit shipped (c3); operator-judgment column [Domis review] held open
+- 4 calibration seeds harness shipped (c4); seeds not yet run
 
-**Total sprint duration estimate:** 1-2 weeks, depending on pillar count and gate strategy.
+**What changed from session 18 brief:**
+- Pillar 4 (logo wiring) is no longer Polish Sprint's first render-output workstream because Simple Pipeline ships its own logo overlay independently. Pillar 4 still belongs to Polish Sprint scope (advanced pipeline logo wiring) but isn't blocking first shippable video.
+- Pillar 2 (music expansion) is harness work that becomes useful for both Simple Pipeline and advanced pipeline. Operator may sequence music ingestion via the bulk-ingest harness (when shipped) concurrent with Polish Sprint resumption.
 
-**What unblocks at sprint completion:**
-- Critic verdicts stop over-flagging operator-acceptable output (4-of-4 escalation rate should drop substantially)
-- Demo render bridge becomes worth building (bridges to good-enough output, not flawed output)
-- First Part B video can render with: appropriate music, correct text placement, brand logo, body-composition-filtered clips, simple cuts as transitions
+**When this resumes:** Once Simple Pipeline v1 ships and operator has nordpilates videos uploadable to TikTok, Polish Sprint reactivates with Pillar 1 c5 as the next commit. Estimated 1-2 weeks elapsed time before resumption depending on Simple Pipeline ship + operator content cadence.
 
-**What still doesn't unblock:**
-- Cutover decision rule still requires ≥30 dual-run comparisons + Q5d signals
-- W10 voice generation still post-cutover
-- Brand expansion still post-first-cutover
+### Simple Pipeline — parallel architecture (two products)
+
+**Status:** brief drafted, agent not yet kicked off. Filed at `docs/briefs/SIMPLE_PIPELINE_BRIEF_v2.md`.
+
+**Purpose:** Ship uploadable nordpilates (and other-brand) videos this week despite Polish Sprint timeline being 4-8 weeks. Sibling pipeline to Phase 3.5 / Part B; not a replacement, not a modification.
+
+**Architectural separation:**
+- New BullMQ queue `simple_pipeline` (separate from existing planning, rendering, ingestion, export queues)
+- New worker `src/workers/simple-pipeline.ts`
+- New orchestrator `src/orchestrator/simple-pipeline-orchestrator.ts`
+- ffmpeg-based render path (avoids Remotion + render bridge gap that W9.2 addresses)
+- No Critic, no Director, no Planner — single Gemini Pro library-aware agent serves both products
+- Reuses existing music_tracks selection, brand_configs, asset_segments retrieval
+
+**Two products from one infrastructure:**
+
+| Product | Sheet `Format` value | Slot count | Picker output | Overlay style |
+|---|---|---|---|---|
+| Routine videos | `routine` | 2-5 (Sheet `Clips` column, default 3) | Agent emits N ranked segment_ids from one parent (parent-first picker, cooldown of 2) | Routine prompt — instructive, brand-anchored, label-style |
+| Meme videos | `meme` | 1 (implicit) | Agent emits 1 segment_id from any parent (segment-first picker, segment cooldown of 2) | Meme prompt — punchy, conversational, hook-style |
+
+Both products use the same Gemini Pro library-aware "Match-Or-Match" agent that sees v2 segment descriptions (not raw videos) for the brand and picks the best-fit segment(s) for the idea seed. Single Gemini call per render. Output shape determined by Format input.
+
+**Cooldown logic:**
+- Routine: parent cooldown last 2 + segment cooldown last 2 (per brand)
+- Meme: segment cooldown last 2 only (parent cooldown implicit via segment uniqueness when slot_count=1)
+
+**Operator routing:**
+- Sheet "Pipeline" column: dropdown `simple` / `advanced`. Empty defaults to `advanced`. Existing.
+- Sheet "Format" column (NEW): dropdown `meme` / `routine` for simple pipeline jobs. Determines orchestrator branch.
+- Sheet "Clips" column (NEW): dropdown 1-5 for slot_count. Mostly informational for meme (always 1); operator-controlled for routine (default 3).
+
+**Per-brand readiness gating:**
+- S1 routes to simple_pipeline queue only if brand has (a) ≥3 parents with ≥10 segments AND (b) brand_configs.aesthetic_description populated
+- If either missing, S1 sets jobs.status = `simple_pipeline_blocked` with reason in Sheet status
+
+**Why this is parked behind S8 chore:** S8 multi-brand routing was shipped first to enable cyclediet / carnimeat / nodiet ingestion. Simple Pipeline can't serve those brands until they have library content. S8 + lazy brand_configs population is the unblock path.
+
+**Why this stays separate from Polish Sprint:**
+- Polish Sprint reframes Critic for advanced pipeline quality bar. Simple Pipeline doesn't use Critic at all.
+- Polish Sprint Pillar 4 (logo wiring), Pillar 3 (text safe zones), Pillar 6 (transitions) are advanced-pipeline render concerns. Simple Pipeline ffmpeg render path is independent.
+- Polish Sprint Pillar 5 (body composition filter) eventually applies to both pipelines via S7 ingestion, but not Tier 1 scope.
+- Polish Sprint Pillar 1 (Critic stance-conditional + charter rewrite) — the parked work — is purely Critic-shaped; doesn't touch Simple Pipeline at all.
+
+**Future-conditional work that re-emerges if Simple Pipeline output isn't enough:**
+- Director architecture rebuild (W11) — only if Simple Pipeline output reveals a creative-direction gap that Polish Sprint Pillar 1 looser thresholds can't fix on the advanced pipeline
+- Multi-parent simple pipeline cuts — currently single-parent only; multi-parent is a Simple Pipeline v2 if v1 output gets stale across many videos
+- Simple Pipeline render-bridge integration with W9.2 — only if Simple Pipeline's ffmpeg-based render needs to talk to the same render bridge surface as Part B; not currently the case
+
+**Estimated timeline:**
+- Simple Pipeline v1 (both products, single brand `nordpilates`): ~3-4 days agent work after S8 chore + brand_configs lazy population for nordpilates
+- First real shippable nordpilates video: shortly after Gate A close
+- Multi-brand expansion: per-brand operator action (drop content + populate brand_configs.aesthetic_description) — operator-time-bound, not agent-time-bound
+- Cyclediet/carnimeat/nodiet first videos: depends on ingestion velocity; realistically end of week 1 or early week 2 post-Simple-Pipeline-ship
 
 ### W10 — Audio generation (NEW, added 2026-04-21)
 
@@ -400,30 +460,55 @@ Composition logic in `src/orchestrator/feature-flags.ts`. All three default to o
 
 ---
 
-## Cost & latency projections (revised 2026-04-27)
+## Cost & latency projections (revised 2026-04-28)
+
+### Phase 3.5 (production, all brands)
 
 | Stage | Cost | Wall time |
 |---|---|---|
-| Planner | $0.05 | 8s |
-| Retrieval (×N slots) | $0.00 | 3s total |
+| Creative Director (Sonnet) | $0.05-0.08 | 30s |
+| Asset Curator V2 (Gemini Pro × parallel slots) | $0.05-0.10 | 90-180s |
+| Copywriter (Sonnet) | $0.05-0.08 | 20s |
+| Music selection | $0 | <1s |
+| Render (Remotion) | $0 | 60-90s |
+| **Phase 3.5 total** | **~$0.10-0.20/video** | ~240-300s |
+
+### Part B (shadow mode on nordpilates)
+
+| Stage | Cost | Wall time |
+|---|---|---|
+| Planner (Gemini Pro) | $0.05 | 8s |
+| Retrieval (×N slots) | $0 | 3s total |
 | Visual Director (×N slots, parallel) | $0.30-0.40 | 30-45s |
-| Copywriter | $0.03 | 6s |
-| Coherence Critic | $0.05 | 10s |
-| **Subtotal Part B happy-path** | **~$0.45-0.55/video** | ~75s |
+| Copywriter (Gemini Pro) | $0.03 | 6s |
+| Coherence Critic (Gemini Pro) | $0.05 | 10s |
+| **Part B happy-path** | **~$0.45-0.55/video** | ~75s |
 | Revise loop (×2 max) | +$0.10-0.15 per cycle | +30s per cycle |
-| **Subtotal Part B with full revise** | **~$0.55-0.85/video** | ~135s |
-| **Phase 3.5 (Sonnet × 2 calls)** | **~$0.10-0.20/video** | ~240s |
-| **Dual-run total per nordpilates job** | **~$0.65-1.05/video** | ~480s wall (parallel) |
-| Remotion render | $0.00 | ~60s + variable on clip count |
-| W10 voice generation (when shipped) | +$0.02 | +5s |
+| **Part B with full revise** | **~$0.55-0.85/video** | ~135s |
 
-**Real measured:** W9.1 Gate A + W9 Phase 1 calibration both ran $0.55-0.56/Part-B-run (full revise to exhaustion).
+### Simple Pipeline (both products)
 
-**Operator cost ceiling:** $1/video accepted, even higher if necessary. Current cost is well within ceiling.
+| Stage | Cost | Wall time |
+|---|---|---|
+| Match-Or-Match agent (Gemini Pro) | ~$0.01-0.02 | 8-12s |
+| Overlay generator (Gemini Pro, routine or meme prompt) | ~$0.005 | 5s |
+| Music selection | $0 | <1s |
+| Render (ffmpeg) | $0 | 30-60s |
+| **Simple Pipeline total** | **~$0.015-0.025/video** | ~50-90s |
 
-**Production target post-cutover:** $0.50-0.55/Part-B-video happy-path; $0.85 worst-case with full revise. With W10 voice: +$0.02. Production at $0.52/video happy-path post-W10.
+### Dual-run mode (current state for nordpilates: phase35 + part_b)
 
-**Watch item:** dual-run mode is current state through Phase 1 calibration window. Doubles Claude consumption per nordpilates job (Sonnet × 2 in Phase 3.5). Logged as `claude-api-limit-watchitem`.
+| Combination | Cost | Wall time |
+|---|---|---|
+| **Phase 3.5 + Part B per nordpilates job** | **~$0.55-1.05/video** | ~480s wall (parallel) |
+
+Once Simple Pipeline ships, operator can route nordpilates jobs to:
+- `advanced` pipeline (Phase 3.5 + dual-run Part B if `pipeline_version='part_b_shadow'`)
+- `simple` pipeline (single Match-Or-Match agent, no Critic, no Director)
+
+**Operator cost ceiling:** $1/video accepted, even higher if necessary. Current state well within ceiling. Simple Pipeline at ~$0.025/video provides massive headroom; can raise if needed for higher-quality agent calls.
+
+**Watch item:** dual-run mode (Phase 3.5 + Part B simultaneously) doubles Sonnet API consumption per nordpilates job. Anthropic limit raised by operator on 2026-04-27; sufficient for sprint scale. Logged as `claude-api-limit-watchitem`. Simple Pipeline doesn't use Sonnet (Gemini Pro only) so it doesn't compound this.
 
 ---
 

@@ -6,6 +6,57 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## pillar1-planner-overcommits-subject-consistency — Active (deferred)
+
+**Discovered:** 2026-04-28, Polish Sprint Pillar 1 c3 (audit at `docs/diagnostics/POLISH_SPRINT_PILLAR_1_PLANNER_AUDIT.md` on parked branch `feat/polish-sprint-pillar-1-critic-calibration`)
+**Pattern:** All 3 nordpilates shadow_runs rows (cb87d32c, ff67fc55, cf104600) committed Planner stance `single-subject`. Agent cannot evaluate over-commit threshold without operator-judgment column filled in for each row.
+**Pending:** Domis fills the [Domis review] column at Pillar 1 Tier 1 Gate A or earlier. Followup tripwire: 2+ rows showing operator-judgment "would NOT have wanted single-subject for this seed" → file Planner-prompt followup.
+**Owner:** Domis (operator-judgment input); Polish Sprint Pillar 1 (when resumed)
+
+---
+
+## simple-pipeline-parent-vs-subject-identity — Active
+
+**Discovered:** 2026-04-28, Simple Pipeline brief Q&A (operator-flagged)
+**Pattern:** parent_asset_id reflects "which uploaded file the segment came from," not "which subject is in the video." If operator uploads 5 separate files of same person doing same workout (clips chunked before ingestion), Simple Pipeline parent picker treats them as 5 different parents. Cooldown of last 2 thinks they're different and produces visually-redundant videos despite cooldown working correctly per its own logic.
+**Operator-named future fix:** filename-based subject tagging at ingestion. Convention `<PREFIX>_<SUBJECT_TAG>_<description>` lets S8 parse subject_tag and assign subject_group_id at ingestion. Not yet implemented.
+**Acceptance for v1:** known limitation, operator-catchable at QA stage. Wastes ~$0.025 per redundant render. Acceptable for week-1 ship.
+**Owner:** Simple Pipeline v2 workstream when redundancy becomes binding constraint, OR S8 enhancement when subject_tag filename convention adopted
+
+---
+
+## s8-cl-cd-prefix-consolidation — Active (low priority)
+
+**Discovered:** 2026-04-28, S8 chore brief
+**Pattern:** Both `CL` and `CD` prefixes route to brand_id `cyclediet`. Operator-provided table had both. Future cleanup may pick canonical prefix and retire the other. Not urgent.
+**Owner:** Domis (operator decision)
+
+---
+
+## s8-subject-group-tagging-future — Active
+
+**Discovered:** 2026-04-28, S8 chore + Simple Pipeline brief discussions
+**Pattern:** Files of same subject (same person, same shoot, multiple uploaded files) currently treated as separate parents in `parent_asset_id`. Operator-named filename-tagging idea: extend filename convention to `<PREFIX>_<SUBJECT_TAG>_<description>` for subject_group_id resolution at ingestion. Not yet implemented.
+**Owner:** future workstream when subject identity becomes binding constraint
+
+---
+
+## s8-quarantine-cleanup-policy — Active
+
+**Discovered:** 2026-04-28, S8 chore brief
+**Pattern:** Quarantined files accumulate in Drive folder indefinitely. No automated cleanup. Operator manually empties folder periodically.
+**Owner:** Domis (operator process); automation as followup workstream when accumulation becomes problem
+
+---
+
+## s8-n8n-workflow-versioning — Active
+
+**Discovered:** 2026-04-28, S8 chore brief
+**Pattern:** n8n workflow state lives in n8n's database, not git. Repo artifact at `n8n-workflows/S8_UGC_Ingest_v2.json` is operator-imported; git commits don't sync to n8n production. Future automation: n8n CLI / API integration for workflow versioning. Not urgent.
+**Owner:** future workstream
+
+---
+
 ## docs-residue-cleanup-from-session-18 — Active
 
 **Discovered:** 2026-04-27 during Polish Sprint pre-work
@@ -25,7 +76,7 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 ---
 
-## s8-v2-json-config-binary-encoding-and-routing — Active
+## s8-v2-json-divergence-followup — Active
 
 **Discovered:** 2026-04-28 during Gate A smoke testing
 **Pattern:** c3 of `chore/s8-multi-brand-ingestion-routing` shipped `n8n-workflows/S8_UGC_Ingest_v2.json` that diverges from the working operator-side configuration in three places:
@@ -133,13 +184,13 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 ---
 
-## claude-api-limit-watchitem — Active
+## claude-api-limit-watchitem — Active (low watch)
 
-**Discovered:** 2026-04-27, during W9 Phase 1 calibration first real-seed run
-**Pattern:** Anthropic Claude API limit hit during today's calibration run. Operator raised limit; no production impact (demo seed completed before throttle bit).
-**Watch:** Dual-run mode roughly doubles Claude consumption per nordpilates job (CD + Copywriter both Sonnet × 2 pipelines, since Phase 3.5 uses Sonnet for both Creative Director and Copywriter while Part B is Gemini-only).
-**Revisit if:** jobs fail with Anthropic 429s under sustained dual-run load, OR billing/credit alerts fire, OR production volume meaningfully scales.
-**Owner:** Production Polish Sprint planning chat to keep visible. May need budget review at Polish Sprint deploy.
+**Discovered:** 2026-04-27, W9 Phase 1 calibration first real-seed run
+**Pattern:** Anthropic Claude API limit hit during W9 Phase 1 calibration. Operator raised limit; sufficient for sprint scale.
+**Update 2026-04-28:** Polish Sprint Pillar 1 c1-c4 shipped without exhausting limit. Pillar 1 c5 (calibration seeds, would have used 4× ~Sonnet × 2 = ~8× standard usage) deferred behind Polish Sprint pause. Simple Pipeline doesn't use Sonnet (Gemini Pro only) so doesn't compound this. Anthropic limit currently in low-watch state — sufficient for foreseeable workload.
+**Revisit if:** dual-run mode runs at scale + Polish Sprint resumes + per-brand Pillar 1 calibration runs propagate.
+**Owner:** Polish Sprint resumption (when relevant)
 
 ---
 
@@ -497,6 +548,18 @@ Combining into one global helper would risk destabilizing W3/W5/W6 responseSchem
 ## Resolved
 
 *(Entries moved here once closed, with a "resolved on <date>" note. Optional — can just remove entries instead.)*
+
+---
+
+## r2-orphaned-NP-keys-cleanup — RESOLVED 2026-04-28
+
+**Resolved by:** S8 chore pre-work audit (commit 30b0549) confirmed no `NP/`-prefixed R2 keys exist for nordpilates. All assets use `assets/nordpilates/` and `segments/nordpilates/` patterns. The W5 clean-slate (2026-04-16) erased any historical `NP/` keys; post-W5 ingestion has used the brand-id-keyed `<resource_type>/<brand_id>/<uuid>` layout consistently. No migration needed.
+
+---
+
+## s8-vps-endpoint-validation — RESOLVED 2026-04-28
+
+**Resolved by:** S8 chore c6 (commit 9b4a2ce, merged in main f4ae06c). VPS `/ugc-ingest` endpoint now validates filename-fallback parsed brand_id against in-memory brand_configs Set cache. Cache loads lazily on first fallback request; fail-open on cache-load error. Rejects with HTTP 400 if parsed brand_id doesn't match any brand_configs.brand_id.
 
 ---
 
