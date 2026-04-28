@@ -6,6 +6,15 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## w91-gate-a-forced-structural-override-cleared — RESOLVED 2026-04-27
+
+**Discovered:** Polish Sprint pre-work check 4 (2026-04-27)
+**Pattern:** W9.1 Gate A forced-structural seed (job 31f0ed09-45e6-44ae-8247-106d6c2e9e08, 2026-04-26) had `pipeline_override='force'` that was never cleared after the job terminated in `brief_review`. Sticky on a terminal row; no live routing impact. Shadow_runs row cb87d32c preserves the evidence.
+**Resolved:** `UPDATE jobs SET pipeline_override = NULL WHERE id = '31f0ed09-...'` on 2026-04-27 during Polish Sprint pre-work.
+**Followup for future:** W9 brief should specify "clear override on terminal state" as part of forced-seed teardown. Filed as a process observation; applies to any future forced-routing seed harness.
+
+---
+
 ## docs-residue-cleanup-from-session-18 — Active
 
 **Discovered:** 2026-04-27 during Polish Sprint pre-work
