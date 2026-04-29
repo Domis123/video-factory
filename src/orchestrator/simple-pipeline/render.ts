@@ -285,11 +285,29 @@ interface OverlayCommandOpts {
 }
 
 function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
-  // Lower-third Y position: 78% from top
-  const TEXT_Y_PCT = 0.78;
-  const FONT_SIZE = 64;
-  const TEXT_BOX_PADDING = 16;
-  const SHADOW_OFFSET = 4;
+  // v1.1 (Q3, Q4, Q5):
+  //   - Vertical position: stack center at 27% from top (was 78% bottom-third).
+  //     Frees the bottom area for the logo and the middle band as the
+  //     unobstructed "content stage."
+  //   - Base font size: 0.7× v1.0's 64 = ~45px.
+  //   - Auto-wrap to 2 lines when a single line at base size would exceed
+  //     80% of comp width (~864px on 1080).
+  //   - Auto-scale-down in 5% steps (floor 30px) if 2 lines at base size
+  //     still don't fit — protects against long unsplittable runs.
+  //   - Line spacing 1.2× font_size.
+  //   - Shadow / box / fontcolor preserved exactly (Q5).
+  const TEXT_Y_PCT = 0.27;
+  const FONT_SIZE_BASE = 45;
+  const FONT_SIZE_FLOOR = 30;
+  const FONT_SCALE_STEP = 0.95;
+  const LINE_HEIGHT_MULT = 1.2;
+  const TEXT_BOX_PADDING = 16; // unchanged from v1.0
+  const SHADOW_OFFSET = 4;     // unchanged from v1.0
+  // Char-width heuristic for DejaVuSans-Bold: ~0.55× font_size per char on
+  // average. Threshold for wrap = floor(0.8 × W / (0.55 × FONT_SIZE_BASE))
+  //   = floor(864 / 24.75) ≈ 34. Used 36 to be slightly forgiving on
+  // shorter-than-average char texts ("i", "l", spaces).
+  const MAX_CHARS_PER_LINE_AT_BASE = 36;
 
   // v1.1 (Q1, Q2): logo half-size and lifted off the bottom edge.
   //   - Height: 0.075× composition height (~144px on 1920) — half of v1.0's 0.15×.
@@ -300,30 +318,52 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   //     bottom UI chrome.
   const LOGO_HEIGHT = Math.round(HEIGHT * 0.075);
   const LOGO_OPACITY = 0.75;
-  const LOGO_BOTTOM_Y_PCT = 0.78; // logo bottom edge anchor
+  const LOGO_BOTTOM_Y_PCT = 0.78;
 
-  const escapedText = escapeForDrawtext(opts.overlayText);
-  const escapedFont = opts.fontFile.replace(/:/g, '\\:'); // ffmpeg drawtext
+  const escapedFont = opts.fontFile.replace(/:/g, '\\:');
 
-  // Pass C filter chain on input 0 (the concat'd video):
-  //   1. <gradeFilter>  — color grade (preset or LUT)
-  //   2. drawtext       — overlay text
-  // Then overlay logo from input 1.
-  // Single re-encode (libx264 -preset slow -crf 18) since pre_normalized
-  // parent + concat -c copy carried the source through losslessly to here.
-  const drawtextFilter =
-    `drawtext=fontfile='${escapedFont}':` +
-    `text='${escapedText}':` +
-    `fontsize=${FONT_SIZE}:` +
-    `fontcolor=white:` +
-    `box=1:boxcolor=black@0.35:boxborderw=${TEXT_BOX_PADDING}:` +
-    `shadowcolor=black@0.6:shadowx=${SHADOW_OFFSET}:shadowy=${SHADOW_OFFSET}:` +
-    `x=(w-text_w)/2:` +
-    `y=h*${TEXT_Y_PCT}-text_h/2`;
+  // Plan layout: split text into 1 or 2 lines, choose font size that fits.
+  const layout = planOverlayLayout(
+    opts.overlayText,
+    FONT_SIZE_BASE,
+    FONT_SIZE_FLOOR,
+    FONT_SCALE_STEP,
+    MAX_CHARS_PER_LINE_AT_BASE,
+  );
+  const lineHeight = Math.round(layout.fontSize * LINE_HEIGHT_MULT);
+
+  // Build one drawtext filter per line. y is computed so the stack of lines
+  // is centered around h*TEXT_Y_PCT; line 0 is highest, line N-1 is lowest.
+  // Each drawtext gets its own translucent box (preserved Q5 styling).
+  const drawtextChain = layout.lines.map((line, idx) => {
+    const escapedLine = escapeForDrawtext(line);
+    const offsetPx = Math.round((idx - (layout.lines.length - 1) / 2) * lineHeight);
+    const yExpr =
+      offsetPx === 0
+        ? `h*${TEXT_Y_PCT}-text_h/2`
+        : offsetPx > 0
+          ? `h*${TEXT_Y_PCT}+${offsetPx}-text_h/2`
+          : `h*${TEXT_Y_PCT}-${-offsetPx}-text_h/2`;
+    return (
+      `drawtext=fontfile='${escapedFont}':` +
+      `text='${escapedLine}':` +
+      `fontsize=${layout.fontSize}:` +
+      `fontcolor=white:` +
+      `box=1:boxcolor=black@0.35:boxborderw=${TEXT_BOX_PADDING}:` +
+      `shadowcolor=black@0.6:shadowx=${SHADOW_OFFSET}:shadowy=${SHADOW_OFFSET}:` +
+      `x=(w-text_w)/2:` +
+      `y=${yExpr}`
+    );
+  }).join(',');
+
+  console.log(
+    `[render] overlay layout: ${layout.lines.length} line(s) at ${layout.fontSize}px ` +
+      `(text "${opts.overlayText}", ${opts.overlayText.length} chars)`,
+  );
 
   const videoChain = opts.gradeFilter
-    ? `${opts.gradeFilter},${drawtextFilter}`
-    : drawtextFilter;
+    ? `${opts.gradeFilter},${drawtextChain}`
+    : drawtextChain;
 
   const filterComplex = [
     `[0:v]${videoChain}[vt]`,
@@ -350,6 +390,75 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
       opts.outputPath,
     ],
   };
+}
+
+/**
+ * v1.1 c2: plan overlay text layout — choose between 1 and 2 lines,
+ * scale font down if needed.
+ *
+ * The width-fits-on-line check uses a char-count heuristic, not pixel
+ * measurement. DejaVuSans-Bold averages ~0.55× font_size per char in
+ * English text; the caller passes `maxCharsAtBaseFontSize` precomputed
+ * for that ratio at the configured base size and 80%-of-width threshold.
+ *
+ * Algorithm:
+ *   1. If text fits on one line at base size: 1 line at base size.
+ *   2. Else split at the whitespace closest to mid-string.
+ *      - If no whitespace exists (single very long word): single line,
+ *        let scale-down handle width.
+ *   3. Loop: while longest line still wouldn't fit at current font and
+ *      we're above the floor: scale font size by 0.95 and re-check.
+ *      The per-line char threshold scales linearly with font size.
+ */
+interface OverlayLayout {
+  lines: string[];
+  fontSize: number;
+}
+function planOverlayLayout(
+  text: string,
+  baseFontSize: number,
+  fontSizeFloor: number,
+  fontScaleStep: number,
+  maxCharsAtBaseFontSize: number,
+): OverlayLayout {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxCharsAtBaseFontSize) {
+    return { lines: [trimmed], fontSize: baseFontSize };
+  }
+
+  // Find whitespace closest to mid-string for a balanced 2-line split.
+  let lines: string[];
+  const mid = Math.floor(trimmed.length / 2);
+  let splitIdx = -1;
+  for (let offset = 0; offset < trimmed.length; offset++) {
+    const left = mid - offset;
+    if (left > 0 && /\s/.test(trimmed[left])) { splitIdx = left; break; }
+    const right = mid + offset;
+    if (right < trimmed.length && /\s/.test(trimmed[right])) { splitIdx = right; break; }
+  }
+  if (splitIdx < 0) {
+    // No whitespace — single very long word. Render as 1 line; rely on
+    // scale-down to make it fit (or visually overflow if smaller than floor).
+    lines = [trimmed];
+  } else {
+    lines = [
+      trimmed.slice(0, splitIdx).trim(),
+      trimmed.slice(splitIdx + 1).trim(),
+    ];
+  }
+
+  // Scale-down loop. Per-line char threshold grows as font shrinks
+  // (smaller font → more chars fit at the 80%-width threshold).
+  let fontSize = baseFontSize;
+  while (fontSize > fontSizeFloor) {
+    const charsThisFont = Math.floor((maxCharsAtBaseFontSize * baseFontSize) / fontSize);
+    const longest = Math.max(...lines.map((l) => l.length));
+    if (longest <= charsThisFont) break;
+    const next = Math.round(fontSize * fontScaleStep);
+    if (next === fontSize) break; // round stuck; bail
+    fontSize = next;
+  }
+  return { lines, fontSize };
 }
 
 /**
