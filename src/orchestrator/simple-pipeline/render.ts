@@ -180,12 +180,27 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
       }),
     );
 
-    // 6. Pass D: mix UGC audio + music (sidechain ducking on by default).
-    //    -16 dB ≈ 0.158 linear amplitude
+    // 6. Pass D: audio mix.
+    //
+    // ffprobe to detect whether the concatenated UGC has any audio stream.
+    // Per CLAUDE.md (transcriber no-audio hotfix 2026-04-17): UGC fitness
+    // clips frequently lack microphones. When all picked clips were silent,
+    // overlay.mp4 has no [0:a] stream and the sidechain-ducking filter graph
+    // in buildAudioMixCommand fails with "Error initializing complex filters:
+    // Invalid argument". Two paths:
+    //   - has UGC audio:  buildAudioMixCommand at 0.158 (= -16 dB), ducking on
+    //   - silent UGC:     music-only audio at 0.7 (no ducking needed)
     const finalPath = resolve(workDir, 'final.mp4');
-    await execOrThrow(
-      buildAudioMixCommand(overlayPath, musicLocal, finalPath, 0.158, { ducking: true }),
-    );
+    const overlayHasAudio = await probeHasAudio(overlayPath);
+    if (overlayHasAudio) {
+      console.log(`[render] UGC audio detected; mixing with music ducking at -16 dB`);
+      await execOrThrow(
+        buildAudioMixCommand(overlayPath, musicLocal, finalPath, 0.158, { ducking: true }),
+      );
+    } else {
+      console.log(`[render] no UGC audio; using music-only at volume 0.7`);
+      await execOrThrow(buildMusicOnlyCommand(overlayPath, musicLocal, finalPath, 0.7));
+    }
 
     // 7. Probe duration
     const durationS = await ffprobeDuration(finalPath);
@@ -343,6 +358,50 @@ async function ffprobeDuration(path: string): Promise<number> {
     ],
   });
   return Number(out.trim()) || 0;
+}
+
+async function probeHasAudio(path: string): Promise<boolean> {
+  const out = await execOrThrow({
+    command: 'ffprobe',
+    args: [
+      '-v', 'error',
+      '-select_streams', 'a',
+      '-show_entries', 'stream=codec_type',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      path,
+    ],
+  });
+  return out.trim() === 'audio';
+}
+
+/**
+ * Audio mix when the video has no UGC audio stream. Just attaches music
+ * at `musicVolume` linear amplitude. Sidechain ducking is unnecessary
+ * (no UGC track to duck against) and would fail anyway due to missing
+ * [0:a] reference.
+ */
+function buildMusicOnlyCommand(
+  videoPath: string,
+  musicPath: string,
+  outputPath: string,
+  musicVolume: number,
+): FfCommand {
+  return {
+    command: 'ffmpeg',
+    args: [
+      '-y',
+      '-i', videoPath,
+      '-i', musicPath,
+      '-filter_complex', `[1:a]volume=${musicVolume}[aout]`,
+      '-map', '0:v',
+      '-map', '[aout]',
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '192k',
+      '-shortest',
+      '-movflags', '+faststart',
+      outputPath,
+    ],
+  };
 }
 
 // ─── Supabase fetchers ─────────────────────────────────────────────────────
