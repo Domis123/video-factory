@@ -6,6 +6,26 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-routine-prompt-iteration — Active (post-v1.1)
+
+**Discovered:** 2026-04-29, c10 / Round 2 / Round 3 Gate A reviews.
+**Pattern:** Routine overlay generator (`overlay-routine.ts` + `overlay-routine.md`) produces "soft instructor" register — examples from Round 3: "Your mindful 5-minute glute awakening", "Awaken your deep core strength", "A gentle awakening for your hips". Brief Q12 anchored on label-style ("5-min morning flow", "wake your hips up", "core routine that actually works") — terser, more feed-tap-shape. The current outputs are coherent and on-brand but are 1-2 register notches longer than the brief example shape.
+**Workable today:** Round 3 didn't surface this as a blocker; Domis didn't flag routine overlays in c10 review (5/6 routine pass). Acceptable for v1 ship.
+**Long-term fix:** prompt rewrite in the same shape as Round 2's overlay-meme.md rewrite (anchor register on the operator's idea seed, add anti-pattern list for soft-instructor phrasings, add label-style example block). Re-run the 6 routine seeds, A/B against current.
+**Owner:** post-Simple-Pipeline-v1.1 (Cosmetic Polish) workstream if still relevant after the cosmetic fixes change the visual register of the renders.
+
+---
+
+## simple-pipeline-meme-prompt-iteration — Active (post-v1.1)
+
+**Discovered:** 2026-04-29, Round 3 Gate A.
+**Pattern:** Meme verbatim mode (Round 3 default for meme) is shipping; the generate path remains for memes where the operator wants paraphrase / longer text. The Round 2 prompt rewrite (`overlay-meme.md`) holds register against the c2 + Round 2 seeds. If operator starts using `Overlay Mode = generate` for meme idea seeds that are "topic-shaped" (e.g., "5 reasons to stretch") rather than "caption-shaped", the prompt may need iteration to produce caption-style output across that wider input distribution.
+**Workable today:** verbatim default covers the majority case (operators usually write meme idea seeds in caption shape). Generate path produces meme-register output on caption-shaped seeds (Round 2 evidence).
+**Long-term fix:** if operator-observed generate-path output drifts off-tone for topic-shaped seeds, iterate `overlay-meme.md` with example seeds covering the wider input distribution.
+**Owner:** post-v1.1 if surfaces; may not need any work if verbatim remains the dominant meme path.
+
+---
+
 ## simple-pipeline-non-portrait-source-letterbox — Active (low-medium priority)
 
 **Discovered:** 2026-04-29, Round 2 Gate A visual review (R6 — "gentle stretches before bed").
