@@ -6,6 +6,91 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-routine-prompt-iteration — Active (post-v1.1)
+
+**Discovered:** 2026-04-29, c10 / Round 2 / Round 3 Gate A reviews.
+**Pattern:** Routine overlay generator (`overlay-routine.ts` + `overlay-routine.md`) produces "soft instructor" register — examples from Round 3: "Your mindful 5-minute glute awakening", "Awaken your deep core strength", "A gentle awakening for your hips". Brief Q12 anchored on label-style ("5-min morning flow", "wake your hips up", "core routine that actually works") — terser, more feed-tap-shape. The current outputs are coherent and on-brand but are 1-2 register notches longer than the brief example shape.
+**Workable today:** Round 3 didn't surface this as a blocker; Domis didn't flag routine overlays in c10 review (5/6 routine pass). Acceptable for v1 ship.
+**Long-term fix:** prompt rewrite in the same shape as Round 2's overlay-meme.md rewrite (anchor register on the operator's idea seed, add anti-pattern list for soft-instructor phrasings, add label-style example block). Re-run the 6 routine seeds, A/B against current.
+**Owner:** post-Simple-Pipeline-v1.1 (Cosmetic Polish) workstream if still relevant after the cosmetic fixes change the visual register of the renders.
+
+---
+
+## simple-pipeline-meme-prompt-iteration — Active (post-v1.1)
+
+**Discovered:** 2026-04-29, Round 3 Gate A.
+**Pattern:** Meme verbatim mode (Round 3 default for meme) is shipping; the generate path remains for memes where the operator wants paraphrase / longer text. The Round 2 prompt rewrite (`overlay-meme.md`) holds register against the c2 + Round 2 seeds. If operator starts using `Overlay Mode = generate` for meme idea seeds that are "topic-shaped" (e.g., "5 reasons to stretch") rather than "caption-shaped", the prompt may need iteration to produce caption-style output across that wider input distribution.
+**Workable today:** verbatim default covers the majority case (operators usually write meme idea seeds in caption shape). Generate path produces meme-register output on caption-shaped seeds (Round 2 evidence).
+**Long-term fix:** if operator-observed generate-path output drifts off-tone for topic-shaped seeds, iterate `overlay-meme.md` with example seeds covering the wider input distribution.
+**Owner:** post-v1.1 if surfaces; may not need any work if verbatim remains the dominant meme path.
+
+---
+
+## simple-pipeline-non-portrait-source-letterbox — Active (low-medium priority)
+
+**Discovered:** 2026-04-29, Round 2 Gate A visual review (R6 — "gentle stretches before bed").
+**Pattern:** Pre_normalized parents are produced by `parent-normalizer.ts` with `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2` — non-portrait sources get LETTERBOXED (black bars top/bottom) into the 1080×1920 frame. Round 2 R6 used a horizontally-framed source clip and produced visible black bars in the final render. Render path inherits the bars since pass A `-c copy` trims the already-padded frame.
+**Workable today:** operator avoids picking landscape source clips (manual filter at upload).
+**Long-term fix (Simple Pipeline v1.1 or post-merge polish):** zoom-to-fill / smart-crop on non-portrait sources at parent-normalize OR render time. Center-crop is a 5-line ffmpeg change at parent-normalize; smart-crop (subject-aware) is bigger.
+**Owner:** Simple Pipeline v1.1 or Polish Sprint adjacent workstream.
+
+---
+
+## simple-pipeline-overlay-mode-default-by-format — Resolved 2026-04-29
+
+**Resolved by:** Round 3 commit (this branch).
+**Discovered:** 2026-04-29, Round 2 Gate A debrief — meme overlay generator paraphrased seeds into weaker copy ("main character energy" → "your main character arc starts on the mat").
+**Resolution:** added Sheet "Overlay Mode" column with `generate` / `verbatim` dropdown. Empty defaults by format: meme→`verbatim`, routine→`generate`. `verbatim` skips the Gemini call entirely and uses idea_seed as the overlay text directly. Plumbed through S1 JSON → /enqueue → BullMQ payload → orchestrator. Operator can override the default per-job.
+
+---
+
+## simple-pipeline-ugc-audio-mute-on-no-speech — Resolved 2026-04-29
+
+**Resolved by:** Round 3 commit (this branch).
+**Discovered:** 2026-04-29, Round 2 Gate A — some UGC has loud incidental audio (room noise, equipment hum, creator music) without speech that fights with our chosen music in the mix.
+**Resolution:** render Pass D extends the c10 binary "has audio?" check with a silencedetect-based speech-pause heuristic. Computes silence_ratio = total_silence_below_-30dB_for_≥0.4s / total_video_duration. silence_ratio ≥ 0.15 (natural speech has 15-30% pauses) → keep UGC, sidechain duck music. silence_ratio < 0.15 (continuous audio) → mute UGC, music-only path (same branch as no-audio case). Threshold conservative — errs toward muting on edge cases.
+
+---
+
+## simple-pipeline-routine-duration-target-hint — Resolved 2026-04-29
+
+**Resolved by:** Round 3 commit (this branch).
+**Discovered:** 2026-04-29, Round 2 Gate A — Routine 3 was 62s and felt suboptimal at slot_count=4; 2-3 segments would have flowed better.
+**Resolution:** added soft duration target to `src/agents/prompts/match-or-match-routine.md` rule (3): "Target render duration is around 30 seconds … avoid renders longer than 50s unless the segments truly require it." Doesn't override Q8 contract (agent still picks 2-5 itself); it's a hint not a hard cap.
+
+---
+
+## simple-pipeline-editor-agent-workstream — Active (post-Simple-Pipeline-v1 ship)
+
+**Status:** parked, will be briefed separately.
+**Discovered:** 2026-04-29, c10 Gate A debrief.
+**Pattern:** Match-Or-Match picks segments at the granularity recorded in `asset_segments` (start_s / end_s set by the v2 analyzer). The v2 analyzer's segment boundaries are coarse — sometimes a chosen segment includes a few seconds of pre-action setup or post-action cooldown that an editor would trim. An "Editor agent" sibling stage between Match-Or-Match and the render module would re-cut the picked segments at tighter boundaries (operator-named: "real version of slight-incision recutting").
+**Use case:** routine path benefits most (multi-clip flow legibility); meme path also benefits (vibe-clip's own start/end matters more when it's the whole video).
+**Owner:** Simple Pipeline v2 / Editor-agent workstream. Will brief separately after v1 ships clean.
+
+---
+
+## simple-pipeline-redis-rps-cap-needs-rate-limiting — Defensive mitigation in place
+
+**Status:** mitigation deployed (BullMQ `limiter: { max: 500, duration: 1000 }` on simplePipelineWorker registration in `src/index.ts`). Filed informational, not active concern.
+**Discovered:** 2026-04-28, c10 first-run cleanup-induced burst.
+**Pattern:** Upstash Pay-as-you-go enforces 1000 commands/sec per DB. The c10 first-run hit `ERR max requests limit exceeded` mid-run. Same error string as the daily-cap variant; diagnostic miss initially attributed it to plan/daily limit, then to worker concurrency. Real cause: a cleanup script deleted Postgres rows for jobs still queued in BullMQ → simple_pipeline worker retry-bursted through 10 orphan jobs with "race condition" failures (status mismatch); each fail is fast (no I/O) so the worker churned ~1k Redis commands in <1 second. Per-render real command rate is healthy (c7 e2e ran 2 jobs clean at ~80s wall each well under the cap). Worker concurrency was already 1 from c7 — not the bottleneck.
+**v1 mitigation:** BullMQ limiter caps simple_pipeline worker at 500 commands/sec, well under Upstash ceiling, gives headroom for housekeeping + harness bursts. Negligible perf impact at concurrency=1 (typical real activity ~30 cmd/sec per render).
+**Operational note (not code):** drain BullMQ before deleting Postgres rows when aborting a harness mid-flight. Inverse order is safe (delete Postgres after BullMQ is empty) — wrong order causes the burst.
+**Future revisit:** if multi-brand production saturates beyond 500/sec across all queues combined, raise limiter ceiling or distribute across multiple Upstash DBs. Phase 3.5/Part B planning + rendering workers don't have a limiter today; if they ever start hitting the cap, file individually and apply the same pattern.
+**Owner:** revisit at multi-brand production scale (post-Polish-Sprint), or sooner if cap recurs in operator-observed runs.
+
+---
+
+## simple-pipeline-clip-rejection-manual-cleanup — Active (low priority)
+
+**Discovered:** 2026-04-28, Simple Pipeline c1 starter aesthetic_description review.
+**Pattern:** The nordpilates `aesthetic_description` deliberately keeps body composition guidance soft ("welcomingly across abilities") rather than encoding strict rules in the prompt. When an off-brand clip is structurally present in the library, Match-Or-Match may still pick it occasionally — the operator's recourse today is to manually delete the relevant `asset_segments` row + (optionally) the parent `assets` row + R2 keys. Workable at current 1-brand scale; becomes friction at multi-brand scale (33 brands, drop-in bar gets sloppier).
+**Long-term fix:** Polish Sprint Pillar 5 (body composition ingestion filter at S8) auto-rejects clips before they become asset_segments rows. Pillar 5 stays deferred until Simple Pipeline ships and content cadence stabilizes; this followup tracks the manual-cleanup pattern as the interim mitigation.
+**Owner:** Polish Sprint Pillar 5 when resumed; until then, Domis manual cleanup as needed.
+
+---
+
 ## pillar1-planner-overcommits-subject-consistency — Active (deferred)
 
 **Discovered:** 2026-04-28, Polish Sprint Pillar 1 c3 (audit at `docs/diagnostics/POLISH_SPRINT_PILLAR_1_PLANNER_AUDIT.md` on parked branch `feat/polish-sprint-pillar-1-critic-calibration`)

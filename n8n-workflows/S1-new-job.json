@@ -1,5 +1,5 @@
 {
-  "name": "S1: New Job (Sheet → Supabase)",
+  "name": "S1: New Job (Sheet → Supabase, Pipeline-aware)",
   "nodes": [
     {
       "parameters": {
@@ -101,6 +101,16 @@
     },
     {
       "parameters": {
+        "jsCode": "// Route Decision — kickoff Q4/Q8 (Simple Pipeline c8) + Round 3.\n//\n// Reads Pipeline / Format / Clips / Overlay Mode columns and decides:\n//   - target_status: jobs.status to insert\n//   - queue:         BullMQ queue name to enqueue (or null for blocked)\n//   - format / clips_mode / overlay_mode: BullMQ payload extras for\n//     simple_pipeline\n//   - block_reason:  if blocked, the operator-facing reason token\n//   - sheet_row_status: human-readable Row Status for the Sheet\n//\n// For Pipeline=simple jobs that pass Format/Clips validation, calls the\n// VPS readiness endpoint; readiness reason flows into block_reason if\n// not ok.\n//\n// Empty/missing Pipeline defaults to 'advanced' (preserves pre-c8\n// behavior for rows operators created before the column existed).\n//\n// Overlay Mode (Round 3, 2026-04-29) — values 'generate' or 'verbatim';\n// empty defaults by format: meme→verbatim, routine→generate. Invalid\n// values block the row (so a typo isn't silently coerced).\n\nconst VPS_BASE = 'http://95.216.137.35:3000';\n\nconst items = $input.all();\nconst out = [];\n\nfor (const item of items) {\n  const row = item.json;\n  const pipeline = String(row.Pipeline || 'advanced').toLowerCase().trim();\n  const format = String(row.Format || '').toLowerCase().trim();\n  const clips = String(row.Clips || '').toLowerCase().trim();\n  const overlayModeRaw = String(row['Overlay Mode'] || '').toLowerCase().trim();\n  const brand = String(row.Brand || '').trim();\n\n  let target_status = '';\n  let queue = null;\n  let payload_format = null;\n  let clips_mode = null;\n  let overlay_mode = null;\n  let block_reason = null;\n\n  if (pipeline === 'advanced' || pipeline === '') {\n    target_status = 'idea_seed';\n    queue = 'planning';\n  } else if (pipeline === 'simple') {\n    if (format !== 'meme' && format !== 'routine') {\n      target_status = 'simple_pipeline_blocked';\n      block_reason = 'invalid_format';\n    } else if (format === 'meme' && clips !== '1') {\n      target_status = 'simple_pipeline_blocked';\n      block_reason = 'meme_format_requires_clips_1';\n    } else if (format === 'routine' && clips !== 'auto') {\n      target_status = 'simple_pipeline_blocked';\n      block_reason = 'routine_format_requires_clips_auto';\n    } else if (overlayModeRaw && overlayModeRaw !== 'generate' && overlayModeRaw !== 'verbatim') {\n      target_status = 'simple_pipeline_blocked';\n      block_reason = `invalid_overlay_mode:${overlayModeRaw}`;\n    } else {\n      // Format/Clips/Overlay-Mode OK — call readiness endpoint\n      try {\n        const readiness = await this.helpers.httpRequest({\n          method: 'POST',\n          url: `${VPS_BASE}/simple-pipeline/check-readiness?brand_id=${encodeURIComponent(brand)}`,\n          json: true,\n          timeout: 10000,\n        });\n        if (readiness && readiness.ok) {\n          target_status = 'simple_pipeline_pending';\n          queue = 'simple_pipeline';\n          payload_format = format;\n          clips_mode = format === 'meme' ? 'fixed_1' : 'agent_picks';\n          // Round 3 default-by-format when Sheet column is empty.\n          overlay_mode = overlayModeRaw\n            || (format === 'meme' ? 'verbatim' : 'generate');\n        } else {\n          target_status = 'simple_pipeline_blocked';\n          block_reason = (readiness && readiness.reason) || 'readiness_unknown';\n        }\n      } catch (err) {\n        target_status = 'simple_pipeline_blocked';\n        block_reason = 'readiness_endpoint_unreachable';\n      }\n    }\n  } else {\n    target_status = 'simple_pipeline_blocked';\n    block_reason = `unknown_pipeline_value:${pipeline}`;\n  }\n\n  out.push({\n    json: {\n      ...row,\n      __target_status: target_status,\n      __queue: queue,\n      __format: payload_format,\n      __clips_mode: clips_mode,\n      __overlay_mode: overlay_mode,\n      __block_reason: block_reason,\n      __sheet_row_status: block_reason ? `BLOCKED: ${block_reason}` : 'OK',\n    },\n  });\n}\n\nreturn out;\n"
+      },
+      "id": "s1-route",
+      "name": "Route Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $env.SUPABASE_URL }}/rest/v1/jobs",
         "authentication": "genericCredentialType",
@@ -114,14 +124,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"brand_id\": \"{{ $json['Brand'] }}\",\n  \"idea_seed\": \"{{ $json['Idea Seed'] }}\",\n  \"status\": \"idea_seed\"\n}",
+        "jsonBody": "={\n  \"brand_id\": \"{{ $json['Brand'] }}\",\n  \"idea_seed\": \"{{ $json['Idea Seed'] }}\",\n  \"status\": \"{{ $json.__target_status }}\"\n}",
         "options": {}
       },
       "id": "s1-create",
       "name": "Create Job in Supabase",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [0, 0],
+      "position": [224, 0],
       "credentials": {
         "httpHeaderAuth": {
           "id": "l66cV4Gj1L3T6MjJ",
@@ -131,18 +141,79 @@
     },
     {
       "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "is-planning",
+                    "leftValue": "={{ $json.__queue }}",
+                    "rightValue": "planning",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "advanced"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "is-simple",
+                    "leftValue": "={{ $json.__queue }}",
+                    "rightValue": "simple_pipeline",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "simple"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "blocked" }
+      },
+      "id": "s1-switch",
+      "name": "Switch on Queue",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [448, 0]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://95.216.137.35:3000/enqueue",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"queue\": \"planning\",\n  \"jobId\": \"{{ $json.id ?? $json[0].id }}\"\n}",
+        "jsonBody": "={\n  \"queue\": \"planning\",\n  \"jobId\": \"{{ $('Create Job in Supabase').item.json.id ?? $('Create Job in Supabase').item.json[0].id }}\"\n}",
         "options": {}
       },
-      "id": "s1-enqueue",
-      "name": "Enqueue to BullMQ",
+      "id": "s1-enqueue-advanced",
+      "name": "Enqueue Advanced",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [224, 0]
+      "position": [672, -176]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://95.216.137.35:3000/enqueue",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"queue\": \"simple_pipeline\",\n  \"jobId\": \"{{ $('Create Job in Supabase').item.json.id ?? $('Create Job in Supabase').item.json[0].id }}\",\n  \"format\": \"{{ $json.__format }}\",\n  \"clipsMode\": \"{{ $json.__clips_mode }}\",\n  \"overlayMode\": \"{{ $json.__overlay_mode }}\"\n}",
+        "options": {}
+      },
+      "id": "s1-enqueue-simple",
+      "name": "Enqueue Simple Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [672, 0]
     },
     {
       "parameters": {
@@ -165,18 +236,98 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Row Status": "OK",
+            "Row Status": "={{ $json.__sheet_row_status }}",
             "Job ID": "={{ $('Create Job in Supabase').item.json.id ?? $('Create Job in Supabase').item.json[0].id }}",
-            "Status": "idea_seed"
+            "Status": "={{ $json.__target_status }}"
           }
         },
         "options": { "cellFormat": "USER_ENTERED" }
       },
-      "id": "s1-write-ok",
-      "name": "Write Job ID to Sheet",
+      "id": "s1-write-advanced",
+      "name": "Write Advanced Job to Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [448, 0],
+      "position": [896, -176],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Row Status": "={{ $json.__sheet_row_status }}",
+            "Job ID": "={{ $('Create Job in Supabase').item.json.id ?? $('Create Job in Supabase').item.json[0].id }}",
+            "Status": "={{ $json.__target_status }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s1-write-simple",
+      "name": "Write Simple Job to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [896, 0],
+      "credentials": {
+        "googleApi": {
+          "id": "AIqzMYUXoQjud7IW",
+          "name": "Flemingo service acc"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78",
+          "mode": "list",
+          "cachedResultName": "Video Pipeline",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 645720058,
+          "mode": "list",
+          "cachedResultName": "Jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1qQ69Oxl-2Tjf0r8Ox4NhZnv1MlPOebs2eNpgf5Ywk78/edit#gid=645720058"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Row Status": "={{ $json.__sheet_row_status }}",
+            "Job ID": "={{ $('Create Job in Supabase').item.json.id ?? $('Create Job in Supabase').item.json[0].id }}",
+            "Status": "={{ $json.__target_status }}"
+          }
+        },
+        "options": { "cellFormat": "USER_ENTERED" }
+      },
+      "id": "s1-write-blocked",
+      "name": "Write Blocked Job to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [672, 192],
       "credentials": {
         "googleApi": {
           "id": "AIqzMYUXoQjud7IW",
@@ -210,8 +361,8 @@
         },
         "options": { "cellFormat": "USER_ENTERED" }
       },
-      "id": "s1-write-error",
-      "name": "Write Error to Sheet",
+      "id": "s1-write-brand-error",
+      "name": "Write Brand Error",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [0, 240],
@@ -229,12 +380,21 @@
     "Filter New Jobs": { "main": [[{ "node": "Validate Brand", "type": "main", "index": 0 }]] },
     "Validate Brand": {
       "main": [
-        [{ "node": "Create Job in Supabase", "type": "main", "index": 0 }],
-        [{ "node": "Write Error to Sheet", "type": "main", "index": 0 }]
+        [{ "node": "Route Decision", "type": "main", "index": 0 }],
+        [{ "node": "Write Brand Error", "type": "main", "index": 0 }]
       ]
     },
-    "Create Job in Supabase": { "main": [[{ "node": "Enqueue to BullMQ", "type": "main", "index": 0 }]] },
-    "Enqueue to BullMQ": { "main": [[{ "node": "Write Job ID to Sheet", "type": "main", "index": 0 }]] }
+    "Route Decision": { "main": [[{ "node": "Create Job in Supabase", "type": "main", "index": 0 }]] },
+    "Create Job in Supabase": { "main": [[{ "node": "Switch on Queue", "type": "main", "index": 0 }]] },
+    "Switch on Queue": {
+      "main": [
+        [{ "node": "Enqueue Advanced", "type": "main", "index": 0 }],
+        [{ "node": "Enqueue Simple Pipeline", "type": "main", "index": 0 }],
+        [{ "node": "Write Blocked Job to Sheet", "type": "main", "index": 0 }]
+      ]
+    },
+    "Enqueue Advanced": { "main": [[{ "node": "Write Advanced Job to Sheet", "type": "main", "index": 0 }]] },
+    "Enqueue Simple Pipeline": { "main": [[{ "node": "Write Simple Job to Sheet", "type": "main", "index": 0 }]] }
   },
   "pinData": {},
   "meta": { "templateCredsSetupCompleted": true }

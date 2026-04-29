@@ -45,6 +45,8 @@ The Supabase UI showed these tables and views:
 - `job_events`
 - `jobs`
 - `music_tracks`
+- `shadow_runs` (Phase 4 Part B W8, migration 011)
+- `simple_pipeline_render_history` (Simple Pipeline c1, migration 013)
 
 **Views:**
 - `v_active_jobs` (UNRESTRICTED)
@@ -61,7 +63,7 @@ Primary table for video generation lifecycle. Each row = one video request.
 |---|---|---|
 | `id` | uuid | PK |
 | `brand_id` | varchar | FK to brand_configs.brand_id |
-| `status` | USER-DEFINED | Enum: `queued`, `planning`, `brief_review`, `clip_prep`, `transcription`, `rendering`, `audio_mix`, `sync_check`, `platform_export`, `auto_qa`, `human_qa`, `delivered`, `failed` (and possibly more) |
+| `status` | USER-DEFINED | Enum `job_status`: `idle`, `idea_seed`, `planning`, `brief_review`, `queued`, `clip_prep`, `transcription`, `rendering`, `audio_mix`, `sync_check`, `platform_export`, `auto_qa`, `human_qa`, `delivered`, `failed`, `simple_pipeline_pending`, `simple_pipeline_rendering`, `simple_pipeline_failed`, `simple_pipeline_blocked` (last four added 2026-04-28 via migration 015 for Simple Pipeline c1). TS mirror: `JobStatus` in `src/types/database.ts`. |
 | `idea_seed` | text | Operator-typed video idea |
 | `context_packet` | jsonb | The full creative brief. Source of truth for everything downstream. |
 | `brief_summary` | text | Short text summary. **Updated post-W1 to format `{video_type} | {template_id} | {duration}s | {N} segments`** (was `{template_id} | {duration}s | {N} segments` pre-W1; historical rows backfilled by SQL on 2026-04-15). |
@@ -208,6 +210,7 @@ Per-brand configuration: branding, colors, voice, content rules.
 | `color_grade_preset` | text | E.g. `"warm-vibrant"` |
 | `allowed_video_types` | text[] | **Updated 2026-04-15** to multi-type per brand (was single-type from MVP simplicity). nordpilates: `['workout-demo','tips-listicle','transformation']`, carnimeat: `['recipe-walkthrough','tips-listicle','transformation']`, highdiet: `['workout-demo','tips-listicle','transformation']`, ketoway/nodiet: unchanged. |
 | `allowed_color_treatments` | text[] \| null | ✅ **Added 2026-04-15 via migration 006 (Phase 3 W1).** NULL = no restriction. nordpilates and carnimeat backfilled with 5 treatments each (see PHASE_3_DESIGN.md). |
+| `aesthetic_description` | text \| null | ✅ **Added 2026-04-28 via migration 014 (Simple Pipeline c1).** Top-level column (not nested in JSONB). Used by Match-Or-Match agent for visual reasoning — kept distinct from `voice_guidelines` per kickoff Q1b (visual vs voice). NULL until populated per brand on Simple Pipeline activation. nordpilates seeded by migration 014 with operator-revisable starter draft; other brands NULL. |
 | `drive_input_folder_id` | text | Google Drive folder for ingestion |
 | `drive_output_folder_id` | text | Google Drive folder for delivery |
 | `hook_style_preference` | text[] | E.g. `["pop-in", "slide-up"]` |
@@ -238,6 +241,33 @@ Music library available to videos.
 ~15 tracks as of Phase 2.5.
 
 **Phase 3 will allow** CD to pin specific track via `audio.music.pinned_track_id`. Phase 4 will add beat detection for beat-locked cuts.
+
+**Note (2026-04-28):** `music_tracks` has no `active`/`is_active` flag column. All rows are treated as live. The Simple Pipeline music selector and readiness endpoint count rows directly without an active filter. If a future migration adds an `active` flag, both consumers should layer the filter without code rewrite.
+
+---
+
+## ✅ simple_pipeline_render_history (Simple Pipeline c1, migration 013, applied 2026-04-28)
+
+Tracks per-brand parent + segment usage for Simple Pipeline cooldown logic. Routine path: parent cooldown (last 2 used per brand) + segment cooldown (last 2 used). Meme path: segment cooldown only (segment uniqueness implies parent uniqueness when slot_count=1).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | uuid | PK, `gen_random_uuid()` default |
+| `brand_id` | text | FK → `brand_configs(brand_id)`. `NOT NULL`. |
+| `parent_asset_id` | uuid | Parent clip the picked segment belongs to. `NOT NULL`. No FK (denormalized — cooldown should outlive parent deletion). |
+| `segment_id` | uuid | Picked segment. `NOT NULL`. No FK (same rationale). |
+| `job_id` | uuid \| null | FK → `jobs(id)` `ON DELETE SET NULL`. Cooldown rows survive job deletion. |
+| `format` | text | `'routine'` or `'meme'` (CHECK enforced). |
+| `created_at` | timestamptz | `NOT NULL DEFAULT NOW()`. |
+
+**Indexes:**
+- `idx_simple_pipeline_render_history_brand_created` — `(brand_id, created_at DESC)` for general history reads
+- `idx_simple_pipeline_render_history_brand_parent_created` — `(brand_id, parent_asset_id, created_at DESC)` for parent cooldown queries
+- `idx_simple_pipeline_render_history_brand_segment_created` — `(brand_id, segment_id, created_at DESC)` for segment cooldown queries
+
+All `created_at DESC` because cooldown reads are "most recent N" patterns.
+
+**Open follow-up:** `simple-pipeline-deletion-policy` — table grows indefinitely; no retention/pruning policy yet.
 
 ---
 
@@ -292,8 +322,11 @@ Used by `src/agents/curator-v2-retrieval.ts`.
 | 007 | `007_pre_normalized_clips.sql` | ✅ **Applied 2026-04-16 (Phase 3 W5)** | Add pre_normalized_r2_key TEXT to assets. Nullable, no default, no backfill (clean-slate drop). |
 | 008 | `008_segment_v2_sidecar.sql` | ✅ **Applied 2026-04-20 (Phase 4 Part A W0c)** | Add segment_v2 JSONB to asset_segments + GIN index. Nullable, no default. Backfilled by W0d. |
 | 011 | `011_shadow_runs.sql` | ✅ **Applied 2026-04-24 (Phase 4 Part B W8)** | Add shadow_runs table + brand_configs.pipeline_version + jobs.pipeline_override (W8 shadow infrastructure). See section below for full schema. |
+| 013 | `013_simple_pipeline_render_history.sql` | ✅ **Applied 2026-04-28 (Simple Pipeline c1)** | Create `simple_pipeline_render_history` table + 3 cooldown indexes. See section above. |
+| 014 | `014_brand_configs_aesthetic_description.sql` | ✅ **Applied 2026-04-28 (Simple Pipeline c1)** | Add `brand_configs.aesthetic_description TEXT NULL` + seed nordpilates with operator-revisable starter draft. |
+| 015 | `015_jobs_status_simple_pipeline.sql` | ✅ **Applied 2026-04-28 (Simple Pipeline c1)** | Extend `job_status` ENUM with `simple_pipeline_pending` / `_rendering` / `_failed` / `_blocked`. Heads-up: kickoff did not call this out; required for Postgres ENUM-typed status column to accept new values. |
 
-> Table is non-exhaustive — migrations 009 (`009_keyframe_grid_column.sql`) and 010 (`010_match_segments_v2.sql`) exist on disk under `src/scripts/migrations/` but are not yet documented in this table. Backfill at next refresh.
+> Table is non-exhaustive — migrations 009 (`009_keyframe_grid_column.sql`), 010 (`010_match_segments_v2.sql`), and 012 (`012_shadow_review_view.sql`) exist on disk under `src/scripts/migrations/` but are not yet documented in this table. Backfill at next refresh.
 
 ### Migration 011 — Part B shadow infrastructure (applied 2026-04-24)
 

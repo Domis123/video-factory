@@ -48,4 +48,5 @@ export const QUEUE_NAMES = {
   planning: 'planning',
   rendering: 'rendering',
   export: 'export',
+  simple_pipeline: 'simple_pipeline',
 } as const;

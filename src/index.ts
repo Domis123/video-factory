@@ -130,6 +130,36 @@ ingestionWorker.on('failed', (job, err) => {
   console.error(`[worker:ingestion] Failed: ${job?.data.filename}`, err.message);
 });
 
+// ── Simple Pipeline Worker ──
+// Triggered by n8n S1 routing Pipeline=simple jobs to /enqueue with
+// {queue: 'simple_pipeline', jobId, format, clipsMode}. End-to-end: agent
+// → overlay → music → ffmpeg render → human_qa.
+const simplePipelineWorker = createWorker(
+  QUEUE_NAMES.simple_pipeline,
+  async (job: BullJob<{ jobId: string; format: 'routine' | 'meme'; clipsMode: 'fixed_1' | 'agent_picks'; overlayMode?: 'generate' | 'verbatim' }>) => {
+    const { runSimplePipelineWorker } = await import('./workers/simple-pipeline.js');
+    console.log(`[worker:simple_pipeline] Processing ${job.data.jobId} format=${job.data.format} overlayMode=${job.data.overlayMode ?? '(default)'}`);
+    await runSimplePipelineWorker(job.data);
+  },
+  {
+    concurrency: 1, // Serial — one ffmpeg pipeline at a time on the VPS
+    // Defensive Redis rate-limit. Upstash Pay-as-you-go enforces 1000 cmd/sec
+    // per DB; BullMQ housekeeping plus a cleanup-induced retry burst hit it
+    // during c10 first-run (followup: simple-pipeline-redis-rps-cap-needs-rate-limiting).
+    // Per-render real command rate is well under this cap; 500/sec gives ample
+    // headroom while removing a class of operational surprise.
+    limiter: { max: 500, duration: 1000 },
+  },
+);
+
+simplePipelineWorker.on('completed', (job) => {
+  console.log(`[worker:simple_pipeline] Completed: ${job.data.jobId}`);
+});
+
+simplePipelineWorker.on('failed', (job, err) => {
+  console.error(`[worker:simple_pipeline] Failed: ${job?.data.jobId}`, err.message);
+});
+
 console.log('✅ All workers started. Waiting for jobs...\n');
 
 // ── HTTP API (for n8n to enqueue jobs) ──
@@ -168,7 +198,8 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/enqueue') {
     try {
       const body = await readBody(req);
-      const { queue, jobId } = JSON.parse(body);
+      const parsed = JSON.parse(body);
+      const { queue, jobId, ...extra } = parsed;
 
       if (!queue || !jobId) {
         res.writeHead(400);
@@ -183,8 +214,12 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Pass through any extra fields from the request body into the BullMQ job
+      // data. Used by simple_pipeline (format, clipsMode) and any future queue
+      // that needs structured payload beyond just jobId. Backward-compatible:
+      // existing callers that send only {queue, jobId} still work as before.
       const q = createQueue(queue);
-      const job = await q.add(`n8n-${queue}`, { jobId });
+      const job = await q.add(`n8n-${queue}`, { jobId, ...extra });
       await q.close();
 
       console.log(`[api] Enqueued ${jobId} → ${queue} (bull job ${job.id})`);
@@ -381,8 +416,39 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  // ── Simple Pipeline readiness check (Q4) ──
+  // Always returns HTTP 200. Body: {ok: true} or {ok: false, reason}.
+  // n8n S1 calls this before routing Pipeline=simple jobs.
+  if (
+    req.method === 'POST' &&
+    req.url &&
+    req.url.startsWith('/simple-pipeline/check-readiness')
+  ) {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const brandId = url.searchParams.get('brand_id');
+      if (!brandId) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: false, reason: 'missing_brand_id_query_param' }));
+        return;
+      }
+      const { checkSimplePipelineReadiness } = await import(
+        './orchestrator/simple-pipeline/readiness.js'
+      );
+      const result = await checkSimplePipelineReadiness(brandId);
+      res.writeHead(200);
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      // Per Q4: always 200. Surface the error as a reason token rather than HTTP 500.
+      console.error('[api] readiness error:', err);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: false, reason: `readiness_error_${(err as Error).message.slice(0, 40)}` }));
+    }
+    return;
+  }
+
   res.writeHead(404);
-  res.end(JSON.stringify({ error: 'Not found. POST /enqueue or GET /health' }));
+  res.end(JSON.stringify({ error: 'Not found. POST /enqueue, POST /simple-pipeline/check-readiness?brand_id=X, or GET /health' }));
 });
 
 function readBody(req: import('node:http').IncomingMessage): Promise<string> {
@@ -404,11 +470,14 @@ function readRawBody(req: import('node:http').IncomingMessage): Promise<Buffer> 
 }
 
 server.listen(API_PORT, () => {
-  console.log(`📡 API listening on port ${API_PORT} (POST /enqueue, GET /health)\n`);
+  console.log(
+    `📡 API listening on port ${API_PORT} ` +
+      `(POST /enqueue, POST /simple-pipeline/check-readiness, POST /music-ingest, POST /ugc-ingest, GET /health)\n`,
+  );
 });
 
 // ── Graceful Shutdown ──
-const workers = [planningWorker, renderingWorker, ingestionWorker];
+const workers = [planningWorker, renderingWorker, ingestionWorker, simplePipelineWorker];
 
 async function shutdown(signal: string) {
   console.log(`\n⏹️  ${signal} received. Shutting down...`);
