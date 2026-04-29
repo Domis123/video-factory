@@ -190,7 +190,8 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/enqueue') {
     try {
       const body = await readBody(req);
-      const { queue, jobId } = JSON.parse(body);
+      const parsed = JSON.parse(body);
+      const { queue, jobId, ...extra } = parsed;
 
       if (!queue || !jobId) {
         res.writeHead(400);
@@ -205,8 +206,12 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Pass through any extra fields from the request body into the BullMQ job
+      // data. Used by simple_pipeline (format, clipsMode) and any future queue
+      // that needs structured payload beyond just jobId. Backward-compatible:
+      // existing callers that send only {queue, jobId} still work as before.
       const q = createQueue(queue);
-      const job = await q.add(`n8n-${queue}`, { jobId });
+      const job = await q.add(`n8n-${queue}`, { jobId, ...extra });
       await q.close();
 
       console.log(`[api] Enqueued ${jobId} → ${queue} (bull job ${job.id})`);
