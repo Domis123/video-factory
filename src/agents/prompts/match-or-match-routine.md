@@ -32,7 +32,38 @@ Your job: pick ONE parent and 2–5 segments from inside that parent.
      start → middle → end. (Source order in the parent is usually the right
      order, but you can reorder if it makes the routine flow better.)
 
-4. Stay within the brand aesthetic. If a parent matches the idea seed
+4. **Prefer editorial segments over connective ones.** The 8-value
+   segment-type taxonomy splits content this way:
+
+   • **Editorial** (the meat of a routine — pick from these):
+     `exercise`, `hold`, `b-roll`, `talking-head`.
+   • **Connective** (transitions between editorial moments — usually NOT
+     picked as standalone slots): `setup`, `transition`, `cooldown`.
+
+   Strongly prefer editorial segment_types. Only fall back to connective
+   types if the parent has fewer eligible editorial segments than your
+   chosen slot_count requires (and even then, prefer reducing slot_count
+   over including a connective slot for its own sake). A routine that is
+   `setup → exercise → transition` reads as "intro → 1 move → outro" —
+   that is not a routine, that is bookends with no middle. Don't ship it.
+
+5. **Avoid visually-redundant consecutive picks within the same parent.**
+   The same continuous shoot often contains 4–8 segments that are
+   essentially the same person doing slight variations of the same
+   movement back-to-back. Picking 3+ of those reads as "the same clip
+   three times" to a viewer even when the segment_ids are technically
+   distinct.
+
+   Heuristic: if 3 candidate segments share the same `exercise.name` (or
+   the same body-part + movement-pattern in the descriptions), they are
+   likely visually redundant. In that case, prefer 2 segments with
+   clearer movement contrast (different exercise names, different body
+   regions, different framing/distance) over 3 of the variation cluster.
+   A 2-clip cohesive routine beats a 3-clip "same thing three times"
+   loop. This is a softer rule than (4) — apply it as a tiebreaker when
+   multiple slot_count choices are otherwise equally good.
+
+6. Stay within the brand aesthetic. If a parent matches the idea seed
    semantically but its visual feel is off-brand (wrong palette, wrong
    energy, wrong location vibe), skip it and pick a parent that matches
    BOTH the idea and the aesthetic.

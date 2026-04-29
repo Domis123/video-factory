@@ -44,7 +44,12 @@ const PROMPT_TEMPLATE = readFileSync(
   'utf-8',
 );
 
-const MIN_WORDS = 4;
+// Meme captions sometimes land at 3 words ("it's giving tuesday", "soft
+// girl era") — the Round 2 prompt rewrite explicitly targets the seed's
+// register, which can be very tight. Lowering the floor from 4 to 3 lets
+// these tight captions through; below 3 words is almost always too thin
+// to read as caption (single-token outputs etc.).
+const MIN_WORDS = 3;
 const MAX_WORDS = 12;
 
 export async function generateMemeOverlay(input: OverlayMemeInput): Promise<OverlayResult> {
