@@ -344,11 +344,23 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   };
 }
 
-/** Escape characters meaningful to ffmpeg's drawtext filter syntax. */
+/**
+ * Escape characters meaningful to ffmpeg's drawtext filter syntax.
+ *
+ * Apostrophes (`'`) cannot be reliably escaped inside a single-quoted
+ * filter_complex value — the ffmpeg parser breaks even with `\'`. The
+ * Round 3 verbatim mode surfaced this on the seed "lying down isn't the
+ * only kind of rest" (ffmpeg exit 234 "Invalid argument"). Practical
+ * fix: substitute U+2019 (right single quotation mark, "smart quote").
+ * Visually identical to a typewriter apostrophe at typical font sizes,
+ * no quoting conflict, no escape needed. Only relevant to overlay text
+ * — segment descriptions / brand names elsewhere in the pipeline aren't
+ * passed through drawtext.
+ */
 function escapeForDrawtext(s: string): string {
   return s
+    .replace(/'/g, '’')
     .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
     .replace(/:/g, '\\:')
     .replace(/%/g, '\\%');
 }
