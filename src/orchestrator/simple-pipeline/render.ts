@@ -309,14 +309,17 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   // shorter-than-average char texts ("i", "l", spaces).
   const MAX_CHARS_PER_LINE_AT_BASE = 36;
 
-  // v1.1 (Q1, Q2): logo half-size and lifted off the bottom edge.
-  //   - Height: 0.075× composition height (~144px on 1920) — half of v1.0's 0.15×.
-  //   - Opacity: 0.75 (was 0.85).
-  //   - Position: horizontally centered; vertically anchored so the logo's
-  //     bottom edge sits at 78% of composition height (= 22% from the bottom
-  //     edge, "two fingers up"). Avoids clipping under TikTok / IG / YT
-  //     bottom UI chrome.
-  const LOGO_HEIGHT = Math.round(HEIGHT * 0.075);
+  // v1.1 (Q1, Q2; Fix 1 c4 update 2026-04-29): logo quarter-size and
+  // lifted off the bottom edge.
+  //   - Height: 0.0375× composition height (~72px on 1920) — Gate A
+  //     review found 0.075× still visually too large and prone to
+  //     subject collision (Routine 1 case). Halved again. Quarter of
+  //     v1.0's 0.15×.
+  //   - Opacity: 0.75 (unchanged).
+  //   - Position: horizontally centered; vertically anchored so the
+  //     logo's bottom edge sits at 78% of composition height (= 22%
+  //     from the bottom edge, "two fingers up"). Unchanged.
+  const LOGO_HEIGHT = Math.round(HEIGHT * 0.0375);
   const LOGO_OPACITY = 0.75;
   const LOGO_BOTTOM_Y_PCT = 0.78;
 
