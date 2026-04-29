@@ -4,7 +4,10 @@
 **Branch:** `feat/simple-pipeline-v1-1`
 **c1 (logo) commit:** `1b21873`
 **c2 (overlay) commit:** `d24b44d`
-**Wall time:** 8.1 min
+**c4 (logo halve) commit:** `fbc5e08`
+**c5 (multi-line box padding) commit:** `645a990`
+**Initial run wall time:** 8.1 min
+**Iteration wall time:** ~7 min (4 renders)
 
 ---
 
@@ -98,3 +101,48 @@ DELETE FROM jobs WHERE id IN (
 # rendered/nordpilates/2026-04/860e7cda-16ac-48f3-a580-6871f58d340e-simple-pipeline.mp4
 # rendered/nordpilates/2026-04/b28e4b28-2493-493a-9415-6429faf667a7-simple-pipeline.mp4
 ```
+
+---
+
+## Iteration retry — c4 + c5 (2026-04-29)
+
+Domis review of the initial 6-render Gate A landed two cosmetic issues, addressed in c4 + c5:
+
+1. **Logo still visually too large** at 0.075× comp height; subject collision risk (Routine 1). c4 halved again to 0.0375× (~72px on 1920).
+2. **Inter-line darkening on multi-line overlays.** Diagnosed against actual frames: per-line drawtext shadows have been isolated since c2 (each line is its own filter invocation). Real cause was per-line translucent box backgrounds (`boxborderw=16`) overlapping by ~23px at 1.2× line spacing → compounded translucency darker zone between lines. c5 made `boxPadding` dynamic by line count: 16px for single line (preserves v1.0 generous look), `floor((lineHeight - font_size) / 2) - 1` for multi-line (3px at 45px font, 2px at 29px scaled). Each box has at least 1px clear gap above and below; no compounding.
+
+### 4-render iteration verification
+
+Bypassing the worker (direct `renderSimplePipeline` call) since fixes are render-only and we want to isolate the cosmetic change from agent / cooldown variability.
+
+| # | Tag | Overlay text | Layout result | Preview |
+|---|---|---|---|---|
+| 1 | iter-short | "5-min morning glute flow" (24 chars) | 1 line @ 45px, 16px box padding | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/96d0cc0a-963d-4072-894d-440fc6dba9ec-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260429%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260429T142056Z&X-Amz-Expires=86400&X-Amz-Signature=fc8ceb283d010a6dba9306b305ca6966350b95747967a5a9e574332df21b774c&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+| 2 | iter-medium | "wake your hips up before sitting all day" (40 chars) | 2 lines @ 45px, 3px box padding | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/f121f729-30fe-45b3-8ea2-55b5b20d00a1-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260429%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260429T142231Z&X-Amz-Expires=86400&X-Amz-Signature=d81af58facb1b4d423cc67edf361a29d6f1dcbfd185e18b32da9004d6aa3aaa8&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+| 3 | iter-long | "this is a longer overlay text designed to test the two-line wrap" (64 chars) | 2 lines @ 45px, 3px box padding | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/40d40f1b-9884-4f9e-8597-e979f71aea7e-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260429%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260429T142349Z&X-Amz-Expires=86400&X-Amz-Signature=c631570b6496caecb774e37f27bae918f4b0045da0b405cc89a6bd2825559164&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+| 4 | iter-extreme | 132 chars (algorithmic floor case) | 2 lines @ 29px, 2px box padding | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/209e1ce9-86dd-4074-9d58-3ba16ec6a8e5-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260429%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260429T142447Z&X-Amz-Expires=86400&X-Amz-Signature=b76f797874abfd403067cfb46d6395727a7c4ab829d80e8878c27f01725c3925&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+
+### Iteration retry findings (agent-side spot check)
+
+- Logo halved from ~144px to ~72px; visibly clear collision improvement; subject in iter-short no longer overlaps logo.
+- Single-line box padding unchanged (iter-short still has v1.0's generous 16px feel).
+- Multi-line: boxes adjacent without overlap. Inter-line darkening eliminated across iter-medium / iter-long / iter-extreme.
+- Per-line drop shadows preserved (4px x/y, 0.6 alpha) — no change to Q5 spec.
+- No regressions on render quality, color grade, or composition layout.
+
+### Future-followup files (filed alongside this iteration)
+
+- `simple-pipeline-logo-subject-collision-detection` (Future, low priority).
+- `simple-pipeline-meme-generate-mode-prompt-iteration` (Future, operator decision).
+
+### Cleanup commands for iteration renders (after operator review closes)
+
+```bash
+# 4 iteration renders (R2 keys, manual delete)
+# rendered/nordpilates/2026-04/96d0cc0a-963d-4072-894d-440fc6dba9ec-simple-pipeline.mp4
+# rendered/nordpilates/2026-04/f121f729-30fe-45b3-8ea2-55b5b20d00a1-simple-pipeline.mp4
+# rendered/nordpilates/2026-04/40d40f1b-9884-4f9e-8597-e979f71aea7e-simple-pipeline.mp4
+# rendered/nordpilates/2026-04/209e1ce9-86dd-4074-9d58-3ba16ec6a8e5-simple-pipeline.mp4
+```
+
+(Iteration renders bypassed the worker — no jobs / job_events / render_history rows were created; only R2 keys to clean up.)
