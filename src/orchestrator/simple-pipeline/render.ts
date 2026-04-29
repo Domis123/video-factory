@@ -301,7 +301,18 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   const FONT_SIZE_FLOOR = 30;
   const FONT_SCALE_STEP = 0.95;
   const LINE_HEIGHT_MULT = 1.2;
-  const TEXT_BOX_PADDING = 16; // unchanged from v1.0
+  // Box border width — controls translucent black background padding around
+  // each line's text. v1.0 used a flat 16px. v1.1 c5 (Gate A retry):
+  // single-line keeps 16px (generous label look). Multi-line REDUCES to
+  // ~10% of font_size so adjacent per-line boxes don't overlap at 1.2× line
+  // spacing. (Each line is rendered as its own drawtext invocation since
+  // c2 ship; per-line shadows have always been isolated. The visual
+  // "shadow stacking" Gate A reported was actually the *box backgrounds*
+  // overlapping by ~23px and compounding to a darker translucency between
+  // lines. Box geometry isn't in Q5's "shadow / outline / stroke" keep-as-is
+  // list — adjusting it here.) Floor of 2px so the dynamic formula doesn't
+  // degenerate at extreme scale-down.
+  const TEXT_BOX_PADDING_SINGLE = 16;
   const SHADOW_OFFSET = 4;     // unchanged from v1.0
   // Char-width heuristic for DejaVuSans-Bold: ~0.55× font_size per char on
   // average. Threshold for wrap = floor(0.8 × W / (0.55 × FONT_SIZE_BASE))
@@ -335,6 +346,16 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   );
   const lineHeight = Math.round(layout.fontSize * LINE_HEIGHT_MULT);
 
+  // c5: per-line box padding. Single-line gets v1.0's 16px (no overlap
+  // possible). Multi-line scales padding down so per-line boxes do NOT
+  // overlap at 1.2× line height: box_height = font_size + 2*padding ≤
+  // lineHeight = 1.2*font_size, so padding ≤ 0.1*font_size. Subtract
+  // 1 to leave a 1-2px clear gap between adjacent boxes; floor at 2.
+  const boxPadding =
+    layout.lines.length === 1
+      ? TEXT_BOX_PADDING_SINGLE
+      : Math.max(2, Math.floor((lineHeight - layout.fontSize) / 2) - 1);
+
   // Build one drawtext filter per line. y is computed so the stack of lines
   // is centered around h*TEXT_Y_PCT; line 0 is highest, line N-1 is lowest.
   // Each drawtext gets its own translucent box (preserved Q5 styling).
@@ -352,7 +373,7 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
       `text='${escapedLine}':` +
       `fontsize=${layout.fontSize}:` +
       `fontcolor=white:` +
-      `box=1:boxcolor=black@0.35:boxborderw=${TEXT_BOX_PADDING}:` +
+      `box=1:boxcolor=black@0.35:boxborderw=${boxPadding}:` +
       `shadowcolor=black@0.6:shadowx=${SHADOW_OFFSET}:shadowy=${SHADOW_OFFSET}:` +
       `x=(w-text_w)/2:` +
       `y=${yExpr}`
