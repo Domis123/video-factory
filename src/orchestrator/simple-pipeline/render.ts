@@ -31,6 +31,7 @@ import { env } from '../../config/env.js';
 import { supabaseAdmin } from '../../config/supabase.js';
 import {
   buildAudioMixCommand,
+  buildTrimCommand,
   type FfCommand,
 } from '../../lib/ffmpeg.js';
 import { execOrThrow } from '../../lib/exec.js';
@@ -58,11 +59,11 @@ export interface RenderResult {
 
 // ─── Module-load constants ─────────────────────────────────────────────────
 
-const WIDTH = 1080;
+// Composition height (used for logo scaling). Width is implicit via H*9/16
+// in the overlay filter chain. fps is set by the pre_normalized parent
+// (30fps from parent-normalizer.ts at ingest); we don't re-set it.
 const HEIGHT = 1920;
-const FPS = 30;
 const CRF = 18;
-const X264_PRESET = 'medium'; // 'slow' is too slow for ~30-60s wall budget
 
 const WORK_ROOT = `${env.RENDER_TEMP_DIR}/simple-pipeline`;
 
@@ -121,12 +122,20 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
     const segments = await fetchSegmentsInOrder(input.segmentIds);
     const brand = await fetchBrandRenderConfig(input.brandId);
 
-    // 2. Download all clips + music + logo (parallel where possible)
-    const clipPaths = await Promise.all(
-      segments.map(async (s, i) => {
-        const local = resolve(workDir, `clip-${i.toString().padStart(2, '0')}.mp4`);
-        await downloadToFile(s.clipR2Key, local);
-        return local;
+    // 2. Download unique parent files (cached across same-parent segments) +
+    //    music + logo. Routine path with N segments from one parent: 1
+    //    parent download + N ffmpeg-trims. Meme path: 1 parent download + 1
+    //    trim. Replaces the old "download N pre-trimmed 720p clips" pattern.
+    const parentLocalByR2Key = new Map<string, string>();
+    const uniqueParentR2Keys = [...new Set(segments.map((s) => s.parentR2Key))];
+    console.log(
+      `[render] downloading ${uniqueParentR2Keys.length} unique parent(s) for ${segments.length} segment(s)`,
+    );
+    await Promise.all(
+      uniqueParentR2Keys.map(async (r2Key, idx) => {
+        const local = resolve(workDir, `parent-${idx.toString().padStart(2, '0')}.mp4`);
+        await downloadToFile(r2Key, local);
+        parentLocalByR2Key.set(r2Key, local);
       }),
     );
     const musicLocal = resolve(workDir, 'music.mp3');
@@ -136,39 +145,47 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
       downloadToFile(brand.logoR2Key, logoLocal),
     ]);
 
-    // 3. Pass A: per-segment normalize (scale + pad + grade)
-    const normalizedPaths: string[] = [];
-    for (let i = 0; i < clipPaths.length; i++) {
-      const out = resolve(workDir, `norm-${i.toString().padStart(2, '0')}.mp4`);
-      const gradeFilter = buildGradingFilter({
-        preset: brand.colorPreset,
-        lutPath: null, // LUTs deferred to a follow-up; preset is sufficient for v1
-        avgBrightness: null,
-      });
-      await execOrThrow(buildPerSegmentNormalize(clipPaths[i], out, gradeFilter));
-      normalizedPaths.push(out);
+    // 3. Pass A: ffmpeg-trim each segment from its cached parent. Uses
+    //    `-c copy` (no re-encode) — pre_normalized parents are already
+    //    1080×1920 30fps libx264 yuv420p AAC 44.1kHz, so a stream copy
+    //    produces a frame-aligned trim with zero quality loss. Concat
+    //    demuxer in pass B requires identical codecs across segments,
+    //    which `-c copy` from the same parent guarantees.
+    const trimmedPaths: string[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const s = segments[i];
+      const out = resolve(workDir, `trim-${i.toString().padStart(2, '0')}.mp4`);
+      const parentLocal = parentLocalByR2Key.get(s.parentR2Key)!;
+      await execOrThrow(buildTrimCommand(parentLocal, out, s.trimStartS, s.trimEndS));
+      trimmedPaths.push(out);
     }
 
-    // 4. Pass B: concat (or symlink/passthrough for single segment)
+    // 4. Pass B: concat (or passthrough for single-segment meme)
     const concatPath = resolve(workDir, 'concat.mp4');
-    if (normalizedPaths.length === 1) {
-      // Meme path: just rename — no concat work needed
-      await execOrThrow({
-        command: 'cp',
-        args: [normalizedPaths[0], concatPath],
-      });
+    if (trimmedPaths.length === 1) {
+      await execOrThrow({ command: 'cp', args: [trimmedPaths[0], concatPath] });
     } else {
       const concatList = resolve(workDir, 'concat.txt');
       await writeFile(
         concatList,
-        normalizedPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
+        trimmedPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'),
         'utf-8',
       );
       await execOrThrow(buildConcatCommand(concatList, concatPath));
     }
 
-    // 5. Pass C: overlay text + logo (preserves UGC audio with -c:a copy)
+    // 5. Pass C: color grade + overlay text + logo. Single re-encode of the
+    //    full concat at libx264 CRF 18 slow — the only re-encode of pixel
+    //    data in this whole pipeline (parent was CRF 22 medium at ingest;
+    //    Pass A's `-c copy` trim adds none). Net: two re-encodes of any
+    //    given frame across the parent's lifecycle (CRF 22 medium at ingest
+    //    + CRF 18 slow here). No upscale; no per-segment re-encode loop.
     const overlayPath = resolve(workDir, 'overlay.mp4');
+    const gradeFilter = buildGradingFilter({
+      preset: brand.colorPreset,
+      lutPath: null, // LUTs deferred to a follow-up; preset is sufficient for v1
+      avgBrightness: null,
+    });
     await execOrThrow(
       buildOverlayCommand({
         videoPath: concatPath,
@@ -177,6 +194,7 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
         overlayText: input.overlayText,
         fontFile,
         primaryColorHex: brand.primaryColorHex,
+        gradeFilter,
       }),
     );
 
@@ -227,39 +245,6 @@ export async function cleanupRenderWorkdir(workDir: string): Promise<void> {
 
 // ─── Sub-commands ──────────────────────────────────────────────────────────
 
-function buildPerSegmentNormalize(
-  inputPath: string,
-  outputPath: string,
-  gradeFilter: string,
-): FfCommand {
-  // scale → pad → fps → color grade → encode
-  const vf = [
-    `scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease`,
-    `pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2`,
-    `fps=${FPS}`,
-    gradeFilter,
-  ]
-    .filter(Boolean)
-    .join(',');
-
-  return {
-    command: 'ffmpeg',
-    args: [
-      '-y',
-      '-i', inputPath,
-      '-vf', vf,
-      '-c:v', 'libx264',
-      '-preset', X264_PRESET,
-      '-crf', String(CRF),
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-ar', '44100',
-      outputPath,
-    ],
-  };
-}
-
 function buildConcatCommand(concatListPath: string, outputPath: string): FfCommand {
   // Concat demuxer requires identical codecs/dims/fps — Pass A guarantees this.
   return {
@@ -282,6 +267,8 @@ interface OverlayCommandOpts {
   overlayText: string;
   fontFile: string;
   primaryColorHex: string; // e.g. "#E8B4A2"
+  /** Color grade filter chain (from buildGradingFilter). Empty string = no grade. */
+  gradeFilter: string;
 }
 
 function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
@@ -299,10 +286,12 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   const escapedText = escapeForDrawtext(opts.overlayText);
   const escapedFont = opts.fontFile.replace(/:/g, '\\:'); // ffmpeg drawtext
 
-  // Filter_complex:
-  //   [0:v] drawtext... [vt]
-  //   [1:v] format=rgba,colorchannelmixer=aa=0.85,scale=-1:LOGO_HEIGHT [logo]
-  //   [vt][logo] overlay=W-w-LOGO_MARGIN:H-h-LOGO_MARGIN [vout]
+  // Pass C filter chain on input 0 (the concat'd video):
+  //   1. <gradeFilter>  — color grade (preset or LUT)
+  //   2. drawtext       — overlay text
+  // Then overlay logo from input 1.
+  // Single re-encode (libx264 -preset slow -crf 18) since pre_normalized
+  // parent + concat -c copy carried the source through losslessly to here.
   const drawtextFilter =
     `drawtext=fontfile='${escapedFont}':` +
     `text='${escapedText}':` +
@@ -313,8 +302,12 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
     `x=(w-text_w)/2:` +
     `y=h*${TEXT_Y_PCT}-text_h/2`;
 
+  const videoChain = opts.gradeFilter
+    ? `${opts.gradeFilter},${drawtextFilter}`
+    : drawtextFilter;
+
   const filterComplex = [
-    `[0:v]${drawtextFilter}[vt]`,
+    `[0:v]${videoChain}[vt]`,
     `[1:v]format=rgba,colorchannelmixer=aa=${LOGO_OPACITY},scale=-1:${LOGO_HEIGHT}[logo]`,
     `[vt][logo]overlay=W-w-${LOGO_MARGIN}:H-h-${LOGO_MARGIN}[vout]`,
   ].join(';');
@@ -329,7 +322,7 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
       '-map', '[vout]',
       '-map', '0:a?',
       '-c:v', 'libx264',
-      '-preset', X264_PRESET,
+      '-preset', 'slow', // CRF 18 slow — matches Phase 3.5's buildNormalizeCommand
       '-crf', String(CRF),
       '-pix_fmt', 'yuv420p',
       '-c:a', 'copy',
@@ -409,41 +402,81 @@ function buildMusicOnlyCommand(
 interface FetchedSegment {
   id: string;
   parentAssetId: string;
-  clipR2Key: string;
-  startS: number;
-  endS: number;
+  /**
+   * R2 key of the source the render path will trim from. Prefer
+   * `assets.pre_normalized_r2_key` (1080×1920 30fps libx264 CRF 22 medium —
+   * single ingest re-encode, ready for `-c copy` trim). Fallback to
+   * `asset_segments.clip_r2_key` (720p CRF 28 pre-trimmed) only if the
+   * parent has no normalized version — defensive for any pre-W5 rows that
+   * survived the clean-slate.
+   */
+  parentR2Key: string;
+  parentSourceKind: 'pre_normalized' | 'pre_trimmed_clip';
+  trimStartS: number;
+  trimEndS: number;
 }
 
 async function fetchSegmentsInOrder(segmentIds: string[]): Promise<FetchedSegment[]> {
-  const { data, error } = await supabaseAdmin
+  const { data: segs, error: segErr } = await supabaseAdmin
     .from('asset_segments')
     .select('id, parent_asset_id, clip_r2_key, start_s, end_s')
     .in('id', segmentIds);
-  if (error) {
-    throw new Error(`renderSimplePipeline: failed to fetch segments: ${error.message}`);
+  if (segErr) {
+    throw new Error(`renderSimplePipeline: failed to fetch segments: ${segErr.message}`);
   }
-  if (!data || data.length === 0) {
+  if (!segs || segs.length === 0) {
     throw new Error(`renderSimplePipeline: no segments found for ids=[${segmentIds.join(', ')}]`);
   }
-  // Must preserve agent-emitted order. .in() doesn't guarantee order.
-  const byId = new Map(data.map((r: any) => [r.id, r as any]));
+
+  const parentIds = [...new Set(segs.map((r: any) => r.parent_asset_id as string))];
+  const { data: parents, error: parentErr } = await supabaseAdmin
+    .from('assets')
+    .select('id, pre_normalized_r2_key')
+    .in('id', parentIds);
+  if (parentErr) {
+    throw new Error(`renderSimplePipeline: failed to fetch parents: ${parentErr.message}`);
+  }
+  const parentByid = new Map((parents ?? []).map((p: any) => [p.id, p]));
+
+  const segsById = new Map(segs.map((r: any) => [r.id, r as any]));
   const ordered: FetchedSegment[] = [];
   for (const id of segmentIds) {
-    const row = byId.get(id);
+    const row = segsById.get(id);
     if (!row) {
       throw new Error(`renderSimplePipeline: segment id=${id} not found in asset_segments`);
     }
-    if (!row.clip_r2_key) {
+    const parent = parentByid.get(row.parent_asset_id);
+    const preNormalized = parent?.pre_normalized_r2_key as string | null | undefined;
+
+    let parentR2Key: string;
+    let parentSourceKind: 'pre_normalized' | 'pre_trimmed_clip';
+    if (preNormalized) {
+      parentR2Key = preNormalized;
+      parentSourceKind = 'pre_normalized';
+    } else if (row.clip_r2_key) {
+      console.warn(
+        `[render] segment ${id}: parent has no pre_normalized_r2_key; ` +
+          `falling back to clip_r2_key (720p CRF 28). Quality will be degraded.`,
+      );
+      parentR2Key = row.clip_r2_key;
+      parentSourceKind = 'pre_trimmed_clip';
+    } else {
       throw new Error(
-        `renderSimplePipeline: segment id=${id} has no clip_r2_key. Phase 2.5 backfill required.`,
+        `renderSimplePipeline: segment id=${id} has neither parent.pre_normalized_r2_key ` +
+          `nor clip_r2_key. Cannot render.`,
       );
     }
+
     ordered.push({
       id: row.id,
       parentAssetId: row.parent_asset_id,
-      clipR2Key: row.clip_r2_key,
-      startS: Number(row.start_s),
-      endS: Number(row.end_s),
+      parentR2Key,
+      parentSourceKind,
+      trimStartS: parentSourceKind === 'pre_trimmed_clip' ? 0 : Number(row.start_s),
+      trimEndS:
+        parentSourceKind === 'pre_trimmed_clip'
+          ? Number(row.end_s) - Number(row.start_s)
+          : Number(row.end_s),
     });
   }
   return ordered;
