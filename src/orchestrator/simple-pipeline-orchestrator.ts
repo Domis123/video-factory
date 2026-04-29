@@ -33,11 +33,22 @@ import { planRoutineExclusions } from './simple-pipeline/parent-picker.js';
 
 export type SimplePipelineFormat = 'routine' | 'meme';
 export type SimplePipelineClipsMode = 'fixed_1' | 'agent_picks';
+/**
+ * Overlay text source mode (Round 3, 2026-04-29):
+ *   - 'generate' : call overlay-{routine,meme}.ts to produce overlay text
+ *                  via Gemini (existing default for routine)
+ *   - 'verbatim' : use jobs.idea_seed verbatim as the overlay text
+ *                  (existing default for meme — meme idea seeds are
+ *                  usually already in caption-shape; the generator
+ *                  paraphrasing weakens them)
+ */
+export type SimplePipelineOverlayMode = 'generate' | 'verbatim';
 
 export interface SimplePipelineInput {
   jobId: string;
   format: SimplePipelineFormat;
   clipsMode: SimplePipelineClipsMode;
+  overlayMode: SimplePipelineOverlayMode;
 }
 
 export interface SimplePipelineResult {
@@ -55,7 +66,7 @@ export async function runSimplePipeline(
   input: SimplePipelineInput,
 ): Promise<SimplePipelineResult> {
   console.log(
-    `[simple-pipeline] start jobId=${input.jobId} format=${input.format} clipsMode=${input.clipsMode}`,
+    `[simple-pipeline] start jobId=${input.jobId} format=${input.format} clipsMode=${input.clipsMode} overlayMode=${input.overlayMode}`,
   );
   const t0 = Date.now();
   let workDir: string | null = null;
@@ -65,6 +76,7 @@ export async function runSimplePipeline(
     await transitionJob(input.jobId, 'simple_pipeline_pending', 'simple_pipeline_rendering', {
       format: input.format,
       clips_mode: input.clipsMode,
+      overlay_mode: input.overlayMode,
     });
 
     // 2. Read job row
@@ -112,11 +124,21 @@ export async function runSimplePipeline(
     const totalDurationS = await fetchTotalDuration(pick.segmentIds);
     console.log(`[simple-pipeline] picked segments total duration: ${totalDurationS.toFixed(1)}s`);
 
-    // 6. Overlay + music in parallel (independent calls)
+    // 6. Overlay + music in parallel (independent calls).
+    //    overlayMode='verbatim' skips the Gemini generator and uses the
+    //    operator's idea_seed as the overlay text directly. Saves ~$0.005
+    //    + ~5s wall, and (especially for meme) preserves the seed's
+    //    register intact rather than paraphrasing it into something
+    //    weaker. No word-count guard on verbatim — operator owns the
+    //    text; if it's too long the render visually overflows in QA.
+    const overlayPromise: Promise<{ text: string; costUsd: number }> =
+      input.overlayMode === 'verbatim'
+        ? Promise.resolve({ text: ideaSeed, costUsd: 0 })
+        : input.format === 'routine'
+          ? generateRoutineOverlay({ brandId, ideaSeed })
+          : generateMemeOverlay({ brandId, ideaSeed });
     const [overlay, music] = await Promise.all([
-      input.format === 'routine'
-        ? generateRoutineOverlay({ brandId, ideaSeed })
-        : generateMemeOverlay({ brandId, ideaSeed }),
+      overlayPromise,
       selectMusicForSimplePipeline({
         brandId,
         format: input.format,
@@ -170,6 +192,7 @@ export async function runSimplePipeline(
       r2_key: render.r2Key,
       duration_s: render.durationS,
       overlay_text: overlay.text,
+      overlay_mode: input.overlayMode,
       music_track_id: music.track.id,
       parent_asset_id: pick.parentAssetId,
       segment_ids: pick.segmentIds,

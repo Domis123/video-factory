@@ -109,6 +109,7 @@ Three columns control Simple Pipeline routing. All three were added pre-c1; valu
 | **Pipeline** | `simple`, `advanced` | Empty defaults to `advanced` (Phase 4 Part B path). Set `simple` to route through this pipeline. |
 | **Format** | `meme`, `routine` | Required when Pipeline=`simple`. Determines product. |
 | **Clips** | `1`, `auto` | Required when Pipeline=`simple`. `1` for `meme`; `auto` for `routine` (agent picks 2–5). Operator does not pick a number. |
+| **Overlay Mode** | `generate`, `verbatim` | Round 3 (2026-04-29). Empty defaults by format: meme→`verbatim`, routine→`generate`. `generate` calls overlay-{routine,meme}.ts via Gemini. `verbatim` uses the operator's idea seed text directly as the overlay (skips Gemini, saves ~$0.005/render and ~5s wall, preserves seed register intact). Use `generate` for routines (label generation typically improves on the seed). Use `verbatim` for memes (seeds are usually already in caption-shape; the generator weakens them by paraphrasing). Override the format default if you've written an idea seed that's already a great overlay or that needs paraphrasing. |
 
 If Format/Clips don't match (e.g. `meme` + `auto`), S1 sets the job to `simple_pipeline_blocked` with reason `meme_format_requires_clips_1` or `routine_format_requires_clips_auto` and the operator sees that string in the Sheet's "Row Status" column.
 

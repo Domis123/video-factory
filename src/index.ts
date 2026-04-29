@@ -136,9 +136,9 @@ ingestionWorker.on('failed', (job, err) => {
 // → overlay → music → ffmpeg render → human_qa.
 const simplePipelineWorker = createWorker(
   QUEUE_NAMES.simple_pipeline,
-  async (job: BullJob<{ jobId: string; format: 'routine' | 'meme'; clipsMode: 'fixed_1' | 'agent_picks' }>) => {
+  async (job: BullJob<{ jobId: string; format: 'routine' | 'meme'; clipsMode: 'fixed_1' | 'agent_picks'; overlayMode?: 'generate' | 'verbatim' }>) => {
     const { runSimplePipelineWorker } = await import('./workers/simple-pipeline.js');
-    console.log(`[worker:simple_pipeline] Processing ${job.data.jobId} format=${job.data.format}`);
+    console.log(`[worker:simple_pipeline] Processing ${job.data.jobId} format=${job.data.format} overlayMode=${job.data.overlayMode ?? '(default)'}`);
     await runSimplePipelineWorker(job.data);
   },
   {

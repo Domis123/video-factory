@@ -200,23 +200,36 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
 
     // 6. Pass D: audio mix.
     //
-    // ffprobe to detect whether the concatenated UGC has any audio stream.
-    // Per CLAUDE.md (transcriber no-audio hotfix 2026-04-17): UGC fitness
-    // clips frequently lack microphones. When all picked clips were silent,
-    // overlay.mp4 has no [0:a] stream and the sidechain-ducking filter graph
-    // in buildAudioMixCommand fails with "Error initializing complex filters:
-    // Invalid argument". Two paths:
-    //   - has UGC audio:  buildAudioMixCommand at 0.158 (= -16 dB), ducking on
-    //   - silent UGC:     music-only audio at 0.7 (no ducking needed)
+    // Three audio paths, classified from the concatenated UGC overlay:
+    //   - 'no_audio':   overlay has no audio stream at all.
+    //                   Use music-only at 0.7. (c10 hotfix branch.)
+    //   - 'no_speech':  overlay has audio but it's continuous noise/ambient
+    //                   without natural speech pauses (silence_ratio below
+    //                   the SPEECH_PAUSE_RATIO_FLOOR threshold). Round 3
+    //                   addition: extends the c10 mute branch to cover loud-
+    //                   non-speech audio (room noise, equipment hum, creator
+    //                   music) that fights with our chosen track.
+    //                   Use music-only at 0.7. Same path as 'no_audio'.
+    //   - 'has_speech': overlay has audio with natural speech pauses (counts,
+    //                   instructions, talking-head). Mix at -16 dB with
+    //                   sidechain ducking — preserves speech intelligibility
+    //                   over music.
+    //
+    // Threshold: silence_ratio is the fraction of the overlay duration spent
+    // below -30 dB for ≥0.4s windows. Natural speech sits in 15-30%; pure
+    // music or steady noise sits below ~5%. Threshold of 0.15 errs toward
+    // muting (conservative — avoids music-vs-noise fights), so a clip with
+    // very brief speech and a lot of background noise may be muted. Falls
+    // open to operator catching it in QA review.
     const finalPath = resolve(workDir, 'final.mp4');
-    const overlayHasAudio = await probeHasAudio(overlayPath);
-    if (overlayHasAudio) {
-      console.log(`[render] UGC audio detected; mixing with music ducking at -16 dB`);
+    const audioClass = await classifyOverlayAudio(overlayPath);
+    if (audioClass === 'has_speech') {
+      console.log(`[render] UGC has speech (silence_ratio≥0.15); mixing with music ducking at -16 dB`);
       await execOrThrow(
         buildAudioMixCommand(overlayPath, musicLocal, finalPath, 0.158, { ducking: true }),
       );
     } else {
-      console.log(`[render] no UGC audio; using music-only at volume 0.7`);
+      console.log(`[render] UGC ${audioClass === 'no_audio' ? 'has no audio stream' : 'has no speech (silence_ratio<0.15)'}; using music-only at volume 0.7`);
       await execOrThrow(buildMusicOnlyCommand(overlayPath, musicLocal, finalPath, 0.7));
     }
 
@@ -365,6 +378,57 @@ async function probeHasAudio(path: string): Promise<boolean> {
     ],
   });
   return out.trim() === 'audio';
+}
+
+type OverlayAudioClass = 'no_audio' | 'no_speech' | 'has_speech';
+const SPEECH_NOISE_FLOOR_DB = -30; // silencedetect threshold
+const SPEECH_PAUSE_MIN_S = 0.4; // shortest pause counted as silence
+const SPEECH_PAUSE_RATIO_FLOOR = 0.15; // below this = continuous noise / no speech
+
+/**
+ * Classify the audio of a concatenated overlay to decide between music-only
+ * and sidechain-ducked mix in Pass D.
+ *
+ * Round 3 (2026-04-29): extends c10's binary has-audio check with a
+ * silencedetect-based speech-pause heuristic. Continuous audio (creator
+ * music, HVAC, equipment hum) sits below 0.05 silence ratio; speech
+ * naturally lands at 0.15+ due to inhalation and word pauses. The 0.15
+ * floor is conservative — it errs toward muting on edge cases.
+ */
+async function classifyOverlayAudio(path: string): Promise<OverlayAudioClass> {
+  if (!(await probeHasAudio(path))) return 'no_audio';
+
+  // ffmpeg silencedetect emits silence_start / silence_end / silence_duration
+  // lines on stderr. We don't decode video, just route audio through the
+  // filter and discard output.
+  const result = await new Promise<{ stderr: string }>((resolve, reject) => {
+    const { spawn } = require('node:child_process') as typeof import('node:child_process');
+    const proc = spawn('ffmpeg', [
+      '-nostats',
+      '-i', path,
+      '-af', `silencedetect=noise=${SPEECH_NOISE_FLOOR_DB}dB:d=${SPEECH_PAUSE_MIN_S}`,
+      '-f', 'null',
+      '-',
+    ]);
+    let stderr = '';
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    proc.on('error', reject);
+    proc.on('close', () => resolve({ stderr }));
+  });
+
+  const totalDur = await ffprobeDuration(path);
+  if (totalDur <= 0) return 'no_audio';
+
+  let totalSilenceS = 0;
+  for (const line of result.stderr.split('\n')) {
+    const m = line.match(/silence_duration:\s*([\d.]+)/);
+    if (m) totalSilenceS += Number(m[1]);
+  }
+  const silenceRatio = totalSilenceS / totalDur;
+  console.log(
+    `[render] silence_ratio=${silenceRatio.toFixed(3)} (${totalSilenceS.toFixed(2)}s silent / ${totalDur.toFixed(2)}s total, threshold=${SPEECH_PAUSE_RATIO_FLOOR})`,
+  );
+  return silenceRatio < SPEECH_PAUSE_RATIO_FLOOR ? 'no_speech' : 'has_speech';
 }
 
 /**

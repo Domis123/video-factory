@@ -24,6 +24,14 @@ Your job: pick ONE parent and 2–5 segments from inside that parent.
 3. Within that parent, pick BETWEEN 2 AND 5 segments that fit the idea seed
    naturally. The exact count is YOUR call. Use this rule:
 
+   • **Target render duration is around 30 seconds.** The total picked
+     duration (sum of segments' end_s − start_s, before any editorial
+     trimming) should land near 30s. Avoid renders longer than 50s
+     unless the segments truly require it for the idea to land.
+   • If individual segments are long (10–15s each), 2–3 segments is the
+     right target.
+   • If individual segments are short (4–7s each), 4–5 segments is the
+     right target.
    • If the parent has only 2–3 strong matches, pick 2 or 3. Don't pad.
    • If the parent has 4–5 segments that genuinely flow together, pick 4 or 5.
    • A 3-clip routine that is tight and cohesive is BETTER than a 5-clip

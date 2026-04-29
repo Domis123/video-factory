@@ -6,6 +6,40 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-non-portrait-source-letterbox — Active (low-medium priority)
+
+**Discovered:** 2026-04-29, Round 2 Gate A visual review (R6 — "gentle stretches before bed").
+**Pattern:** Pre_normalized parents are produced by `parent-normalizer.ts` with `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2` — non-portrait sources get LETTERBOXED (black bars top/bottom) into the 1080×1920 frame. Round 2 R6 used a horizontally-framed source clip and produced visible black bars in the final render. Render path inherits the bars since pass A `-c copy` trims the already-padded frame.
+**Workable today:** operator avoids picking landscape source clips (manual filter at upload).
+**Long-term fix (Simple Pipeline v1.1 or post-merge polish):** zoom-to-fill / smart-crop on non-portrait sources at parent-normalize OR render time. Center-crop is a 5-line ffmpeg change at parent-normalize; smart-crop (subject-aware) is bigger.
+**Owner:** Simple Pipeline v1.1 or Polish Sprint adjacent workstream.
+
+---
+
+## simple-pipeline-overlay-mode-default-by-format — Resolved 2026-04-29
+
+**Resolved by:** Round 3 commit (this branch).
+**Discovered:** 2026-04-29, Round 2 Gate A debrief — meme overlay generator paraphrased seeds into weaker copy ("main character energy" → "your main character arc starts on the mat").
+**Resolution:** added Sheet "Overlay Mode" column with `generate` / `verbatim` dropdown. Empty defaults by format: meme→`verbatim`, routine→`generate`. `verbatim` skips the Gemini call entirely and uses idea_seed as the overlay text directly. Plumbed through S1 JSON → /enqueue → BullMQ payload → orchestrator. Operator can override the default per-job.
+
+---
+
+## simple-pipeline-ugc-audio-mute-on-no-speech — Resolved 2026-04-29
+
+**Resolved by:** Round 3 commit (this branch).
+**Discovered:** 2026-04-29, Round 2 Gate A — some UGC has loud incidental audio (room noise, equipment hum, creator music) without speech that fights with our chosen music in the mix.
+**Resolution:** render Pass D extends the c10 binary "has audio?" check with a silencedetect-based speech-pause heuristic. Computes silence_ratio = total_silence_below_-30dB_for_≥0.4s / total_video_duration. silence_ratio ≥ 0.15 (natural speech has 15-30% pauses) → keep UGC, sidechain duck music. silence_ratio < 0.15 (continuous audio) → mute UGC, music-only path (same branch as no-audio case). Threshold conservative — errs toward muting on edge cases.
+
+---
+
+## simple-pipeline-routine-duration-target-hint — Resolved 2026-04-29
+
+**Resolved by:** Round 3 commit (this branch).
+**Discovered:** 2026-04-29, Round 2 Gate A — Routine 3 was 62s and felt suboptimal at slot_count=4; 2-3 segments would have flowed better.
+**Resolution:** added soft duration target to `src/agents/prompts/match-or-match-routine.md` rule (3): "Target render duration is around 30 seconds … avoid renders longer than 50s unless the segments truly require it." Doesn't override Q8 contract (agent still picks 2-5 itself); it's a hint not a hard cap.
+
+---
+
 ## simple-pipeline-editor-agent-workstream — Active (post-Simple-Pipeline-v1 ship)
 
 **Status:** parked, will be briefed separately.
