@@ -6,6 +6,18 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-redis-rps-cap-needs-rate-limiting — Defensive mitigation in place
+
+**Status:** mitigation deployed (BullMQ `limiter: { max: 500, duration: 1000 }` on simplePipelineWorker registration in `src/index.ts`). Filed informational, not active concern.
+**Discovered:** 2026-04-28, c10 first-run cleanup-induced burst.
+**Pattern:** Upstash Pay-as-you-go enforces 1000 commands/sec per DB. The c10 first-run hit `ERR max requests limit exceeded` mid-run. Same error string as the daily-cap variant; diagnostic miss initially attributed it to plan/daily limit, then to worker concurrency. Real cause: a cleanup script deleted Postgres rows for jobs still queued in BullMQ → simple_pipeline worker retry-bursted through 10 orphan jobs with "race condition" failures (status mismatch); each fail is fast (no I/O) so the worker churned ~1k Redis commands in <1 second. Per-render real command rate is healthy (c7 e2e ran 2 jobs clean at ~80s wall each well under the cap). Worker concurrency was already 1 from c7 — not the bottleneck.
+**v1 mitigation:** BullMQ limiter caps simple_pipeline worker at 500 commands/sec, well under Upstash ceiling, gives headroom for housekeeping + harness bursts. Negligible perf impact at concurrency=1 (typical real activity ~30 cmd/sec per render).
+**Operational note (not code):** drain BullMQ before deleting Postgres rows when aborting a harness mid-flight. Inverse order is safe (delete Postgres after BullMQ is empty) — wrong order causes the burst.
+**Future revisit:** if multi-brand production saturates beyond 500/sec across all queues combined, raise limiter ceiling or distribute across multiple Upstash DBs. Phase 3.5/Part B planning + rendering workers don't have a limiter today; if they ever start hitting the cap, file individually and apply the same pattern.
+**Owner:** revisit at multi-brand production scale (post-Polish-Sprint), or sooner if cap recurs in operator-observed runs.
+
+---
+
 ## simple-pipeline-clip-rejection-manual-cleanup — Active (low priority)
 
 **Discovered:** 2026-04-28, Simple Pipeline c1 starter aesthetic_description review.

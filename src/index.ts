@@ -141,7 +141,15 @@ const simplePipelineWorker = createWorker(
     console.log(`[worker:simple_pipeline] Processing ${job.data.jobId} format=${job.data.format}`);
     await runSimplePipelineWorker(job.data);
   },
-  { concurrency: 1 }, // Serial — one ffmpeg pipeline at a time on the VPS
+  {
+    concurrency: 1, // Serial — one ffmpeg pipeline at a time on the VPS
+    // Defensive Redis rate-limit. Upstash Pay-as-you-go enforces 1000 cmd/sec
+    // per DB; BullMQ housekeeping plus a cleanup-induced retry burst hit it
+    // during c10 first-run (followup: simple-pipeline-redis-rps-cap-needs-rate-limiting).
+    // Per-render real command rate is well under this cap; 500/sec gives ample
+    // headroom while removing a class of operational surprise.
+    limiter: { max: 500, duration: 1000 },
+  },
 );
 
 simplePipelineWorker.on('completed', (job) => {
