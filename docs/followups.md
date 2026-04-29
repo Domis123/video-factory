@@ -6,6 +6,16 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-editor-agent-workstream — Active (post-Simple-Pipeline-v1 ship)
+
+**Status:** parked, will be briefed separately.
+**Discovered:** 2026-04-29, c10 Gate A debrief.
+**Pattern:** Match-Or-Match picks segments at the granularity recorded in `asset_segments` (start_s / end_s set by the v2 analyzer). The v2 analyzer's segment boundaries are coarse — sometimes a chosen segment includes a few seconds of pre-action setup or post-action cooldown that an editor would trim. An "Editor agent" sibling stage between Match-Or-Match and the render module would re-cut the picked segments at tighter boundaries (operator-named: "real version of slight-incision recutting").
+**Use case:** routine path benefits most (multi-clip flow legibility); meme path also benefits (vibe-clip's own start/end matters more when it's the whole video).
+**Owner:** Simple Pipeline v2 / Editor-agent workstream. Will brief separately after v1 ships clean.
+
+---
+
 ## simple-pipeline-redis-rps-cap-needs-rate-limiting — Defensive mitigation in place
 
 **Status:** mitigation deployed (BullMQ `limiter: { max: 500, duration: 1000 }` on simplePipelineWorker registration in `src/index.ts`). Filed informational, not active concern.
