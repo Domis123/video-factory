@@ -291,10 +291,16 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   const TEXT_BOX_PADDING = 16;
   const SHADOW_OFFSET = 4;
 
-  // Logo sized to ~15% composition height
-  const LOGO_HEIGHT = Math.round(HEIGHT * 0.15);
-  const LOGO_OPACITY = 0.85;
-  const LOGO_MARGIN = 36;
+  // v1.1 (Q1, Q2): logo half-size and lifted off the bottom edge.
+  //   - Height: 0.075× composition height (~144px on 1920) — half of v1.0's 0.15×.
+  //   - Opacity: 0.75 (was 0.85).
+  //   - Position: horizontally centered; vertically anchored so the logo's
+  //     bottom edge sits at 78% of composition height (= 22% from the bottom
+  //     edge, "two fingers up"). Avoids clipping under TikTok / IG / YT
+  //     bottom UI chrome.
+  const LOGO_HEIGHT = Math.round(HEIGHT * 0.075);
+  const LOGO_OPACITY = 0.75;
+  const LOGO_BOTTOM_Y_PCT = 0.78; // logo bottom edge anchor
 
   const escapedText = escapeForDrawtext(opts.overlayText);
   const escapedFont = opts.fontFile.replace(/:/g, '\\:'); // ffmpeg drawtext
@@ -322,7 +328,9 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
   const filterComplex = [
     `[0:v]${videoChain}[vt]`,
     `[1:v]format=rgba,colorchannelmixer=aa=${LOGO_OPACITY},scale=-1:${LOGO_HEIGHT}[logo]`,
-    `[vt][logo]overlay=W-w-${LOGO_MARGIN}:H-h-${LOGO_MARGIN}[vout]`,
+    // v1.1 placement: centered horizontally; bottom edge at 78% of comp height
+    // (overlay filter `y` is the top of the logo, so y = H*pct - h to anchor by bottom).
+    `[vt][logo]overlay=(W-w)/2:H*${LOGO_BOTTOM_Y_PCT}-h[vout]`,
   ].join(';');
 
   return {
