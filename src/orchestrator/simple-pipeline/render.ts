@@ -34,7 +34,7 @@ import {
   buildTrimCommand,
   type FfCommand,
 } from '../../lib/ffmpeg.js';
-import { execOrThrow } from '../../lib/exec.js';
+import { exec, execOrThrow } from '../../lib/exec.js';
 import { buildGradingFilter, type ColorPreset } from '../../lib/color-grading.js';
 import { downloadToFile, uploadFile } from '../../lib/r2-storage.js';
 
@@ -400,20 +400,18 @@ async function classifyOverlayAudio(path: string): Promise<OverlayAudioClass> {
 
   // ffmpeg silencedetect emits silence_start / silence_end / silence_duration
   // lines on stderr. We don't decode video, just route audio through the
-  // filter and discard output.
-  const result = await new Promise<{ stderr: string }>((resolve, reject) => {
-    const { spawn } = require('node:child_process') as typeof import('node:child_process');
-    const proc = spawn('ffmpeg', [
+  // filter and discard output. Use exec() (not execOrThrow) since we need
+  // stderr regardless of exit code (and silencedetect via -f null often
+  // exits with non-zero on the pipe close anyway).
+  const result = await exec({
+    command: 'ffmpeg',
+    args: [
       '-nostats',
       '-i', path,
       '-af', `silencedetect=noise=${SPEECH_NOISE_FLOOR_DB}dB:d=${SPEECH_PAUSE_MIN_S}`,
       '-f', 'null',
       '-',
-    ]);
-    let stderr = '';
-    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-    proc.on('error', reject);
-    proc.on('close', () => resolve({ stderr }));
+    ],
   });
 
   const totalDur = await ffprobeDuration(path);
