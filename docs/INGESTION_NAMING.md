@@ -104,6 +104,7 @@ For a Quarantined file:
 **A file uploaded but I can't find it in the renderer pipeline.**
 
 - Check that the brand has a row in `brand_configs`. If `brand_id='cyclediet'` (for example) is being ingested but `brand_configs` has no `cyclediet` row yet, the asset is stored but not yet renderable. Add the `brand_configs` row when committing to ingest + render for that brand.
+- For the **Simple Pipeline** specifically (Pipeline=simple in the Sheet), the brand_configs row also needs `aesthetic_description` populated (added 2026-04-29 via migration 014). Without it, S1 sets the job to `simple_pipeline_blocked` with reason `missing_aesthetic_description`. See [`SIMPLE_PIPELINE.md`](SIMPLE_PIPELINE.md) § Per-brand activation procedure for the full setup sequence (≥3 parents with ≥10 v2-analyzed segments + brand_configs.aesthetic_description + ≥5 music_tracks). The advanced (Phase 4 Part B) pipeline does not require `aesthetic_description`.
 
 **S8 cycle is slow / files sit in Drive a while.**
 

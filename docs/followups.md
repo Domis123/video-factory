@@ -6,6 +6,15 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-clip-rejection-manual-cleanup — Active (low priority)
+
+**Discovered:** 2026-04-28, Simple Pipeline c1 starter aesthetic_description review.
+**Pattern:** The nordpilates `aesthetic_description` deliberately keeps body composition guidance soft ("welcomingly across abilities") rather than encoding strict rules in the prompt. When an off-brand clip is structurally present in the library, Match-Or-Match may still pick it occasionally — the operator's recourse today is to manually delete the relevant `asset_segments` row + (optionally) the parent `assets` row + R2 keys. Workable at current 1-brand scale; becomes friction at multi-brand scale (33 brands, drop-in bar gets sloppier).
+**Long-term fix:** Polish Sprint Pillar 5 (body composition ingestion filter at S8) auto-rejects clips before they become asset_segments rows. Pillar 5 stays deferred until Simple Pipeline ships and content cadence stabilizes; this followup tracks the manual-cleanup pattern as the interim mitigation.
+**Owner:** Polish Sprint Pillar 5 when resumed; until then, Domis manual cleanup as needed.
+
+---
+
 ## pillar1-planner-overcommits-subject-consistency — Active (deferred)
 
 **Discovered:** 2026-04-28, Polish Sprint Pillar 1 c3 (audit at `docs/diagnostics/POLISH_SPRINT_PILLAR_1_PLANNER_AUDIT.md` on parked branch `feat/polish-sprint-pillar-1-critic-calibration`)
