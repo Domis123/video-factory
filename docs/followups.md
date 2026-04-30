@@ -26,6 +26,28 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## simple-pipeline-logo-subject-collision-detection — Future (low priority)
+
+**Discovered:** 2026-04-29, v1.1 Gate A review.
+**Pattern:** Logo overlays at a fixed bottom-area position (78% from top, centered horizontally) without awareness of where the subject is in the frame. Routine 1 case (Gate A render of "5-min morning glute flow") had the logo overlapping the woman's body in the lower portion of the frame.
+**v1.1 mitigation:** halving logo size (c4: 0.075× → 0.0375× comp height) reduces collision footprint substantially. Acceptable for ship.
+**Long-term fix:** subject-aware logo placement — detect the subject's bounding box per segment (or per render-time keyframe), shift logo to a non-overlapping position. Requires per-segment subject metadata or a render-time pose/face-detection step. Substantial scope, deferred.
+**Trigger condition:** wait until production usage shows recurring collision. If multiple operator-rejected renders cite logo-on-subject as the reason, file a separate workstream brief. If smaller-logo proves sufficient, this stays parked.
+**Owner:** future Simple Pipeline workstream when triggered.
+
+---
+
+## simple-pipeline-meme-generate-mode-prompt-iteration — Future (operator decision)
+
+**Discovered:** 2026-04-29, v1.1 Gate A review.
+**Pattern:** Round 3 + v1.1 Gate A both shipped meme path with `Overlay Mode = verbatim` as the default. Verbatim uses idea_seed verbatim as overlay text. Some operator-flagged "memes not landing creatively" cases — verbatim means meme creativity is operator-driven via the idea seed itself (operator writes a good meme caption → render uses it).
+**Workable today:** verbatim default + operator writing meme-shaped seeds covers the v1 ship. Operators who want generate-mode meme overlays can override the Sheet column to `generate`; the Round 2 prompt rewrite (47c1a50) holds register on caption-shaped seeds but may drift on topic-shaped or longer seeds (e.g., "5 reasons to stretch every morning").
+**Long-term fix:** revisit the meme-generate prompt with broader few-shot coverage (literal vs abstract vs ironic vs vibey vs simple seeds, plus topic-shaped inputs). ~1-2 day prompt iteration workstream. Verify with a Q7-style 6-meme harness against the wider input distribution.
+**Trigger condition:** operator decision when they want to re-explore meme generate-mode at scale.
+**Owner:** future Simple Pipeline prompt iteration workstream when triggered.
+
+---
+
 ## simple-pipeline-non-portrait-source-letterbox — Active (low-medium priority)
 
 **Discovered:** 2026-04-29, Round 2 Gate A visual review (R6 — "gentle stretches before bed").

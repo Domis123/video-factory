@@ -285,44 +285,116 @@ interface OverlayCommandOpts {
 }
 
 function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
-  // Lower-third Y position: 78% from top
-  const TEXT_Y_PCT = 0.78;
-  const FONT_SIZE = 64;
-  const TEXT_BOX_PADDING = 16;
-  const SHADOW_OFFSET = 4;
+  // v1.1 (Q3, Q4, Q5):
+  //   - Vertical position: stack center at 27% from top (was 78% bottom-third).
+  //     Frees the bottom area for the logo and the middle band as the
+  //     unobstructed "content stage."
+  //   - Base font size: 0.7× v1.0's 64 = ~45px.
+  //   - Auto-wrap to 2 lines when a single line at base size would exceed
+  //     80% of comp width (~864px on 1080).
+  //   - Auto-scale-down in 5% steps (floor 30px) if 2 lines at base size
+  //     still don't fit — protects against long unsplittable runs.
+  //   - Line spacing 1.2× font_size.
+  //   - Shadow / box / fontcolor preserved exactly (Q5).
+  const TEXT_Y_PCT = 0.27;
+  const FONT_SIZE_BASE = 45;
+  const FONT_SIZE_FLOOR = 30;
+  const FONT_SCALE_STEP = 0.95;
+  const LINE_HEIGHT_MULT = 1.2;
+  // Box border width — controls translucent black background padding around
+  // each line's text. v1.0 used a flat 16px. v1.1 c5 (Gate A retry):
+  // single-line keeps 16px (generous label look). Multi-line REDUCES to
+  // ~10% of font_size so adjacent per-line boxes don't overlap at 1.2× line
+  // spacing. (Each line is rendered as its own drawtext invocation since
+  // c2 ship; per-line shadows have always been isolated. The visual
+  // "shadow stacking" Gate A reported was actually the *box backgrounds*
+  // overlapping by ~23px and compounding to a darker translucency between
+  // lines. Box geometry isn't in Q5's "shadow / outline / stroke" keep-as-is
+  // list — adjusting it here.) Floor of 2px so the dynamic formula doesn't
+  // degenerate at extreme scale-down.
+  const TEXT_BOX_PADDING_SINGLE = 16;
+  const SHADOW_OFFSET = 4;     // unchanged from v1.0
+  // Char-width heuristic for DejaVuSans-Bold: ~0.55× font_size per char on
+  // average. Threshold for wrap = floor(0.8 × W / (0.55 × FONT_SIZE_BASE))
+  //   = floor(864 / 24.75) ≈ 34. Used 36 to be slightly forgiving on
+  // shorter-than-average char texts ("i", "l", spaces).
+  const MAX_CHARS_PER_LINE_AT_BASE = 36;
 
-  // Logo sized to ~15% composition height
-  const LOGO_HEIGHT = Math.round(HEIGHT * 0.15);
-  const LOGO_OPACITY = 0.85;
-  const LOGO_MARGIN = 36;
+  // v1.1 (Q1, Q2; Fix 1 c4 update 2026-04-29): logo quarter-size and
+  // lifted off the bottom edge.
+  //   - Height: 0.0375× composition height (~72px on 1920) — Gate A
+  //     review found 0.075× still visually too large and prone to
+  //     subject collision (Routine 1 case). Halved again. Quarter of
+  //     v1.0's 0.15×.
+  //   - Opacity: 0.75 (unchanged).
+  //   - Position: horizontally centered; vertically anchored so the
+  //     logo's bottom edge sits at 78% of composition height (= 22%
+  //     from the bottom edge, "two fingers up"). Unchanged.
+  const LOGO_HEIGHT = Math.round(HEIGHT * 0.0375);
+  const LOGO_OPACITY = 0.75;
+  const LOGO_BOTTOM_Y_PCT = 0.78;
 
-  const escapedText = escapeForDrawtext(opts.overlayText);
-  const escapedFont = opts.fontFile.replace(/:/g, '\\:'); // ffmpeg drawtext
+  const escapedFont = opts.fontFile.replace(/:/g, '\\:');
 
-  // Pass C filter chain on input 0 (the concat'd video):
-  //   1. <gradeFilter>  — color grade (preset or LUT)
-  //   2. drawtext       — overlay text
-  // Then overlay logo from input 1.
-  // Single re-encode (libx264 -preset slow -crf 18) since pre_normalized
-  // parent + concat -c copy carried the source through losslessly to here.
-  const drawtextFilter =
-    `drawtext=fontfile='${escapedFont}':` +
-    `text='${escapedText}':` +
-    `fontsize=${FONT_SIZE}:` +
-    `fontcolor=white:` +
-    `box=1:boxcolor=black@0.35:boxborderw=${TEXT_BOX_PADDING}:` +
-    `shadowcolor=black@0.6:shadowx=${SHADOW_OFFSET}:shadowy=${SHADOW_OFFSET}:` +
-    `x=(w-text_w)/2:` +
-    `y=h*${TEXT_Y_PCT}-text_h/2`;
+  // Plan layout: split text into 1 or 2 lines, choose font size that fits.
+  const layout = planOverlayLayout(
+    opts.overlayText,
+    FONT_SIZE_BASE,
+    FONT_SIZE_FLOOR,
+    FONT_SCALE_STEP,
+    MAX_CHARS_PER_LINE_AT_BASE,
+  );
+  const lineHeight = Math.round(layout.fontSize * LINE_HEIGHT_MULT);
+
+  // c5: per-line box padding. Single-line gets v1.0's 16px (no overlap
+  // possible). Multi-line scales padding down so per-line boxes do NOT
+  // overlap at 1.2× line height: box_height = font_size + 2*padding ≤
+  // lineHeight = 1.2*font_size, so padding ≤ 0.1*font_size. Subtract
+  // 1 to leave a 1-2px clear gap between adjacent boxes; floor at 2.
+  const boxPadding =
+    layout.lines.length === 1
+      ? TEXT_BOX_PADDING_SINGLE
+      : Math.max(2, Math.floor((lineHeight - layout.fontSize) / 2) - 1);
+
+  // Build one drawtext filter per line. y is computed so the stack of lines
+  // is centered around h*TEXT_Y_PCT; line 0 is highest, line N-1 is lowest.
+  // Each drawtext gets its own translucent box (preserved Q5 styling).
+  const drawtextChain = layout.lines.map((line, idx) => {
+    const escapedLine = escapeForDrawtext(line);
+    const offsetPx = Math.round((idx - (layout.lines.length - 1) / 2) * lineHeight);
+    const yExpr =
+      offsetPx === 0
+        ? `h*${TEXT_Y_PCT}-text_h/2`
+        : offsetPx > 0
+          ? `h*${TEXT_Y_PCT}+${offsetPx}-text_h/2`
+          : `h*${TEXT_Y_PCT}-${-offsetPx}-text_h/2`;
+    return (
+      `drawtext=fontfile='${escapedFont}':` +
+      `text='${escapedLine}':` +
+      `fontsize=${layout.fontSize}:` +
+      `fontcolor=white:` +
+      `box=1:boxcolor=black@0.35:boxborderw=${boxPadding}:` +
+      `shadowcolor=black@0.6:shadowx=${SHADOW_OFFSET}:shadowy=${SHADOW_OFFSET}:` +
+      `x=(w-text_w)/2:` +
+      `y=${yExpr}`
+    );
+  }).join(',');
+
+  console.log(
+    `[render] overlay layout: ${layout.lines.length} line(s) at ${layout.fontSize}px ` +
+      `(text "${opts.overlayText}", ${opts.overlayText.length} chars)`,
+  );
 
   const videoChain = opts.gradeFilter
-    ? `${opts.gradeFilter},${drawtextFilter}`
-    : drawtextFilter;
+    ? `${opts.gradeFilter},${drawtextChain}`
+    : drawtextChain;
 
   const filterComplex = [
     `[0:v]${videoChain}[vt]`,
     `[1:v]format=rgba,colorchannelmixer=aa=${LOGO_OPACITY},scale=-1:${LOGO_HEIGHT}[logo]`,
-    `[vt][logo]overlay=W-w-${LOGO_MARGIN}:H-h-${LOGO_MARGIN}[vout]`,
+    // v1.1 placement: centered horizontally; bottom edge at 78% of comp height
+    // (overlay filter `y` is the top of the logo, so y = H*pct - h to anchor by bottom).
+    `[vt][logo]overlay=(W-w)/2:H*${LOGO_BOTTOM_Y_PCT}-h[vout]`,
   ].join(';');
 
   return {
@@ -342,6 +414,139 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
       opts.outputPath,
     ],
   };
+}
+
+/**
+ * v1.1 c2 / c6: plan overlay text layout — choose between 1 and N lines
+ * (N up to MAX_LINES), scale font down if even MAX_LINES at base size
+ * doesn't fit.
+ *
+ * The width-fits-on-line check uses a char-count heuristic, not pixel
+ * measurement. DejaVuSans-Bold averages ~0.55× font_size per char in
+ * English text; the caller passes `maxCharsAtBaseFontSize` precomputed
+ * for that ratio at the configured base size and 80%-of-width threshold.
+ *
+ * c6 algorithm (extends c2's 2-line cap to N up to 5):
+ *   1. For lineCount = 1 to MAX_LINES (5):
+ *      a. Split text into `lineCount` lines, balanced at whitespace
+ *         nearest each target boundary at length/lineCount intervals.
+ *      b. If splitIntoNLines couldn't produce that many lines (single
+ *         long word, etc.), skip and try smaller counts above this in
+ *         the loop — but this loop only goes up, so just continue.
+ *         The fallback at end handles unsplittable text.
+ *      c. If all lines fit at base font (longest ≤ maxCharsAtBaseFontSize):
+ *         return at base font with this count.
+ *   2. After exhausting 1..MAX_LINES: ship at MAX_LINES with the
+ *      scale-down loop applied. If even at the floor the longest line
+ *      overflows, ship the floor anyway and log a warning — operator-
+ *      visible signal that the seed is unreasonably long.
+ *
+ * Why prefer more lines over scale-down: a 132-char overlay at 4 lines
+ * @ base 45px is more readable than 2 lines @ 29px (where text overflows
+ * width AND is too small to read on a phone screen).
+ *
+ * Cap at 5 lines: a 5-line stack at 1.2× line height = 6× font_size tall.
+ * At 45px that's ~270px stack (~14% of 1920 comp). Beyond 5 the overlay
+ * dominates the upper half and starts intruding on the content stage.
+ */
+interface OverlayLayout {
+  lines: string[];
+  fontSize: number;
+}
+
+const MAX_LINES = 5;
+
+function splitIntoNLines(text: string, n: number): string[] {
+  if (n <= 1) return [text];
+
+  // Target boundary positions: text.length × i / n for i in 1..n-1.
+  // For each, find the whitespace closest to the target position that
+  // sits AFTER the previous chosen split (so splits remain monotonically
+  // increasing). Bail if a target can't find any valid whitespace.
+  const splits: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const target = Math.floor((text.length * i) / n);
+    const minIdx = (splits.length > 0 ? splits[splits.length - 1] : -1) + 1;
+    let chosen = -1;
+    for (let offset = 0; offset < text.length; offset++) {
+      const left = target - offset;
+      if (left > minIdx && left < text.length && /\s/.test(text[left])) {
+        chosen = left;
+        break;
+      }
+      const right = target + offset;
+      if (right > minIdx && right < text.length && /\s/.test(text[right])) {
+        chosen = right;
+        break;
+      }
+    }
+    if (chosen < 0) {
+      // No splittable whitespace remaining; bail with whatever splits we have.
+      break;
+    }
+    splits.push(chosen);
+  }
+
+  // Slice text at the chosen splits.
+  const lines: string[] = [];
+  let start = 0;
+  for (const s of splits) {
+    lines.push(text.slice(start, s).trim());
+    start = s + 1;
+  }
+  lines.push(text.slice(start).trim());
+  return lines.filter((l) => l.length > 0);
+}
+
+function planOverlayLayout(
+  text: string,
+  baseFontSize: number,
+  fontSizeFloor: number,
+  fontScaleStep: number,
+  maxCharsAtBaseFontSize: number,
+): OverlayLayout {
+  const trimmed = text.trim();
+
+  // Try lineCount 1..MAX_LINES at base font; ship the smallest count
+  // whose longest line fits the per-line char threshold.
+  for (let n = 1; n <= MAX_LINES; n++) {
+    const candidate = splitIntoNLines(trimmed, n);
+    if (candidate.length < n) continue; // couldn't split into this many
+    const longest = Math.max(...candidate.map((l) => l.length));
+    if (longest <= maxCharsAtBaseFontSize) {
+      return { lines: candidate, fontSize: baseFontSize };
+    }
+  }
+
+  // Even MAX_LINES at base size doesn't fit. Fall back: split into
+  // MAX_LINES (or as many as we can if text is unsplittable) and run
+  // the scale-down loop until the longest line fits or we hit the floor.
+  let lines = splitIntoNLines(trimmed, MAX_LINES);
+  if (lines.length === 0) lines = [trimmed]; // pathological
+
+  let fontSize = baseFontSize;
+  while (fontSize > fontSizeFloor) {
+    const charsThisFont = Math.floor((maxCharsAtBaseFontSize * baseFontSize) / fontSize);
+    const longest = Math.max(...lines.map((l) => l.length));
+    if (longest <= charsThisFont) break;
+    const next = Math.round(fontSize * fontScaleStep);
+    if (next === fontSize) break; // round stuck; bail
+    fontSize = next;
+  }
+
+  // If the longest line still overflows at the floor, log a warning —
+  // operator-visible signal that this overlay is unreasonably long.
+  const finalLongest = Math.max(...lines.map((l) => l.length));
+  const finalCharThreshold = Math.floor((maxCharsAtBaseFontSize * baseFontSize) / fontSize);
+  if (finalLongest > finalCharThreshold) {
+    console.warn(
+      `[render] overlay text overflows even at MAX_LINES=${MAX_LINES} and floor font=${fontSize}px ` +
+        `(longest line ${finalLongest} chars > ${finalCharThreshold} threshold). ` +
+        `Operator should consider shortening the seed.`,
+    );
+  }
+
+  return { lines, fontSize };
 }
 
 /**
