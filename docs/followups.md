@@ -58,37 +58,18 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
-## simple-pipeline-overlay-mode-default-by-format — Resolved 2026-04-29
+## simple-pipeline-editor-agent-workstream — Active (HEADLINE NEXT WORKSTREAM)
 
-**Resolved by:** Round 3 commit (this branch).
-**Discovered:** 2026-04-29, Round 2 Gate A debrief — meme overlay generator paraphrased seeds into weaker copy ("main character energy" → "your main character arc starts on the mat").
-**Resolution:** added Sheet "Overlay Mode" column with `generate` / `verbatim` dropdown. Empty defaults by format: meme→`verbatim`, routine→`generate`. `verbatim` skips the Gemini call entirely and uses idea_seed as the overlay text directly. Plumbed through S1 JSON → /enqueue → BullMQ payload → orchestrator. Operator can override the default per-job.
-
----
-
-## simple-pipeline-ugc-audio-mute-on-no-speech — Resolved 2026-04-29
-
-**Resolved by:** Round 3 commit (this branch).
-**Discovered:** 2026-04-29, Round 2 Gate A — some UGC has loud incidental audio (room noise, equipment hum, creator music) without speech that fights with our chosen music in the mix.
-**Resolution:** render Pass D extends the c10 binary "has audio?" check with a silencedetect-based speech-pause heuristic. Computes silence_ratio = total_silence_below_-30dB_for_≥0.4s / total_video_duration. silence_ratio ≥ 0.15 (natural speech has 15-30% pauses) → keep UGC, sidechain duck music. silence_ratio < 0.15 (continuous audio) → mute UGC, music-only path (same branch as no-audio case). Threshold conservative — errs toward muting on edge cases.
-
----
-
-## simple-pipeline-routine-duration-target-hint — Resolved 2026-04-29
-
-**Resolved by:** Round 3 commit (this branch).
-**Discovered:** 2026-04-29, Round 2 Gate A — Routine 3 was 62s and felt suboptimal at slot_count=4; 2-3 segments would have flowed better.
-**Resolution:** added soft duration target to `src/agents/prompts/match-or-match-routine.md` rule (3): "Target render duration is around 30 seconds … avoid renders longer than 50s unless the segments truly require it." Doesn't override Q8 contract (agent still picks 2-5 itself); it's a hint not a hard cap.
-
----
-
-## simple-pipeline-editor-agent-workstream — Active (post-Simple-Pipeline-v1 ship)
-
-**Status:** parked, will be briefed separately.
-**Discovered:** 2026-04-29, c10 Gate A debrief.
-**Pattern:** Match-Or-Match picks segments at the granularity recorded in `asset_segments` (start_s / end_s set by the v2 analyzer). The v2 analyzer's segment boundaries are coarse — sometimes a chosen segment includes a few seconds of pre-action setup or post-action cooldown that an editor would trim. An "Editor agent" sibling stage between Match-Or-Match and the render module would re-cut the picked segments at tighter boundaries (operator-named: "real version of slight-incision recutting").
-**Use case:** routine path benefits most (multi-clip flow legibility); meme path also benefits (vibe-clip's own start/end matters more when it's the whole video).
-**Owner:** Simple Pipeline v2 / Editor-agent workstream. Will brief separately after v1 ships clean.
+**Discovered:** 2026-04-28, Simple Pipeline c10 visual review (operator flagged "we should go real version" for incision-cut capability)
+**Pattern:** Match-Or-Match picks valid segments, but their `start_s`/`end_s` boundaries are determined at ingestion (Pass 1 segment analysis) without knowledge of the specific creative intent of the rendering job. Result: some renders have preparation footage at start, ending mid-action, or 1-2 seconds of unhelpful content at boundaries. Hard cuts produce visible-but-imperfect edits.
+**Operator-flagged as core to TikTok-volume usage.** Without it, hard cuts at picked boundaries produce some unshippable renders; operator over-generates ~6 idea seeds per actual target video and discards 2-3.
+**Architectural shape (decisions for kickoff Q&A in next planning chat):**
+- Real Editor agent (Gemini Pro call ffprobing each picked segment, refining boundaries) vs deterministic heuristic (drop first/last 0.3s of segments >2s)
+- Latency budget per render (~$0.01-0.02 + ~20s for real-agent version)
+- Scope: just incision cuts, or also re-rank segments, or full creative judgment
+- Where in orchestrator flow Editor sits
+- Output schema, failure handling
+**Owner:** next planning chat — drafts kickoff Q&A, brief, agent kickoff
 
 ---
 
@@ -110,6 +91,16 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 **Pattern:** The nordpilates `aesthetic_description` deliberately keeps body composition guidance soft ("welcomingly across abilities") rather than encoding strict rules in the prompt. When an off-brand clip is structurally present in the library, Match-Or-Match may still pick it occasionally — the operator's recourse today is to manually delete the relevant `asset_segments` row + (optionally) the parent `assets` row + R2 keys. Workable at current 1-brand scale; becomes friction at multi-brand scale (33 brands, drop-in bar gets sloppier).
 **Long-term fix:** Polish Sprint Pillar 5 (body composition ingestion filter at S8) auto-rejects clips before they become asset_segments rows. Pillar 5 stays deferred until Simple Pipeline ships and content cadence stabilizes; this followup tracks the manual-cleanup pattern as the interim mitigation.
 **Owner:** Polish Sprint Pillar 5 when resumed; until then, Domis manual cleanup as needed.
+
+---
+
+## s8-retry-wait-too-short — Active (low priority)
+
+**Discovered:** 2026-04-28, S8 chore Gate A close (operator confirmed n8n auto-defaulted retry to 5000ms instead of 60000ms recommended)
+**Pattern:** Send to VPS retry is `retryOnFail: true, maxTries: 3, waitBetweenTries: 5000ms`. 5s wait is operationally bounded for fast Pass-1-only files; insufficient when file 1 is in Pass 2 (~200s/segment).
+**Acceptance for current state:** operator chose to ship rather than re-tune; multi-file drops may show silent loss in real production.
+**Watch item:** check ingestion log periodically; if multi-file drops show drops, bump wait to 60000ms via n8n UI.
+**Owner:** Domis when next touching n8n web UI for unrelated work
 
 ---
 
@@ -185,7 +176,9 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 ## s8-v2-json-divergence-followup — Active
 
-**Discovered:** 2026-04-28 during Gate A smoke testing
+**Discovered:** 2026-04-28, S8 chore Gate A smoke testing (session 19)
+**Re-attempt 2026-04-29 (session 20):** abandoned twice. Operator hand-pasted n8n export into repo; chat-paste corruption silently lost characters in two Code nodes' jsCode strings (`const name` → `consname`, `'CM': 'carnimeat'` → `'Carnimeat'`). JSON parsed clean both times but would crash at workflow load or item-1 in n8n. Agent caught both via static analysis before commit. Reverted dirty file; followup remains open.
+**Lesson:** large multi-line JSON cannot be safely chat-pasted. Future re-export needs alternative transport: gist, paste-bin, scp to VPS, or minified single-line paste.
 **Pattern:** c3 of `chore/s8-multi-brand-ingestion-routing` shipped `n8n-workflows/S8_UGC_Ingest_v2.json` that diverges from the working operator-side configuration in three places:
 
 1. **Send to VPS body:** JSON has `Body Content Type: Raw + Body: {{ $binary.data }}`. In n8n expression mode, `$binary.data` evaluates to the binary metadata reference object (`{ mimeType, fileType, ... }`), not the actual bytes. VPS received 0-byte requests; ffprobe failed with "exit 1" on empty file. Working config is `Body Content Type: n8n Binary File` + `inputDataFieldName=data` (no Body field, no Content-Type field).
@@ -209,9 +202,10 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 **Discovered:** 2026-04-28 during S8 multi-brand ingestion routing chore pre-work
 **Pattern:** The 33-prefix BRAND_MAP routes to 32 unique `brand_id` values. Only 5 (carnimeat, highdiet, ketoway, nodiet, nordpilates) have `brand_configs` rows; 27 brands have no config (airdiet, brainway, cortisoldetox, cyclediet, effecto, flamediet, glpdiet, greendiet, harmonydiet, koiyoga, lastdiet, lastingchange, liverdetox, manifestationparadox, menletics, mindway, moongrade, nomorediet, nordastro, nordletics, nordyoga, novahealth, offdiet, raisingdog, taiyoga, walkingyoga, welcomebaby).
 **Operator decision (2026-04-28):** lazy population — add a `brand_configs` row for a brand only when committing to ingest + render for it. Files for non-configured brands routed through S8 (with `x-asset-meta` set by S8's BRAND_MAP) will ingest successfully and create `assets` rows with `brand_id` matching the prefix's brand value, even if `brand_configs` has no row for that brand_id; those rows accumulate as inert until the brand_configs row is added. The c6 fix tightens only the filename-fallback path (when `x-asset-meta` is missing); files reaching VPS without `x-asset-meta` but with a prefix-shaped filename will now 400 instead of silently creating orphan-brand rows. Net: S8-routed ingestion is permissive; non-S8-routed ingestion is restrictive.
+**Update 2026-04-29:** Simple Pipeline now requires `brand_configs.aesthetic_description` populated (and ≥3 parents with ≥10 v2 + ≥5 music tracks across ≥2 moods) for the brand to pass /simple-pipeline/check-readiness. Per-brand activation procedure documented in `SIMPLE_PIPELINE.md` includes the standard agent-drafts-starter-then-operator-revises pattern.
 **Operator-named priority order for first ingestion wave (2026-04-28):** nordpilates (live) → cyclediet → carnimeat → nodiet.
 **Action:** operator adds `brand_configs` rows on commit-to-ingest. No agent action needed; reference this followup if drift between BRAND_MAP and brand_configs surfaces in production.
-**Owner:** Domis, on per-brand commit-to-ingest
+**Owner:** Domis, on per-brand commit-to-ingest; SIMPLE_PIPELINE.md owns the procedure documentation
 
 ---
 
@@ -295,8 +289,8 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 **Discovered:** 2026-04-27, W9 Phase 1 calibration first real-seed run
 **Pattern:** Anthropic Claude API limit hit during W9 Phase 1 calibration. Operator raised limit; sufficient for sprint scale.
-**Update 2026-04-28:** Polish Sprint Pillar 1 c1-c4 shipped without exhausting limit. Pillar 1 c5 (calibration seeds, would have used 4× ~Sonnet × 2 = ~8× standard usage) deferred behind Polish Sprint pause. Simple Pipeline doesn't use Sonnet (Gemini Pro only) so doesn't compound this. Anthropic limit currently in low-watch state — sufficient for foreseeable workload.
-**Revisit if:** dual-run mode runs at scale + Polish Sprint resumes + per-brand Pillar 1 calibration runs propagate.
+**Update 2026-04-29:** Simple Pipeline v1.0 + v1.1 shipped without using Sonnet (Gemini Pro only). Limit didn't approach. Editor agent (next workstream) also Gemini Pro — won't compound. Polish Sprint Pillar 1 c5 (calibration seeds, would have used 4× ~Sonnet × 2 = ~8× standard usage) deferred behind resumption. Anthropic limit currently in low-watch state — sufficient for foreseeable workload.
+**Revisit if:** Polish Sprint Pillar 1 calibration seeds run, or W10 voice generation activates Sonnet usage.
 **Owner:** Polish Sprint resumption (when relevant)
 
 ---
@@ -661,6 +655,24 @@ Combining into one global helper would risk destabilizing W3/W5/W6 responseSchem
 ## r2-orphaned-NP-keys-cleanup — RESOLVED 2026-04-28
 
 **Resolved by:** S8 chore pre-work audit (commit 30b0549) confirmed no `NP/`-prefixed R2 keys exist for nordpilates. All assets use `assets/nordpilates/` and `segments/nordpilates/` patterns. The W5 clean-slate (2026-04-16) erased any historical `NP/` keys; post-W5 ingestion has used the brand-id-keyed `<resource_type>/<brand_id>/<uuid>` layout consistently. No migration needed.
+
+---
+
+## simple-pipeline-overlay-mode-default-by-format — RESOLVED 2026-04-29
+
+**Resolved by:** Simple Pipeline v1.0 Round 3 (commit `679d362`). Sheet "Overlay Mode" column added with `generate` / `verbatim` dropdown. Default-by-format applied: routine→generate (Gemini paraphrase via overlay-routine.ts), meme→verbatim (idea seed used directly as overlay text). Verbatim mode skips the Gemini overlay-meme.ts call entirely; saves ~$0.005 + ~5s per meme render. Operator can override per job in the Sheet.
+
+---
+
+## simple-pipeline-ugc-audio-mute-on-no-speech — RESOLVED 2026-04-29
+
+**Resolved by:** Simple Pipeline v1.0 Round 3 (commit `679d362`). render.ts Pass D extended `classifyOverlayAudio` to use ffprobe + silencedetect. If silence_ratio < 0.15 (mostly silent UGC) OR no audio stream at all, render skips sidechain mix and uses music-only path (extension of c10 audio fix's silent-UGC handling). If speech detected, sidechain-ducked mix preserved as before. Threshold: 0.15 silence_ratio. Edge case at 0.987 silence_ratio (loud-but-mostly-silent) currently goes to mixed mode rather than muted; not flagged as a bug yet.
+
+---
+
+## simple-pipeline-routine-duration-target-hint — RESOLVED 2026-04-29
+
+**Resolved by:** Simple Pipeline v1.0 Round 3 (commit `679d362`). `src/agents/prompts/match-or-match-routine.md` rule (3) added: "Target render duration is ~30s for routine videos. Pick slot_count to fit this target — fewer segments if individual segments are long, more if short. Avoid renders longer than 50s unless the segments truly require it." Doesn't change Q8 contract (agent still picks slot_count 2-5 itself); soft hint only. Round 3 metrics confirmed slot_count distribution within target band.
 
 ---
 
