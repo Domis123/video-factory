@@ -109,14 +109,15 @@ src/index.ts (entry point)
 │   └── clip-prep → transcribe → render → audio-mix → sync-check → export → QA
 ├── Ingestion Worker (BullMQ)
 │   └── FFprobe + Gemini Pro analyze → R2 upload → Supabase insert (single-threaded by design; serializes via /ugc-ingest)
-├── [PLANNED] Simple Pipeline Worker (BullMQ, concurrency: 2)
-│   └── Match-Or-Match agent → overlay generation → music select → ffmpeg render → R2 upload
-│       (Pending Simple Pipeline brief implementation)
+├── Simple Pipeline Worker (BullMQ, concurrency: 1, limiter: 500 cmd/sec)
+│   └── Match-Or-Match agent → overlay generation (verbatim or generate) →
+│       music select → ffmpeg render (4-pass: trim → concat → text+logo+grade → audio mix) → R2 upload
 └── HTTP API (port 3000)
-    ├── POST /enqueue            — n8n adds jobs to BullMQ queues (planning, simple_pipeline)
-    ├── POST /ugc-ingest         — n8n S8 sends UGC video file with x-asset-meta + binary stream
-    ├── POST /music-ingest       — n8n sends audio file for processing
-    └── GET  /health             — Health check
+    ├── POST /enqueue                            — n8n adds jobs to BullMQ queues (planning, simple_pipeline)
+    ├── POST /ugc-ingest                         — n8n S8 sends UGC video file with x-asset-meta + binary stream
+    ├── POST /music-ingest                       — n8n sends audio file for processing
+    ├── POST /simple-pipeline/check-readiness    — n8n S1 calls before enqueueing simple jobs (NEW v1.0)
+    └── GET  /health                             — Health check
 ```
 
 ### How a video gets made (VPS perspective)
@@ -157,6 +158,47 @@ src/index.ts (entry point)
 9. Build template config (transition timing from energy curve)
 10. Store Context Packet in Supabase → status becomes `brief_review`
 ```
+
+**Simple Pipeline phase** (alternative to advanced pipeline; activated by Sheet `Pipeline=simple` — added 2026-04-29):
+```
+1. n8n S1 polls Jobs sheet (every 30s); reads new row's Pipeline + Format + Clips + Overlay Mode columns
+2. If Pipeline=simple, S1 validates Format + Clips combination:
+   - Format=meme requires Clips=1 (else simple_pipeline_blocked, reason: meme_format_requires_clips_1)
+   - Format=routine requires Clips=auto (else simple_pipeline_blocked, reason: routine_format_requires_clips_auto)
+3. S1 calls VPS POST /simple-pipeline/check-readiness?brand_id=X
+   - Validates: ≥3 parents with ≥10 segment_v2-analyzed segments AND brand_configs.aesthetic_description populated AND ≥5 active music_tracks across ≥2 distinct moods
+   - Returns {ok: true} or {ok: false, reason: <token>}
+4. If readiness fails, S1 sets jobs.status = simple_pipeline_blocked with reason; row visible in Sheet for operator action
+5. If readiness passes, S1 inserts job row, status = simple_pipeline_pending
+6. S1 calls VPS POST /enqueue {queue: 'simple_pipeline', jobId, format, slot_count, overlay_mode}
+7. Simple Pipeline Worker picks up job from BullMQ (concurrency=1, 500 cmd/sec limiter)
+8. Orchestrator: simple-pipeline-orchestrator.ts
+   a. Fetch job + brand_config from Supabase
+   b. Branch on format → routine or meme path
+   c. Match-Or-Match agent (Gemini Pro, ~$0.015, ~10s) — picks segment_ids + parent_asset_id + reasoning
+      - v2-only segment policy: only segments where segment_v2 IS NOT NULL considered
+      - Routine: agent picks parent first (cooldown last 2), then 2-5 segments within (Q8 contract)
+      - Meme: agent picks 1 segment from any parent (segment cooldown last 2)
+   d. Cooldown enforcement: log to simple_pipeline_render_history
+   e. Overlay text:
+      - overlay_mode='verbatim' (default for meme): use idea_seed verbatim; skip Gemini call
+      - overlay_mode='generate' (default for routine): Gemini Pro overlay-routine.ts or overlay-meme.ts (~$0.005, ~5s)
+   f. Music selector: existing logic, brand-allowed mood pool
+9. Render (ffmpeg, 4 passes):
+   - Pass A: download pre_normalized_r2_key parent (1080×1920 30fps libx264, full quality), ffmpeg-trim each segment with -c copy (no re-encode)
+     - Critical: NEVER reads clip_r2_key (720p CRF 28); that produces graininess
+     - Cache parent download across multi-segment routine from same parent
+   - Pass B: ffmpeg concat demuxer joins trimmed segments
+   - Pass C: drawtext (per-line, dynamic N-line wrap up to 5 lines) + logo overlay (0.0375× height, 78% from top, 0.75 opacity) + color grade LUT; single re-encode at libx264 CRF 18 slow
+   - Pass D: audio mix — silencedetect on UGC; if silence_ratio < 0.15 → music-only; else → sidechain-ducked mix
+10. Output: 1080×1920 / 30fps / CRF 18 MP4. Wall ~30-60s.
+11. Upload to R2 → status = human_qa
+12. n8n P1 sync: status update visible in Sheet, preview URL populated
+13. Operator views, approves/rejects in Sheet
+14. n8n S3 (existing QA decision workflow) handles approve → delivered
+```
+
+**Cost per Simple Pipeline render:** ~$0.015-0.025 (vs ~$0.45-0.85 for Part B with revise loop). Cost-irrelevant for v1.
 
 **Rendering phase** (triggered by S2 workflow after worker approves):
 ```
@@ -325,11 +367,11 @@ API_PORT=3000
 | VPS (video-factory-01) | ~$8.50 | Hetzner CX32 (4 vCPU, 8GB RAM, 80GB SSD) |
 | n8n server | ~$4.50 | Hetzner (shared with other projects) |
 | Supabase | $0 | Free tier |
-| Upstash Redis | $0 | Free tier (500K cmds/month, using ~26K/day) |
+| Upstash Redis | ~$2-5 | Pay-as-you-go; 1.6M+ commands/day across multiple workers (1000 cmd/sec per-DB ceiling); see s8-retry-wait-too-short followup |
 | Cloudflare R2 | ~$0-1 | Free 10GB storage, zero egress |
 | Claude API (Sonnet) | ~$8 | ~150 videos/week × 2 Sonnet calls (CD + Copywriter); doubles during dual-run on shadow brands |
 | Gemini API (Phase 3.5 ingestion + clip analysis) | ~$0.60 | ~150 clips/week × $0.001 |
 | Gemini API (Part B agents on nordpilates dual-run) | ~$3-5 | ~10-20 nordpilates jobs/week × ~$0.55/run during Phase 1 calibration |
-| Gemini API (Simple Pipeline — both products) | ~$1-2 | Estimated ~50-80 simple pipeline videos/week × ~$0.025/video |
-| **Total (steady state, current)** | **~$22-26/month** | At ~150 videos/week through Phase 3.5 + nordpilates dual-run |
-| **Projected (post-Simple-Pipeline-ship, multi-brand)** | **~$25-32/month** | Adds Simple Pipeline at ~$0.025/video × 50-80 videos/week + ingestion compute for new brands |
+| Gemini API (Simple Pipeline — both products, post-v1.1) | ~$1-2 | Estimated ~50-80 simple pipeline videos/week × ~$0.015-0.025/video (verbatim default for meme reduces from earlier estimate) |
+| **Total (steady state, current)** | **~$25-32/month** | At ~150 videos/week through Phase 3.5 + nordpilates dual-run + Simple Pipeline ramp |
+| **Projected (post-Editor-agent + multi-brand active)** | **~$28-38/month** | Adds Editor agent at ~$0.01-0.02/video + ingestion compute for new brands (cyclediet, carnimeat, nodiet) |

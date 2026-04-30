@@ -1,8 +1,8 @@
 # Handoff to New Claude Chat
 
-**Drafted:** 2026-04-28 at session-19 close
-**Replaces:** prior `HANDOFF_TO_NEW_CHAT.md` from session-18 close
-**Next workstream:** Simple Pipeline implementation (two products: routine + meme)
+**Drafted:** 2026-04-29 at session-20 close
+**Replaces:** prior `HANDOFF_TO_NEW_CHAT.md` from session-19 close
+**Next workstream:** Editor agent (smart-trim at segment boundaries for Simple Pipeline)
 
 ---
 
@@ -11,21 +11,21 @@
 Read these in order before answering operator. Don't skip; the documents reference each other and the strategic shape requires the full picture.
 
 1. **This file** — orientation, current state, what's next, key context
-2. **`docs/MVP_PROGRESS_19.md`** — historical record of session 19 (Polish Sprint pause + S8 chore + Simple Pipeline pivot)
-3. **`docs/MVP_PROGRESS_18.md`** — prior session record (W11-collapse + Rule 43 promotion + Polish Sprint scoping)
-4. **`docs/briefs/SIMPLE_PIPELINE_BRIEF_v2.md`** — load-bearing technical artifact for the next workstream
-5. **`docs/CLAUDE.md`** — rules, especially Rule 43 (now 7 sightings); session 19 added two more
-6. **`docs/PHASE_4_PART_B_PIPELINE.md`** — pipeline architecture (now includes Simple Pipeline as parallel sibling)
-7. **`docs/followups.md`** — active and resolved followups (~23 active after session 19)
-8. **`docs/VPS-SERVERS.md`** — infra ground truth, includes simple_pipeline queue addition
-9. **`docs/INGESTION_NAMING.md`** — operator-facing naming convention reference (33 brand prefixes)
-10. **`docs/diagnostics/W9_CALIBRATION_RUN_DIAGNOSTIC.md`** — primary evidence for parked Polish Sprint Pillar 1 (referenced by but not active for Simple Pipeline)
+2. **`SIMPLE_PIPELINE.md`** (project root) — production reference for Simple Pipeline v1.0 + v1.1. Architecture, two-product distinction, operator workflow, schema, render path, hard constraints. Load-bearing for understanding what's currently deployed.
+3. **`docs/MVP_PROGRESS_20.md`** — historical record of session 20 (Simple Pipeline v1.0 build through three quality rounds, v1.1 cosmetic polish, three new Rule 43 sightings, abandoned S8 chore re-attempt)
+4. **`docs/MVP_PROGRESS_19.md`** — prior session record (Polish Sprint pause, S8 multi-brand chore, Simple Pipeline two-product pivot)
+5. **`docs/MVP_PROGRESS_18.md`** — earlier prior session record (W11-collapse, Rule 43 promotion to rule)
+6. **`docs/CLAUDE.md`** — project rules, especially Rule 43 (now 10 sightings)
+7. **`docs/PHASE_4_PART_B_PIPELINE.md`** — pipeline architecture; Simple Pipeline as parallel sibling with v1.0 + v1.1 noted as shipped
+8. **`docs/followups.md`** — active and resolved followups (~28 active after session 20)
+9. **`docs/VPS-SERVERS.md`** — infra ground truth, simple_pipeline queue active
+10. **`docs/INGESTION_NAMING.md`** — operator naming convention reference
 
 ---
 
 ## Current state in 5 sentences
 
-Polish Sprint Pillar 1 is parked at branch `feat/polish-sprint-pillar-1-critic-calibration`, HEAD `cebfc46`, 6 commits ahead of main, intentionally unmerged — pivoted away from mid-execution because business pressure forced shipping nordpilates videos this week instead of completing Critic calibration. The S8 multi-brand ingestion routing chore shipped successfully (main at `98d85b5` after followup merge), unblocking ingestion for 33 brand prefixes via filename routing through n8n. The next workstream is **Simple Pipeline implementation** — a parallel architecture serving two products (routine videos with 2-5 clips + meme/vibe videos with 1 clip) using a single Gemini Pro library-aware "Match-Or-Match" agent. Operator (Domis) is starting to ingest content for cyclediet / carnimeat / nodiet alongside existing nordpilates; Simple Pipeline goes live for nordpilates first, then per-brand as each crosses the readiness threshold (≥3 parents with ≥10 segments + brand_configs.aesthetic_description populated). Polish Sprint resumes after Simple Pipeline ships and operator content cadence stabilizes.
+Simple Pipeline v1.0 and v1.1 are both merged to main and deployed to VPS — the second production pipeline (alongside Phase 3.5 + Part B) is code-complete and architecturally sound, with the v1.0 graininess fix preserved and v1.1 cosmetic polish (logo + overlay sizing + N-line wrap) finalized. Polish Sprint Pillar 1 remains parked at branch `feat/polish-sprint-pillar-1-critic-calibration` HEAD `cebfc46`, intentionally unmerged, deferred until Editor agent ships and operator content cadence stabilizes. The next workstream is **Editor agent** — smart-trim at segment boundaries, operator-flagged as core to making routine videos shippable to TikTok at volume; without it, hard cuts at segment boundaries produce some imperfect renders that operator must discard. Production verification of Simple Pipeline is still pending — first end-to-end Sheet-driven production render not yet exercised, deliberately deferred until Editor agent ships so first TikTok uploads are at full intended quality. Multi-brand activation (cyclediet, carnimeat, nodiet) is operator-paced; nordpilates is the only brand with content + aesthetic_description ready for Simple Pipeline production.
 
 ---
 
@@ -34,157 +34,153 @@ Polish Sprint Pillar 1 is parked at branch `feat/polish-sprint-pillar-1-critic-c
 Run these queries before proposing anything substantive. Halt if anything diverges from expected.
 
 ```bash
-# 1. Git state — main at session-19-close, Polish Sprint parked
+# 1. Git state — main at session-20-close, Polish Sprint parked
 git fetch origin
 git checkout main
 git pull origin main
 git status   # clean
 git log --oneline -10
-# expected near top: 98d85b5 (followup merge), f4ae06c (S8 chore merge), recent c1-c6 of S8 chore
+# expected near top: v1.1 merge commit, v1.0 merge commit (cc973d0), recent docs touches
 
 git branch -v
 # expected: feat/polish-sprint-pillar-1-critic-calibration exists at cebfc46
 # (6 commits ahead of main, unmerged)
+# expected: feat/simple-pipeline and feat/simple-pipeline-v1-1 are DELETED from origin
 ```
 
 ```sql
 -- 2. brand_configs state
 SELECT brand_id,
-       config->>'aesthetic_description' AS aesthetic_description,
-       config->>'logo_r2_key' AS logo_r2_key
+       aesthetic_description IS NOT NULL AS has_aesthetic,
+       logo_r2_key IS NOT NULL AS has_logo
 FROM brand_configs
 ORDER BY brand_id;
 -- expected: 5 brand_configs rows (carnimeat, highdiet, ketoway, nodiet, nordpilates)
--- nordpilates likely has aesthetic_description; others likely don't yet
+-- nordpilates: has_aesthetic=true, has_logo=true
+-- others: has_aesthetic=false, has_logo varies
 
--- 3. Per-brand ingestion progress (operator may have started ingesting overnight)
+-- 3. Per-brand ingestion progress (operator may have started ingesting other brands)
 SELECT brand_id,
-       COUNT(DISTINCT parent_asset_id) FILTER (WHERE parent_asset_id IS NOT NULL) AS parents,
-       COUNT(*) AS segments
+       COUNT(DISTINCT parent_asset_id) AS distinct_parents,
+       COUNT(*) AS total_segments,
+       COUNT(*) FILTER (WHERE segment_v2 IS NOT NULL) AS v2_segments
 FROM asset_segments
 WHERE brand_id IN ('nordpilates', 'cyclediet', 'carnimeat', 'nodiet')
 GROUP BY brand_id;
--- expected: nordpilates ~1173 segments / ~30+ parents
--- cyclediet/carnimeat/nodiet variable; depends on operator overnight ingestion
+-- expected: nordpilates ~1174 segments, ~17 parents with ≥10 v2 segments
+-- cyclediet/nodiet 0; carnimeat 1 segment (test ingestion only)
 
--- 4. shadow_runs anchor rows still present
+-- 4. Simple Pipeline schema confirmed present
+SELECT to_regclass('simple_pipeline_render_history');
+-- expected: simple_pipeline_render_history table exists
+
+-- 5. Music tracks for nordpilates
+SELECT mood, COUNT(*) FROM music_tracks GROUP BY mood;
+-- expected: 15 tracks across 6 distinct moods (emotional, chill, hype, playful, aggressive, energetic)
+-- (no `active` column on music_tracks; readiness endpoint counts all rows)
+
+-- 6. shadow_runs anchor rows still present
 SELECT id, part_b_terminal_state, created_at FROM shadow_runs ORDER BY created_at ASC;
--- expected: cb87d32c (2026-04-26), ff67fc55 (2026-04-26), cf104600 (2026-04-27)
--- all failed_after_revise_budget
-
--- 5. jobs.pipeline_override clean
-SELECT COUNT(*) FROM jobs WHERE pipeline_override IS NOT NULL;
--- expected: 0
-
--- 6. Music tracks
-SELECT COUNT(*) FROM music_tracks WHERE active = true;
--- expected: handful of nordpilates-compatible tracks
+-- expected: cb87d32c, ff67fc55, cf104600 — all failed_after_revise_budget
 ```
 
 ```bash
 # 7. VPS service active
 ssh root@95.216.137.35 "systemctl status video-factory --no-pager | head -5"
-# expected: active (running) since 2026-04-28 08:37:40 UTC (S8 chore deploy)
+# expected: active (running) since recent v1.1 deploy
 
-# 8. PART_B_ROLLOUT_PERCENT confirmed
-ssh root@95.216.137.35 "grep PART_B_ROLLOUT_PERCENT /home/video-factory/.env"
-# expected: PART_B_ROLLOUT_PERCENT=100 (from W9 Phase 1 calibration)
+# 8. Simple Pipeline readiness endpoint live
+ssh root@95.216.137.35 "curl -s 'http://localhost:3000/simple-pipeline/check-readiness?brand_id=nordpilates'"
+# expected: {"ok":true}
+ssh root@95.216.137.35 "curl -s 'http://localhost:3000/simple-pipeline/check-readiness?brand_id=cyclediet'"
+# expected: {"ok":false,"reason":"missing_aesthetic_description"}
 ```
 
 If anything diverges from expected, surface it before proceeding. Don't relitigate parked work; just confirm current state.
 
 ---
 
-## Two products of Simple Pipeline (load-bearing distinction)
+## Why Editor agent is the next workstream
 
-The Simple Pipeline brief covers two distinct products, not one parameterized product. They share infrastructure but serve different creative intents.
+Simple Pipeline ships hard cuts at segment boundaries. Operator review during Round 3 of v1.0 surfaced (consistently across v1.0 and v1.1 renders): some segments have preparation footage at the start, ending mid-action, or 1-2 seconds of unhelpful content at boundaries. The Match-Or-Match agent picks valid segments, but their boundaries are determined at ingestion (Pass 1 segment analysis) — not at render time, and not against the specific creative intent of the current job.
 
-**Routine videos (Format=routine):**
-- Slot count 2-5 (operator picks via Sheet "Clips" column, default 3)
-- Anchored on one parent — agent picks parent first (cooldown of last 2 used per brand), then picks N segments within that parent
-- Overlay text style: instructive, brand-anchored, label-style ("5-min morning flow", "core routine that actually works")
-- Use case: workout routines, meditation sequences, multi-step demonstrations
+Operator-flagged as the highest-leverage remaining issue for routine videos specifically. Without it, the operator workflow is "over-generate ~6 idea seeds per actual target video, discard the 2-3 with bad boundaries." Editor agent would change that to "generate 3 idea seeds, ship 3 videos."
 
-**Meme/vibe videos (Format=meme):**
-- Slot count 1 (forced; Sheet "Clips" column shows 1 but is informational)
-- Single segment from any parent — agent picks best-fit segment from any parent (segment cooldown of last 2 used per brand)
-- Overlay text style: punchy, conversational, hook-style ("no thoughts just stretching", "POV: you actually moved today")
-- Use case: meme content, vibey juice videos, simple snackable moments
+**Open architectural questions for Editor agent kickoff Q&A** (this is the next chat's job):
 
-**Why two products:** operator-flagged that pure semantic search on segment descriptions won't work for meme idea seeds (which are often abstract, ironic, or oblique — "main character energy" doesn't map to any literal segment description). The agent stage handles this — it sees the library and reasons about vibe match, not just keyword match.
+1. **Agent vs heuristic.** Real Editor agent (Gemini Pro call ffprobing each picked segment, reasoning about visual content + cut boundaries, deciding tighter `start_s`/`end_s`) vs deterministic heuristic (drop first/last 0.3s of any segment >2s). Operator pre-flagged "real version" preference, but worth confirming after seeing v1.1 production-deployed since some scope may have shifted.
 
-**Why same infrastructure:** both products use:
-- Same BullMQ queue (`simple_pipeline`)
-- Same worker
-- Same orchestrator (with format branch)
-- Same Match-Or-Match agent (different output shapes based on Format input)
-- Same render path (ffmpeg)
-- Same music selector
-- Same logo / color grade / brand config logic
+2. **Latency budget per render.** Real Editor adds ~$0.01-0.02 + ~20s per render. Acceptable trade-off?
 
-**Why operator override of my single-product framing matters:** my initial Simple Pipeline brief had single-product framing (slot_count parameterized 1-5 of the same product). Operator pushback during Q&A reframed as two distinct products. This is a Rule 43 sighting — Q&A caught the architectural fork before brief was committed. Filed as sighting 7 in CLAUDE.md.
+3. **Scope.** Just incision cuts (refine boundaries on agent-picked segments)? Or also re-rank segments after seeing real footage? Or full creative judgment (overrule Match-Or-Match if footage doesn't match prompt intent)?
+
+4. **Where in orchestrator flow.** Between Match-Or-Match and Pass A? Or between Pass A and Pass B (after segment trim, before concat)?
+
+5. **Output schema.** `{segment_id, refined_start_s, refined_end_s, reasoning}` per picked segment? What if Editor wants to drop a segment entirely?
+
+6. **Failure handling.** If Editor call fails or returns invalid output, fall back to original Match-Or-Match boundaries (current behavior)?
+
+These are real product questions; deserve a fresh kickoff Q&A, not a tail-end addition to session 20.
 
 ---
 
-## Match-Or-Match agent — load-bearing module
+## Anti-patterns to avoid
 
-Single Gemini Pro call per render. Sees v2 segment descriptions for the brand (not raw videos). Picks segment(s) for the idea seed.
-
-For routine path: agent picks parent first (excluding last 2 used), then picks N segments within that parent ordered to flow naturally.
-
-For meme path: agent picks 1 segment from any parent (excluding last 2 segments used).
-
-Cost: ~$0.01-0.02 per call.
-
-The agent emits reasoning along with segment_ids. Reasoning gets stored for debugging when meme videos don't land. Don't strip reasoning from output schema; it's a future debugging surface.
-
-Operator-confirmed both paths use the agent (Q16 = b). My initial lean was code-only routine path with agent-only on meme path; operator overrode with consistency-over-selective-complexity reasoning. Cost is irrelevant for v1.
+- **Don't skip the verification queries.** Several state assumptions in the docs may have drifted between session-20 close and the new chat opening (operator may have ingested overnight, populated brand_configs for new brand, run a first production render, etc.).
+- **Don't tactically defend in-flight commits when operator surfaces strategic concerns.** Rule 43 has 10 sightings as evidence; this is well-established.
+- **Don't relitigate Simple Pipeline architecture.** It's deployed and working. Editor agent is the next layer; don't propose v2 of Simple Pipeline as scope for the new workstream.
+- **Don't paste large multi-line JSON into chat.** Session 20 had two failures on this (S8 chore re-attempt). Use a different transport: gist, paste-bin, scp to VPS, or minified single-line.
+- **Don't ship n8n workflow changes via JSON in repo without operator-side smoke testing.** Session 19's S8 chore lesson holds.
+- **Don't bundle Editor agent scope with Polish Sprint scope.** Polish Sprint stays parked. Editor agent is its own workstream against Simple Pipeline; doesn't touch advanced pipeline.
+- **Don't promise faster than 3 days for Editor agent.** Real Editor (agent-driven) is a new agent stage with its own prompts, cost, latency, schema, and Gate A bar. Treat as a real workstream, not a hotfix.
+- **Don't promise first Simple Pipeline TikTok upload faster than Editor + ~1 day operator integration.** Operator wants Editor before TikTok-volume usage.
 
 ---
 
-## What's parked, what's deferred
+## What's likely to come up in conversation
 
-**Parked (resumable when Simple Pipeline ships):**
-- Polish Sprint Pillar 1 at `cebfc46` — Critic stance-conditional + charter rewrite + Planner audit + harness scripts shipped; calibration seeds NOT YET RUN. Resumption picks up at c5: run the 4-seed calibration harness, write CALIBRATION_REPORT.md, write Tier 1 verification artifact.
-- Q1+Q2 from c4 close locked: production VPS path-A confirmed; calibration jobs left in `brief_review` post-termination (matches test-orchestrator T2 pattern).
+**"Is Simple Pipeline production-ready?"**
+Code-wise yes — merged, deployed, all Gate A passes done. Production-verified no — first Sheet-driven end-to-end render not yet exercised. Operator deliberately holding TikTok volume until Editor agent ships.
 
-**Deferred (not in scope of next workstream):**
-- Polish Sprint Pillars 2-6 (music expansion, text safe zones, logo wiring, body composition filter, transitions library)
-- W9.2 demo render bridge (waits for Polish Sprint completion)
-- W10 voice generation (waits for first-brand cutover)
-- W11 Director architecture rebuild (future-conditional only)
-- Body composition filter ingestion (Polish Sprint Pillar 5 territory)
-- Per-form text safe zones (Polish Sprint Pillar 3 territory)
-- Logo wiring on advanced pipeline (Polish Sprint Pillar 4 — Simple Pipeline ships its own logo independently)
+**"Why didn't operator just ship v1.1 to TikTok?"**
+Hard cuts at segment boundaries produce some imperfect renders. Operator's choice: ship Editor agent first, then start TikTok volume with full quality. Costs ~3 days; saves the credibility hit of bad-boundary renders going public.
 
-**Open followups requiring operator action:**
-- `pillar1-planner-overcommits-subject-consistency` — Domis fills [Domis review] judgment columns in Pillar 1 audit when Polish Sprint resumes
-- `s8-brand-configs-lazy-population` — operator activates brand_configs per brand on commit-to-ingest. Priority: nordpilates → cyclediet → carnimeat → nodiet
-- `simple-pipeline-parent-vs-subject-identity` — known limitation; operator-catchable at QA; future fix via filename-tag convention
+**"What about cyclediet/carnimeat/nodiet?"**
+Operator hasn't ingested for them yet. Ingestion is operator-paced. Once a brand has ≥3 parents with ≥10 v2-analyzed segments + populated aesthetic_description + ≥5 music tracks, Simple Pipeline auto-routes for it. No agent work needed for new brand activation beyond the standard per-brand draft-and-revise pattern documented in `SIMPLE_PIPELINE.md`.
+
+**"Should we re-attempt the S8 chore?"**
+Not via chat-paste. The followup stays open; pick up next time operator touches n8n web UI for unrelated work. Use scp or gist transport, not chat-paste.
+
+**"Should we resume Polish Sprint now?"**
+No. Editor agent first. Polish Sprint resumes when Simple Pipeline is in TikTok production at steady cadence and operator has time for the 4-8 week Polish Sprint timeline.
+
+**"What's the verbatim mode default doing?"**
+For meme renders, the operator's idea seed is used as overlay text directly (no Gemini paraphrase). Was a Round 3 fix because Gemini was paraphrasing already-meme-shaped seeds into instructor-voice. For routine renders, default is generate (Gemini produces the overlay from voice_guidelines + idea seed). Operator can override per job in the Sheet's Overlay Mode column.
 
 ---
 
-## Operator interaction patterns to watch for
+## Operator interaction patterns (preserved from prior handoffs, still active)
 
-These are operator behavior patterns observed across sessions 17-19. Honor them.
+These are operator behavior patterns observed across sessions 17-20. Honor them.
 
 **Strategic-shaped pushback during tactical work** (Rule 43 trigger):
 - "the video wasn't bad" / "success looks different to me than to you"
 - "maybe we should have chosen X then?"
 - "this might be our downfall"
 - "I don't think we should change our plan that much"
+- "no, doesn't fit" (during iteration review — strategic-shaped, not just tactical)
 
-When these appear, **pause tactical work, reframe from upstream surface, don't tactically defend.** Filed as Rule 43 in CLAUDE.md with 7 sightings as evidence.
+When these appear, **pause tactical work, reframe from upstream surface, don't tactically defend.** Filed as Rule 43 in CLAUDE.md with 10 sightings as evidence.
 
 **Decision signals:**
 - Short replies to multi-question Q&A — trust earned, decisions made, proceed
 - "I dont care" / "I dont think so" — stop optimizing this, move on
 - "explain simpler" — reset on jargon
-- "lets keep the original plan" — strategic preservation; proposed change may misframe the problem
+- "lets keep the original plan" — strategic preservation
 - Strategic pushback during tactical work — pause, reframe, do NOT defend
 
 **Brief drafting workflow:**
-1. Planning chat (you) drafts kickoff Q&A first (~10-12 questions)
+1. Planning chat (you) drafts kickoff Q&A first (~5-10 questions)
 2. Operator answers (often terse, often strategic-shaped)
 3. Planning chat drafts brief
 4. Operator reviews + filed at `docs/briefs/`
@@ -192,123 +188,62 @@ When these appear, **pause tactical work, reframe from upstream surface, don't t
 6. Operator relays to Claude Code agent (separate conversation, terminal-based execution)
 7. Agent executes through Gate A, reports back via operator relay
 8. Planning chat reviews + decides hold-or-merge
-9. Agent merges + deploys + reports
-10. Planning chat writes post-merge docs touch directive
-11. Agent commits, then move to next workstream
+9. Operator merges per GIT_WORKFLOW.md (operator action only — agent never merges to main)
+10. Operator deploys to VPS
+11. Planning chat writes post-merge docs touch directive
+12. Agent commits, then move to next workstream
 
 **Agent execution context:** Claude Code in operator's local terminal with full VPS SSH access + Supabase access + repo access. Operator copy-pastes between planning chat and Claude Code. Agent has no n8n write access — that's operator-side only.
 
-**Brief structure pattern that works:**
-```
-TL;DR
-Decisions locked from kickoff Q&A
-Scope (in/out)
-Pre-work
-[Implementation sections per pillar/component]
-Files (create/modify/don't-touch)
-Gate A tier design
-Hard constraints
-Non-goals
-Followups (open hooks)
-Commit sequence
-Rollback
-Prerequisites
-Success criterion
-```
+**Agent message format:** wrap relay-ready agent messages in start/end markers (`========== BEGIN AGENT MESSAGE ==========` / `========== END AGENT MESSAGE ==========`) so operator can clearly see what to copy.
+
+**Three-role split:**
+- Operator (Domis): tester, overseer, n8n workflow manager. Owns Sheet column setup, brand_configs population, R2 file uploads, n8n imports, merge to main, VPS deploy.
+- Planning chat (this conversation): planner. Drafts questions, briefs, agent kickoff messages.
+- Agent: executioner. Owns repo (except merges), commits, branches, code, tests, schema migrations, VPS service code.
 
 ---
 
-## Anti-patterns to avoid
+## Brand priority (unchanged from session 19)
 
-- **Don't tactically defend in-flight commits when operator surfaces strategic concerns.** Rule 43 has 7 sightings as evidence; this is well-established.
-- **Don't relitigate Polish Sprint Pillar 1 decisions.** Branch is parked; resumption picks up where it left off; don't re-scope Pillar 1 unless Simple Pipeline reveals it should change.
-- **Don't ship n8n workflow changes via JSON in repo without operator-side smoke testing.** S8 chore taught this lesson (3 configuration bugs only surfaced via end-to-end binary stream testing). Future briefs touching n8n workflow JSONs should require operator runs a real-file end-to-end test before Gate A closes.
-- **Don't bundle Simple Pipeline scope into Polish Sprint scope or vice versa.** They're separate workstreams in separate codepaths. Polish Sprint Pillar 4 (logo wiring on advanced pipeline) ≠ Simple Pipeline logo overlay. Polish Sprint Pillar 3 (text safe zones on advanced pipeline) ≠ Simple Pipeline overlay placement. Two separate concerns.
-- **Don't promise faster than 4-7 days for first Simple Pipeline nordpilates video.** Brief is 3-4 days agent work + Gate A + operator-side imports + per-brand population for additional brands. Timeline is operator-realistic.
-- **Don't promise faster than 6-10 weeks for first Part B advanced-pipeline video.** That requires Polish Sprint resumption + completion + W9.2 + cutover decision. Two pipelines on different timelines.
+Per operator-named priority:
 
----
-
-## What's likely to come up in conversation
-
-**"How do we ship videos for cyclediet/carnimeat/nodiet today?"**
-Answer: those brands need ingestion (operator drops content via S8) AND brand_configs.aesthetic_description populated AND ≥3 parents with ≥10 segments. Once those gates are met, Simple Pipeline can render for them. Per-brand operator action.
-
-**"Why didn't Polish Sprint just continue?"**
-Answer: business pressure for shippable content this week. Polish Sprint timeline was 4-8 weeks; that runway didn't fit. Simple Pipeline is the parallel architecture serving the timeline; Polish Sprint resumes after.
-
-**"Should we just delete the Polish Sprint branch?"**
-No. Branch parking is intentional. c1-c4 work is good (charter rewrite, stance-conditional thresholds, audit, harness scripts). Resumption is mechanical. Branch parks cleanly at `cebfc46`.
-
-**"Why two products in Simple Pipeline?"**
-Answer: routine videos and meme videos have different creative intents. Operator surfaced this fork during Q&A. Brief is structured to ship both from one infrastructure but with different orchestration paths. Q16 (b) — both paths use the agent, by operator override of my initial code-only-routine lean.
-
-**"Can the Simple Pipeline use multiple parents?"**
-v1: no, single-parent only for routine; cross-parent only for meme (one segment from any parent — no concatenation). Multi-parent routine cuts is a v2 followup if v1 output stales.
-
-**"What if cyclediet's library is sparse?"**
-Per-brand readiness check at S1 blocks routing to Simple Pipeline if brand has fewer than 3 parents with ≥10 segments OR no aesthetic_description. Sheet status shows reason. Operator ingests more content; readiness check passes; jobs route normally.
-
-**"Why ffmpeg instead of Remotion for Simple Pipeline?"**
-Advanced pipeline's render bridge (W9.2) is tangled — Remotion composition is hardwired to Phase 3.5 CopyPackage shape, prepareContextForRender is a null-safety stub. Simple Pipeline avoids that by using ffmpeg directly. Cleaner separation.
-
-**"What about subject identity (multiple files of same shoot)?"**
-Known limitation. Filed as `simple-pipeline-parent-vs-subject-identity`. v1 acceptance: operator-catchable at QA; ~$0.025 wasted per redundant render. Future fix: filename-based subject tagging via `<PREFIX>_<SUBJECT_TAG>_<description>` convention; not in v1 scope.
-
----
-
-## Conversation flow with operator
-
-After reading docs + running verifications, propose next steps in this shape:
-
-1. State your understanding of current state (Polish Sprint parked, S8 chore complete, Simple Pipeline next)
-2. Ask if anything has changed since session 19 close (operator may have ingested overnight; brand_configs may have been populated; etc.)
-3. Confirm Simple Pipeline brief is the load-bearing artifact and review key decisions
-4. Draft Simple Pipeline kickoff Q&A if any new questions emerge from current-state changes
-5. Wait for operator answers before drafting agent kickoff message
-
-Don't draft agent kickoff message before confirming current state + brief shape.
-
----
-
-## Brand priority for first-week ship
-
-Per operator-named priority (2026-04-28):
-
-1. **nordpilates** — already has library, brand_configs, music. Simple Pipeline ships first for this brand.
+1. **nordpilates** — has library (1174 segments, 17 parents ≥10 v2), aesthetic_description, logo, music. Simple Pipeline ready for production.
 2. **cyclediet** — operator-named priority for first multi-brand expansion. Description: menstrual helper diet and exercises.
 3. **carnimeat** — second multi-brand expansion. Description: carnivore diet and exercises.
 4. **nodiet** — third multi-brand expansion. Description: mediterranean diet.
 
-Other 28 brands: deferred. Activated on commit-to-ingest basis. No urgency.
+Other 28 brands: deferred. Activated on commit-to-ingest basis.
 
-For each priority brand, operator action sequence:
+For each priority brand, operator action sequence (per `SIMPLE_PIPELINE.md` Per-brand activation):
 1. Drop content via S8 (with correct prefix: `NP_`, `CL_`, `CM_`, `ND_`)
-2. Wait for ingestion to populate ≥3 parents with ≥10 segments (depends on file sizes; ~5-30 minutes per file via Gemini Pro Pass 2)
-3. Populate brand_configs row with aesthetic_description (operator-written, brand-voice)
-4. Test Simple Pipeline render (drop test idea seed in Sheet)
-5. Approve in QA flow → upload to TikTok / Reels / YouTube Shorts manually
+2. Wait for ingestion to populate ≥3 parents with ≥10 v2-analyzed segments
+3. Agent drafts starter aesthetic_description; operator revises
+4. Operator places logo at `brands/<brand_id>/logo.png` in R2
+5. Confirm music_tracks readiness (≥5 active across ≥2 moods)
+6. Test Simple Pipeline render
+7. Approve in QA flow → manual upload to TikTok / Reels / YouTube Shorts
 
 ---
 
 ## Cost trajectory (informational)
 
-Current monthly spend: ~$22-26/month (VPS + n8n + AI APIs + R2)
+Current monthly spend: ~$25-32/month projected post-Simple-Pipeline-ship.
 
-Post-Simple-Pipeline-ship projection: ~$25-32/month
-- Simple Pipeline at ~$0.025/video × 50-80 videos/week
-- Multi-brand ingestion compute (more files going through Pass 1 + Pass 2 Gemini analysis)
+Simple Pipeline cost: ~$0.015-0.025/video (down from ~$0.025 due to verbatim mode skipping Gemini call for memes).
 
-Anthropic API limit raised by operator on 2026-04-27. Current state: low-watch. Simple Pipeline doesn't use Sonnet (Gemini Pro only) so doesn't compound. Polish Sprint Pillar 1 c5 (calibration seeds) deferred behind pause; doesn't currently consume.
+Anthropic API limit: low-watch (raised by operator 2026-04-27, still sufficient for foreseeable workload). Simple Pipeline doesn't use Sonnet (Gemini Pro only) so doesn't compound.
+
+Editor agent will add ~$0.01-0.02 + ~20s per render if shipped as real-agent version. Cost-irrelevant for v1.
 
 ---
 
 ## Questions for operator at session start
 
-1. Has any brand library state changed overnight? (cyclediet/carnimeat/nodiet ingestion progress; brand_configs.aesthetic_description population; etc.)
-2. Is Polish Sprint resumption still post-Simple-Pipeline, or has priority shifted?
-3. Are there any new constraints on Simple Pipeline (cost, timeline, scope) that emerged after session 19 close?
-4. Is the Simple Pipeline brief at `docs/briefs/SIMPLE_PIPELINE_BRIEF_v2.md` still the canonical artifact, or has operator iterated on it?
+1. Has any brand library state changed since session-20 close? (cyclediet/carnimeat/nodiet ingestion progress; brand_configs.aesthetic_description population; etc.)
+2. Has a first end-to-end production Simple Pipeline render been exercised since deploy? If yes, any findings to surface before Editor agent kickoff?
+3. Is Editor agent still the next workstream, or has priority shifted (e.g., business pressure for Polish Sprint resumption, multi-brand expansion, advanced pipeline cutover)?
+4. Any new constraints on Editor agent scope (cost, latency, timeline) that emerged after session-20 close?
 
 Don't propose anything substantive until these answers land.
 
@@ -318,10 +253,10 @@ Don't propose anything substantive until these answers land.
 
 Read the docs in order. Run the verifications. Then ask operator the questions above.
 
-Once current state is confirmed + brief is canonical, the next step is drafting the agent kickoff message for Simple Pipeline implementation. Brief is fully scoped; agent should be able to start c1 immediately after kickoff lands.
+Once current state is confirmed, the next step is drafting the **Editor agent kickoff Q&A** — 6-8 questions covering agent-vs-heuristic shape, cost/latency budget, orchestrator placement, output schema, failure handling, and Gate A verification approach.
 
-Standard agent reporting format applies: terse table fill-in + commit SHAs + verification snippets + ending with "Merge to main and deploy, or hold?" Same pattern as W7/W8/W9/Polish-Sprint-Pillar-1.
+After Q&A answers land, Editor agent brief gets drafted, operator reviews, agent kickoff message goes out to Claude Code agent. Standard workflow from there.
 
 ---
 
-*Handoff doc drafted 2026-04-28 at session-19 close. Replaces session-18 version. Filed at `docs/HANDOFF_TO_NEW_CHAT.md`.*
+*Handoff doc drafted 2026-04-29 at session-20 close. Replaces session-19 version. Filed at `docs/HANDOFF_TO_NEW_CHAT.md`.*
