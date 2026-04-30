@@ -50,6 +50,16 @@ export interface SimplePipelineInput {
   format: SimplePipelineFormat;
   clipsMode: SimplePipelineClipsMode;
   overlayMode: SimplePipelineOverlayMode;
+  /**
+   * c5.5 per-job toggle. When true, the editor step is skipped on the
+   * routine path (yields the same shape as meme bypass — editor_invoked=false,
+   * empty refined map, zero cost/wall). Defaults to false.
+   *
+   * Used by the c6 Gate A baseline batch to render v1.1-shape outputs from
+   * the same feat-branch deployment that produced the with-Editor batch.
+   * Defensive post-merge — the toggle stays in production for ops use.
+   */
+  editorDisabled?: boolean;
 }
 
 export interface SimplePipelineResult {
@@ -78,6 +88,7 @@ export async function runSimplePipeline(
       format: input.format,
       clips_mode: input.clipsMode,
       overlay_mode: input.overlayMode,
+      editor_disabled: input.editorDisabled === true,
     });
 
     // 2. Read job row
@@ -128,11 +139,16 @@ export async function runSimplePipeline(
     //    failure. The refinedBoundsBySegmentId map is held here and threaded
     //    into renderSimplePipeline below — render consumes it via c5's
     //    optional RenderInput field.
+    //
+    //    editorDisabled (c5.5): per-job override. Routine + editorDisabled=true
+    //    yields the same shape as meme bypass (editor_invoked=false). Used
+    //    by c6 Gate A baseline batch.
     const editor = await runEditorStep({
       jobId: input.jobId,
       segmentIds: pick.segmentIds,
       ideaSeed,
       format: input.format,
+      editorDisabled: input.editorDisabled === true,
     });
 
     // 6. Fetch picked segment durations (sum for routine; single for meme)
@@ -219,6 +235,7 @@ export async function runSimplePipeline(
       agent_cost_usd: pick.costUsd,
       overlay_cost_usd: overlay.costUsd,
       editor_cost_usd: editor.outcome.editor_cost_usd,
+      editor_disabled: input.editorDisabled === true,
       total_cost_usd: totalCostUsd,
       wall_time_s: ((Date.now() - t0) / 1000).toFixed(1),
       editor_outcome: editor.outcome,

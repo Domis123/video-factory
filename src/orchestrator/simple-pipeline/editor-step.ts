@@ -63,6 +63,13 @@ export interface EditorStepInput {
   segmentIds: string[];
   ideaSeed: string;
   format: 'routine' | 'meme';
+  /**
+   * Per-job toggle (c5.5). When true, the routine path skips the Editor
+   * just like the meme path — used for the c6 Gate A baseline batch where
+   * we want with-Editor and v1.1-shape renders from the same deployed
+   * code. Default false; default OFF preserves c4 behavior.
+   */
+  editorDisabled?: boolean;
 }
 
 // ─── Public entry ─────────────────────────────────────────────────────────
@@ -72,6 +79,12 @@ export async function runEditorStep(input: EditorStepInput): Promise<EditorStepR
 
   // Meme bypass per brief Q4 — never invoke the editor.
   if (input.format === 'meme') {
+    return memeBypass(input.segmentIds, t0);
+  }
+
+  // c5.5 per-job disable toggle — same shape as meme bypass on routine.
+  if (input.editorDisabled === true) {
+    console.log(`[editor-step] jobId=${input.jobId} editorDisabled=true; bypassing editor (routine baseline mode)`);
     return memeBypass(input.segmentIds, t0);
   }
 
