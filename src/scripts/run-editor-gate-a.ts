@@ -121,13 +121,31 @@ async function verifyReadiness(): Promise<void> {
   console.log(`  ✓ ${BRAND_ID} ready for Simple Pipeline jobs`);
 }
 
-// ─── Step 3: insert + enqueue ─────────────────────────────────────────────
+// ─── Step 3: insert + enqueue (c5.8 hardening: per-pair atomicity + rollback) ──
 
-async function insertAndEnqueue(dryRun: boolean): Promise<PlannedJob[]> {
+interface InsertEnqueueOutcome {
+  planned: PlannedJob[];
+  insertFailures: number;
+  enqueueFailuresWithRollback: number;
+  /**
+   * Worst case: enqueue failed AND the post-failure DELETE rollback also
+   * failed. Resulting Postgres row is orphaned (status=pending, no BullMQ
+   * job). Operator-side cleanup needed if this is non-zero.
+   */
+  rollbackFailures: number;
+}
+
+async function insertAndEnqueue(
+  dryRun: boolean,
+  /**
+   * c5.8 synthetic-test hook. When set, the enqueue at this index throws a
+   * simulated error to exercise the rollback path. Has no effect in live
+   * runs (default undefined).
+   */
+  simulateEnqueueFailureAt?: number,
+): Promise<InsertEnqueueOutcome> {
   const planned: PlannedJob[] = [];
   for (const seed of IDEA_SEEDS) {
-    // The brief's Q8 contract has slot_count picked by the agent. Both
-    // variants run on routine path.
     for (const variant of ['with_editor', 'baseline'] as const) {
       const jobId = randomUUID();
       const editorDisabled = variant === 'baseline';
@@ -144,40 +162,87 @@ async function insertAndEnqueue(dryRun: boolean): Promise<PlannedJob[]> {
       );
     }
     console.log(`  [dry-run] WOULD ENQUEUE 12 BullMQ jobs to ${QUEUE_NAMES.simple_pipeline} queue`);
-    console.log(`  [dry-run] (deploy-needed: feat branch must be on VPS for the worker to pick up editorDisabled toggle)`);
-    return planned;
+    console.log(`  [dry-run] (insert+enqueue is per-pair with rollback on enqueue failure)`);
+    return { planned, insertFailures: 0, enqueueFailuresWithRollback: 0, rollbackFailures: 0 };
   }
 
-  // Live: insert all 12 rows then enqueue. Insert first so the worker can
-  // claim the row when BullMQ delivers the job.
-  const insertRows = planned.map((j) => ({
-    id: j.jobId,
-    brand_id: BRAND_ID,
-    idea_seed: j.seed,
-    status: 'simple_pipeline_pending' as const,
-    video_type: 'workout-demo',
-  }));
-  const { error: insErr } = await supabaseAdmin.from('jobs').insert(insertRows);
-  if (insErr) throw new Error(`jobs insert failed: ${insErr.message}`);
-  console.log(`  Inserted ${insertRows.length} jobs (status=simple_pipeline_pending)`);
-
+  // Live: insert + enqueue per-pair so a single Redis hiccup doesn't strand
+  // a Postgres row in simple_pipeline_pending with no BullMQ counterpart.
+  // Pre-c5.8 behavior was batch insert then sequential enqueue — vulnerable
+  // to partial-enqueue desync as observed in c6 attempts 1+2.
   const queue = createQueue(QUEUE_NAMES.simple_pipeline);
+  let insertFailures = 0;
+  let enqueueFailuresWithRollback = 0;
+  let rollbackFailures = 0;
+  let succeeded = 0;
+
   try {
-    for (const j of planned) {
-      await queue.add('gate-a-c6', {
-        jobId: j.jobId,
-        format: 'routine',
-        clipsMode: 'agent_picks',
-        overlayMode: 'generate',
-        editorDisabled: j.editorDisabled,
-      });
+    for (let idx = 0; idx < planned.length; idx++) {
+      const j = planned[idx];
+
+      // Step 3a: insert one row.
+      try {
+        const { error } = await supabaseAdmin.from('jobs').insert({
+          id: j.jobId,
+          brand_id: BRAND_ID,
+          idea_seed: j.seed,
+          status: 'simple_pipeline_pending' as const,
+          video_type: 'workout-demo',
+        });
+        if (error) throw new Error(error.message);
+      } catch (err) {
+        console.warn(
+          `  ⚠ insert failed for ${j.variant} ${j.jobId.slice(0, 8)}: ${(err as Error).message}; skipping enqueue`,
+        );
+        insertFailures++;
+        continue;
+      }
+
+      // Step 3b: enqueue. On failure, roll back the insert.
+      try {
+        if (simulateEnqueueFailureAt === idx) {
+          throw new Error('SIMULATED enqueue failure (c5.8 rollback test)');
+        }
+        await queue.add('gate-a-c6', {
+          jobId: j.jobId,
+          format: 'routine',
+          clipsMode: 'agent_picks',
+          overlayMode: 'generate',
+          editorDisabled: j.editorDisabled,
+        });
+        succeeded++;
+      } catch (enqErr) {
+        console.warn(
+          `  ⚠ enqueue failed for ${j.variant} ${j.jobId.slice(0, 8)}: ${(enqErr as Error).message}; rolling back insert`,
+        );
+        try {
+          const { error: delErr } = await supabaseAdmin
+            .from('jobs')
+            .delete()
+            .eq('id', j.jobId)
+            .eq('brand_id', BRAND_ID)
+            .eq('status', 'simple_pipeline_pending');
+          if (delErr) throw new Error(delErr.message);
+          console.log(`     ↩ rollback OK (deleted ${j.jobId.slice(0, 8)})`);
+          enqueueFailuresWithRollback++;
+        } catch (rbErr) {
+          console.error(
+            `     ❌ ROLLBACK FAILED for ${j.jobId.slice(0, 8)}: ${(rbErr as Error).message}. ` +
+              `Postgres row is orphaned (status=pending, no BullMQ). Manual cleanup needed.`,
+          );
+          rollbackFailures++;
+        }
+      }
     }
-    console.log(`  Enqueued ${planned.length} BullMQ jobs to ${QUEUE_NAMES.simple_pipeline}`);
+    console.log(
+      `  insert+enqueue done: succeeded=${succeeded} insertFails=${insertFailures} ` +
+        `enqueueFails(rolled-back)=${enqueueFailuresWithRollback} rollbackFails=${rollbackFailures}`,
+    );
   } finally {
     await queue.close();
   }
 
-  return planned;
+  return { planned, insertFailures, enqueueFailuresWithRollback, rollbackFailures };
 }
 
 // ─── Step 4: poll ──────────────────────────────────────────────────────────
@@ -317,7 +382,28 @@ async function main() {
   await verifyReadiness();
 
   console.log('\n── Step 3: insert + enqueue 12 jobs ──');
-  const planned = await insertAndEnqueue(dryRun);
+  const ieResult = await insertAndEnqueue(dryRun);
+  const planned = ieResult.planned;
+
+  // c5.8 halt: any insert/enqueue/rollback failure means we don't have a
+  // clean 12-job pair set. Stop before polling so we don't try to render
+  // against a partial-enqueue state and so the operator sees the failure
+  // shape immediately.
+  if (
+    !dryRun &&
+    (ieResult.insertFailures > 0 ||
+      ieResult.enqueueFailuresWithRollback > 0 ||
+      ieResult.rollbackFailures > 0)
+  ) {
+    console.error(
+      `\n❌ HALT before polling: insert/enqueue had failures ` +
+        `(insert=${ieResult.insertFailures}, enqueue-rolled-back=${ieResult.enqueueFailuresWithRollback}, ` +
+        `rollback-failed=${ieResult.rollbackFailures}). ` +
+        `Don't try to render a partial pair set. Investigate Redis/Postgres health, ` +
+        `clean any orphaned rows (rollback-failed count), then retry.`,
+    );
+    process.exit(1);
+  }
 
   if (dryRun) {
     console.log('\n── Step 4: poll (skipped in dry-run) ──');
