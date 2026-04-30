@@ -49,6 +49,13 @@ export interface RenderInput {
   overlayText: string;
   /** R2 key for the music track. */
   musicR2Key: string;
+  /**
+   * Optional refined boundaries from the editor agent (c4+). Map keyed by
+   * segment_id with refined start/end times in absolute parent seconds.
+   * Plumbed through in c4; consumed in c5. Absent or empty map ⇒ render
+   * uses the segment's original asset_segments.start_s/end_s as before.
+   */
+  refinedBoundsBySegmentId?: Map<string, { startS: number; endS: number; refined: boolean }>;
 }
 
 export interface RenderResult {
