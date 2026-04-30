@@ -16,3 +16,4 @@ music-tracks/
 # excluded.)
 docs/briefs/*
 !docs/briefs/SIMPLE_PIPELINE_BRIEF_v2.md
+!docs/briefs/editor-agent-brief.md
