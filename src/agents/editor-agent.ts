@@ -281,13 +281,17 @@ async function callGemini(
 // ─── Internal: prompt rendering ────────────────────────────────────────────
 
 function renderPrompt(input: EditorAgentInput): string {
+  // Field paths verified against production nordpilates v2 rows in c3
+  // spot-check: motion, audio, quality, editorial all present at v2 root.
+  // setting.on_screen_text is nested but always null in current data — we
+  // surface it defensively in case backfill populates it later.
   const v2 = input.segmentV2 ?? {};
   const motion = pickPath<unknown>(v2, ['motion']);
   const audio = pickPath<unknown>(v2, ['audio']);
-  const onScreenText = pickPath<unknown>(v2, ['on_screen_text']);
-  const recommendedIn = pickPath<number>(v2, ['recommended_in_point_s']);
-  const recommendedOut = pickPath<number>(v2, ['recommended_out_point_s']);
   const quality = pickPath<unknown>(v2, ['quality']);
+  const editorial = pickPath<unknown>(v2, ['editorial']);
+  const onScreenText = pickPath<unknown>(v2, ['setting', 'on_screen_text']);
+  const subjectPresent = pickPath<boolean>(v2, ['subject', 'present']);
 
   return PROMPT_TEMPLATE.replace(/\{segment_id\}/g, input.segmentId)
     .replace(/\{original_start_s\}/g, fmt(input.originalStartS))
@@ -298,20 +302,19 @@ function renderPrompt(input: EditorAgentInput): string {
     )
     .replace(/\{segment_type\}/g, input.segmentType)
     .replace(/\{description\}/g, input.description ?? '(none)')
-    .replace(/\{editor_use\}/g, input.editorUse ?? '(none)')
     .replace(/\{idea_seed\}/g, input.ideaSeed)
     .replace(/\{slot_role\}/g, input.slotRole)
     .replace(/\{motion_block\}/g, jsonOrNone(motion))
     .replace(/\{audio_block\}/g, jsonOrNone(audio))
-    .replace(/\{on_screen_text_block\}/g, jsonOrNone(onScreenText))
     .replace(/\{quality_block\}/g, jsonOrNone(quality))
+    .replace(/\{editorial_block\}/g, jsonOrNone(editorial))
     .replace(
-      /\{recommended_in_point_s\}/g,
-      typeof recommendedIn === 'number' ? fmt(recommendedIn) : '(none)',
+      /\{on_screen_text\}/g,
+      typeof onScreenText === 'string' ? onScreenText : '(none)',
     )
     .replace(
-      /\{recommended_out_point_s\}/g,
-      typeof recommendedOut === 'number' ? fmt(recommendedOut) : '(none)',
+      /\{subject_present\}/g,
+      typeof subjectPresent === 'boolean' ? String(subjectPresent) : '(unknown)',
     );
 }
 
