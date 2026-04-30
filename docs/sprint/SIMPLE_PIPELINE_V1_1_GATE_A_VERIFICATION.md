@@ -6,8 +6,10 @@
 **c2 (overlay) commit:** `d24b44d`
 **c4 (logo halve) commit:** `fbc5e08`
 **c5 (multi-line box padding) commit:** `645a990`
+**c6 (N-line wrap 1..5) commit:** `11aaf2a`
 **Initial run wall time:** 8.1 min
-**Iteration wall time:** ~7 min (4 renders)
+**Iteration 1 wall time:** ~7 min (4 renders)
+**Iteration 2 wall time:** ~7 min (3 renders)
 
 ---
 
@@ -146,3 +148,51 @@ Bypassing the worker (direct `renderSimplePipeline` call) since fixes are render
 ```
 
 (Iteration renders bypassed the worker — no jobs / job_events / render_history rows were created; only R2 keys to clean up.)
+
+---
+
+## Iteration retry 2 — c6 (N-line wrap, 2026-04-30)
+
+Iteration 1 review identified a Q4 spec gap: `iter-extreme` (132 chars) at 2 lines @ 29px (scaled-down floor) overflows horizontally and is too small to read. Original Q4 capped at 2 lines + scale-down; reality is some text needs 3-5 lines at base font to be readable AND fit width.
+
+c6 extends the wrap algorithm:
+
+  for lineCount = 1..5 at base 45px:
+    if longest line ≤ 36-char width threshold: ship at base font
+  if MAX_LINES (5) at base still doesn't fit → scale-down at MAX_LINES
+
+Prefers more lines at base font over scale-down (a 132-char overlay at 4 lines @ 45px reads cleanly; at 2 lines @ 29px it doesn't). Cap at 5 lines: a 5-line stack at 1.2× line height = ~270px on 1920 comp (~14% of vertical) — beyond that, overlay starts intruding on the content stage. If text doesn't fit at 5 lines + 30px floor, ships floor + console.warn (operator-visible signal that the seed is unreasonably long).
+
+`splitIntoNLines(text, n)` helper: target boundaries at `length × i / n` for i in 1..n-1; for each target find whitespace closest to position, subject to "after the previous chosen split" monotonicity. Bails early if a target lacks valid whitespace (single-giant-word case falls back to fewer lines + scale-down).
+
+c5 box-padding logic unchanged (works for any line count). c4 logo unchanged (orthogonal to overlay line count). Per-line drawtext / shadow / fontcolor / stroke from c2 unchanged.
+
+### 3-render iteration 2 verification
+
+Bypassing the worker (direct `renderSimplePipeline` call) since c6 is a render-only change. All 3 frames inspected.
+
+| # | Tag | Overlay text length | c6 layout | c2-era result (for compare) | Preview |
+|---|---|---|---|---|---|
+| 1 | iter2-bound | 77 chars | 3 lines @ 45px | 2 lines @ 39px (scaled) | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/293639ed-259f-41a4-8c6d-cf47e3a99f42-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260430%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260430T062301Z&X-Amz-Expires=86400&X-Amz-Signature=c0b2130426ecbbc51e56eb4b0bace3a7b7691feec1eec2b53f7bdac18dd31ca4&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+| 2 | iter2-3line | 109 chars | 4 lines @ 45px | 2 lines @ 29px (scaled, would overflow width) | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/e110da14-1c70-4fc2-b646-8b85e868565b-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260430%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260430T062436Z&X-Amz-Expires=86400&X-Amz-Signature=a35eac1886fbd7bcf6cdc5953ab3d4f52cf6449f43debe1cc857b90a7ef0894b&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+| 3 | iter2-extreme | 132 chars | 4 lines @ 45px | 2 lines @ 29px (scaled, overflowed width — Iteration 1 fail) | [link](https://c9a225a2af25661d5ef85c9bc76a9ec5.r2.cloudflarestorage.com/video-factory/rendered/nordpilates/2026-04/72b41812-ad22-4e7e-bc0f-584acb9e15bd-simple-pipeline.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=7484d6072a684a333345d20fb1c159b8%2F20260430%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260430T062527Z&X-Amz-Expires=86400&X-Amz-Signature=2baae8ba35e9ba359d807663f5c100a3c30729569bc0251638bd774a3ed9c349&X-Amz-SignedHeaders=host&x-amz-checksum-mode=ENABLED&x-id=GetObject) |
+
+### Iteration 2 findings (agent-side spot check)
+
+- iter2-bound (77c): 3 lines, all at 45px, all within ~80% width threshold with margin — algorithm correctly picks 3 (smallest count where all lines fit), doesn't over-line to 4. Visual confirms.
+- iter2-3line (109c): 4 lines, all at 45px, full readable size (no scale-down). Major improvement vs c2 (which was 2 lines @ 29px scaled).
+- iter2-extreme (132c): 4 lines, all at 45px, all fit horizontally with margin. Same input that failed Iteration 1 fits cleanly now.
+- Box adjacency / no inter-line darkening preserved across 3, 4 line counts (c5 dynamic padding holds for any N).
+- Logo at ~72px / centered / 78% top-edge anchor preserved (c4 unchanged).
+- No `overlay text overflows even at MAX_LINES` warnings logged — all 3 cases fit at base font.
+
+### Cleanup commands for iteration 2 renders (after operator review closes)
+
+```bash
+# 3 iteration 2 renders (R2 keys, manual delete)
+# rendered/nordpilates/2026-04/293639ed-259f-41a4-8c6d-cf47e3a99f42-simple-pipeline.mp4
+# rendered/nordpilates/2026-04/e110da14-1c70-4fc2-b646-8b85e868565b-simple-pipeline.mp4
+# rendered/nordpilates/2026-04/72b41812-ad22-4e7e-bc0f-584acb9e15bd-simple-pipeline.mp4
+```
+
+(Same as iteration 1 — bypassed worker, no Postgres rows to delete.)
