@@ -417,27 +417,87 @@ function buildOverlayCommand(opts: OverlayCommandOpts): FfCommand {
 }
 
 /**
- * v1.1 c2: plan overlay text layout — choose between 1 and 2 lines,
- * scale font down if needed.
+ * v1.1 c2 / c6: plan overlay text layout — choose between 1 and N lines
+ * (N up to MAX_LINES), scale font down if even MAX_LINES at base size
+ * doesn't fit.
  *
  * The width-fits-on-line check uses a char-count heuristic, not pixel
  * measurement. DejaVuSans-Bold averages ~0.55× font_size per char in
  * English text; the caller passes `maxCharsAtBaseFontSize` precomputed
  * for that ratio at the configured base size and 80%-of-width threshold.
  *
- * Algorithm:
- *   1. If text fits on one line at base size: 1 line at base size.
- *   2. Else split at the whitespace closest to mid-string.
- *      - If no whitespace exists (single very long word): single line,
- *        let scale-down handle width.
- *   3. Loop: while longest line still wouldn't fit at current font and
- *      we're above the floor: scale font size by 0.95 and re-check.
- *      The per-line char threshold scales linearly with font size.
+ * c6 algorithm (extends c2's 2-line cap to N up to 5):
+ *   1. For lineCount = 1 to MAX_LINES (5):
+ *      a. Split text into `lineCount` lines, balanced at whitespace
+ *         nearest each target boundary at length/lineCount intervals.
+ *      b. If splitIntoNLines couldn't produce that many lines (single
+ *         long word, etc.), skip and try smaller counts above this in
+ *         the loop — but this loop only goes up, so just continue.
+ *         The fallback at end handles unsplittable text.
+ *      c. If all lines fit at base font (longest ≤ maxCharsAtBaseFontSize):
+ *         return at base font with this count.
+ *   2. After exhausting 1..MAX_LINES: ship at MAX_LINES with the
+ *      scale-down loop applied. If even at the floor the longest line
+ *      overflows, ship the floor anyway and log a warning — operator-
+ *      visible signal that the seed is unreasonably long.
+ *
+ * Why prefer more lines over scale-down: a 132-char overlay at 4 lines
+ * @ base 45px is more readable than 2 lines @ 29px (where text overflows
+ * width AND is too small to read on a phone screen).
+ *
+ * Cap at 5 lines: a 5-line stack at 1.2× line height = 6× font_size tall.
+ * At 45px that's ~270px stack (~14% of 1920 comp). Beyond 5 the overlay
+ * dominates the upper half and starts intruding on the content stage.
  */
 interface OverlayLayout {
   lines: string[];
   fontSize: number;
 }
+
+const MAX_LINES = 5;
+
+function splitIntoNLines(text: string, n: number): string[] {
+  if (n <= 1) return [text];
+
+  // Target boundary positions: text.length × i / n for i in 1..n-1.
+  // For each, find the whitespace closest to the target position that
+  // sits AFTER the previous chosen split (so splits remain monotonically
+  // increasing). Bail if a target can't find any valid whitespace.
+  const splits: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const target = Math.floor((text.length * i) / n);
+    const minIdx = (splits.length > 0 ? splits[splits.length - 1] : -1) + 1;
+    let chosen = -1;
+    for (let offset = 0; offset < text.length; offset++) {
+      const left = target - offset;
+      if (left > minIdx && left < text.length && /\s/.test(text[left])) {
+        chosen = left;
+        break;
+      }
+      const right = target + offset;
+      if (right > minIdx && right < text.length && /\s/.test(text[right])) {
+        chosen = right;
+        break;
+      }
+    }
+    if (chosen < 0) {
+      // No splittable whitespace remaining; bail with whatever splits we have.
+      break;
+    }
+    splits.push(chosen);
+  }
+
+  // Slice text at the chosen splits.
+  const lines: string[] = [];
+  let start = 0;
+  for (const s of splits) {
+    lines.push(text.slice(start, s).trim());
+    start = s + 1;
+  }
+  lines.push(text.slice(start).trim());
+  return lines.filter((l) => l.length > 0);
+}
+
 function planOverlayLayout(
   text: string,
   baseFontSize: number,
@@ -446,33 +506,24 @@ function planOverlayLayout(
   maxCharsAtBaseFontSize: number,
 ): OverlayLayout {
   const trimmed = text.trim();
-  if (trimmed.length <= maxCharsAtBaseFontSize) {
-    return { lines: [trimmed], fontSize: baseFontSize };
+
+  // Try lineCount 1..MAX_LINES at base font; ship the smallest count
+  // whose longest line fits the per-line char threshold.
+  for (let n = 1; n <= MAX_LINES; n++) {
+    const candidate = splitIntoNLines(trimmed, n);
+    if (candidate.length < n) continue; // couldn't split into this many
+    const longest = Math.max(...candidate.map((l) => l.length));
+    if (longest <= maxCharsAtBaseFontSize) {
+      return { lines: candidate, fontSize: baseFontSize };
+    }
   }
 
-  // Find whitespace closest to mid-string for a balanced 2-line split.
-  let lines: string[];
-  const mid = Math.floor(trimmed.length / 2);
-  let splitIdx = -1;
-  for (let offset = 0; offset < trimmed.length; offset++) {
-    const left = mid - offset;
-    if (left > 0 && /\s/.test(trimmed[left])) { splitIdx = left; break; }
-    const right = mid + offset;
-    if (right < trimmed.length && /\s/.test(trimmed[right])) { splitIdx = right; break; }
-  }
-  if (splitIdx < 0) {
-    // No whitespace — single very long word. Render as 1 line; rely on
-    // scale-down to make it fit (or visually overflow if smaller than floor).
-    lines = [trimmed];
-  } else {
-    lines = [
-      trimmed.slice(0, splitIdx).trim(),
-      trimmed.slice(splitIdx + 1).trim(),
-    ];
-  }
+  // Even MAX_LINES at base size doesn't fit. Fall back: split into
+  // MAX_LINES (or as many as we can if text is unsplittable) and run
+  // the scale-down loop until the longest line fits or we hit the floor.
+  let lines = splitIntoNLines(trimmed, MAX_LINES);
+  if (lines.length === 0) lines = [trimmed]; // pathological
 
-  // Scale-down loop. Per-line char threshold grows as font shrinks
-  // (smaller font → more chars fit at the 80%-width threshold).
   let fontSize = baseFontSize;
   while (fontSize > fontSizeFloor) {
     const charsThisFont = Math.floor((maxCharsAtBaseFontSize * baseFontSize) / fontSize);
@@ -482,6 +533,19 @@ function planOverlayLayout(
     if (next === fontSize) break; // round stuck; bail
     fontSize = next;
   }
+
+  // If the longest line still overflows at the floor, log a warning —
+  // operator-visible signal that this overlay is unreasonably long.
+  const finalLongest = Math.max(...lines.map((l) => l.length));
+  const finalCharThreshold = Math.floor((maxCharsAtBaseFontSize * baseFontSize) / fontSize);
+  if (finalLongest > finalCharThreshold) {
+    console.warn(
+      `[render] overlay text overflows even at MAX_LINES=${MAX_LINES} and floor font=${fontSize}px ` +
+        `(longest line ${finalLongest} chars > ${finalCharThreshold} threshold). ` +
+        `Operator should consider shortening the seed.`,
+    );
+  }
+
   return { lines, fontSize };
 }
 
