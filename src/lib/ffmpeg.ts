@@ -25,13 +25,21 @@ export function buildTrimCommand(
   startSec: number,
   endSec: number,
 ): FfCommand {
+  // c1.2.1.5: -ss/-to AFTER -i (output-seek) gives frame-accurate cuts;
+  // -ss/-to BEFORE -i (input-seek) snaps to the nearest preceding keyframe
+  // and renders unwanted footage from the keyframe to the requested start.
+  // Symptom became visible at v1.2.1 trim levels: refined start at 5.2s
+  // with nearest keyframe at 0s rendered 0s..end instead of 5.2s..end.
+  // Output-seek decodes-and-discards up to the requested timestamp, then
+  // copies frames lossless. Cost: ~few hundred ms of decode work per
+  // segment. No re-encode of kept frames.
   return {
     command: 'ffmpeg',
     args: [
       '-y',
+      '-i', inputPath,
       '-ss', String(startSec),
       '-to', String(endSec),
-      '-i', inputPath,
       '-c', 'copy',
       '-avoid_negative_ts', 'make_zero',
       outputPath,
