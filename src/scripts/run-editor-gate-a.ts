@@ -44,13 +44,17 @@ import { checkSimplePipelineReadiness } from '../orchestrator/simple-pipeline/re
 
 const BRAND_ID = 'nordpilates';
 
+// v1.2.1 fresh seeds (replaces the original v1.2 c6 seeds 2026-05-01).
+// Mix is intentional per brief: 5 specific seeds testing M-O-M slot count
+// + same-parent redundancy + Editor pacing; seed #6 is feel-shaped and
+// tests the vague-seed handling section of the M-O-M v1.0.1 prompt.
 const IDEA_SEEDS: string[] = [
-  'morning glute activation routine',
-  'gentle hip openers for desk workers',
-  'core engagement basics — 4 movements that actually transfer',
-  'unwind your spine before bed',
-  'pilates that actually feels good in your body when you’re tired',
-  'slow controlled flow — no jumping no momentum just breath and intent',
+  'morning core flow for tight hips',
+  'pilates breathing reset',
+  'slow leg circles for stiff knees',
+  'gentle full body wakeup',
+  'posture correction for desk workers',
+  'pilates stretches that feel like rest',
 ];
 
 const RAW_DUMP_PATH = '/tmp/editor-gate-a-raw.json';
@@ -150,15 +154,25 @@ async function insertAndEnqueue(
   simulateEnqueueFailureAt?: number,
   /**
    * c5.9 partial-run cap. When set, only the first N seeds get queued
-   * (= 2N iterations). Used by --max-pairs verification to test that
-   * sleep spacing defeats the Upstash burst cap before running full c6.
+   * (= 2N iterations, or N iterations with noBaseline). Used by --max-pairs
+   * verification to test that sleep spacing defeats the Upstash burst cap
+   * before running full Gate A.
    */
   maxPairs?: number,
+  /**
+   * v1.2.1 single-arm flag. When true, only the with_editor variant is
+   * enqueued per seed (no v1.1-baseline arm). Used for operator-judgment
+   * Gate A reviews that compare against memory rather than strict A/B.
+   */
+  noBaseline?: boolean,
 ): Promise<InsertEnqueueOutcome> {
   const planned: PlannedJob[] = [];
   const seeds = maxPairs !== undefined ? IDEA_SEEDS.slice(0, maxPairs) : IDEA_SEEDS;
+  const variants = noBaseline
+    ? (['with_editor'] as const)
+    : (['with_editor', 'baseline'] as const);
   for (const seed of seeds) {
-    for (const variant of ['with_editor', 'baseline'] as const) {
+    for (const variant of variants) {
       const jobId = randomUUID();
       const editorDisabled = variant === 'baseline';
       planned.push({ jobId, seed, variant, editorDisabled });
@@ -166,15 +180,15 @@ async function insertAndEnqueue(
   }
 
   if (dryRun) {
-    console.log(`  [dry-run] WOULD INSERT 12 jobs (paired by seed):`);
+    console.log(`  [dry-run] WOULD INSERT ${planned.length} jobs:`);
     for (const job of planned) {
       console.log(
         `    ${job.variant.padEnd(12)} editor=${job.editorDisabled ? 'OFF' : 'ON '} ` +
           `jobId=${job.jobId.slice(0, 8)}...  seed="${job.seed.slice(0, 50)}${job.seed.length > 50 ? '...' : ''}"`,
       );
     }
-    console.log(`  [dry-run] WOULD ENQUEUE 12 BullMQ jobs to ${QUEUE_NAMES.simple_pipeline} queue`);
-    console.log(`  [dry-run] (insert+enqueue is per-pair with rollback on enqueue failure)`);
+    console.log(`  [dry-run] WOULD ENQUEUE ${planned.length} BullMQ jobs to ${QUEUE_NAMES.simple_pipeline} queue`);
+    console.log(`  [dry-run] (insert+enqueue per-pair with rollback on enqueue failure)`);
     return { planned, insertFailures: 0, enqueueFailuresWithRollback: 0, rollbackFailures: 0 };
   }
 
@@ -435,17 +449,24 @@ async function cleanupCanary(planned: PlannedJob[]): Promise<void> {
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
+  const noBaseline = process.argv.includes('--no-baseline');
   const maxPairs = parseMaxPairs();
   const verifyMode = maxPairs !== undefined;
+  const variantsPerSeed = noBaseline ? 1 : 2;
   const tag = dryRun
     ? 'DRY RUN'
     : verifyMode
-      ? `VERIFY (--max-pairs=${maxPairs})`
-      : 'LIVE';
+      ? `VERIFY (--max-pairs=${maxPairs}${noBaseline ? ', --no-baseline' : ''})`
+      : noBaseline
+        ? 'LIVE (--no-baseline, single-arm)'
+        : 'LIVE';
   console.log(`\n🎯 Editor agent Gate A trigger — ${tag}\n`);
   if (verifyMode) {
     console.log(`  Sleep between pairs: ${SLEEP_BETWEEN_PAIRS_MS}ms`);
     console.log(`  Will skip steps 4 (poll) and 5 (collect); cleanup after step 3`);
+  }
+  if (noBaseline) {
+    console.log(`  --no-baseline: only with_editor variant enqueued per seed (single-arm Gate A)`);
   }
 
   console.log('── Step 1: cooldown clear ──');
@@ -454,9 +475,11 @@ async function main() {
   console.log('\n── Step 2: readiness ──');
   await verifyReadiness();
 
-  const stepLabel = verifyMode ? `verify (${maxPairs * 2} jobs)` : '12 jobs';
+  const totalSeeds = maxPairs ?? IDEA_SEEDS.length;
+  const totalJobs = totalSeeds * variantsPerSeed;
+  const stepLabel = verifyMode ? `verify (${totalJobs} jobs)` : `${totalJobs} jobs`;
   console.log(`\n── Step 3: insert + enqueue ${stepLabel} ──`);
-  const ieResult = await insertAndEnqueue(dryRun, undefined, maxPairs);
+  const ieResult = await insertAndEnqueue(dryRun, undefined, maxPairs, noBaseline);
   const planned = ieResult.planned;
 
   // c5.8 halt: any insert/enqueue/rollback failure means we don't have a
@@ -495,16 +518,16 @@ async function main() {
 
   if (dryRun) {
     console.log('\n── Step 4: poll (skipped in dry-run) ──');
-    console.log(`  [dry-run] WOULD POLL jobs.status until all 12 reach terminal (human_qa or *_failed)`);
+    console.log(`  [dry-run] WOULD POLL jobs.status until all ${planned.length} reach terminal (human_qa or *_failed)`);
     console.log(`  [dry-run] poll interval=${POLL_INTERVAL_MS / 1000}s ceiling=${POLL_CEILING_MS / 60_000}min`);
 
     console.log('\n── Step 5: collect outcomes (skipped in dry-run) ──');
-    console.log(`  [dry-run] WOULD READ jobs + job_events, build CollectedJob[12], dump to ${RAW_DUMP_PATH}`);
+    console.log(`  [dry-run] WOULD READ jobs + job_events, build CollectedJob[${planned.length}], dump to ${RAW_DUMP_PATH}`);
 
+    const armTag = noBaseline ? 'with-Editor only (single-arm)' : 'with-Editor + baseline (paired)';
     console.log('\n── Dry-run summary ──');
-    console.log(`  Planned: ${planned.length} jobs (6 with-Editor + 6 baseline, paired by seed)`);
-    console.log(`  Cost projection (live): ~$0.30 agent calls + ~12-15 min VPS wall`);
-    console.log(`  Pre-deploy check: passed. Awaiting feat branch deploy to VPS.`);
+    console.log(`  Planned: ${planned.length} jobs — ${armTag}`);
+    console.log(`  Cost projection (live): ~$${(planned.length * 0.025).toFixed(2)} agent calls + ${planned.length * 2}-${planned.length * 2.5} min VPS wall`);
     return;
   }
 
