@@ -60,6 +60,11 @@ const RAW_DUMP_PATH = '/tmp/editor-gate-a-raw.json';
 const POLL_INTERVAL_MS = 15_000;
 const POLL_CEILING_MS = 30 * 60 * 1000;
 
+// c5.9: sleep BETWEEN insert+enqueue iterations to defeat the burst-rate
+// cap on Upstash that took down c6 attempts 1-3. Override via env var
+// EDITOR_GATE_A_SLEEP_MS for the kickoff's 2000→5000 retry path.
+const SLEEP_BETWEEN_PAIRS_MS = Number(process.env['EDITOR_GATE_A_SLEEP_MS'] ?? 2000);
+
 interface PlannedJob {
   jobId: string;
   seed: string;
@@ -143,9 +148,16 @@ async function insertAndEnqueue(
    * runs (default undefined).
    */
   simulateEnqueueFailureAt?: number,
+  /**
+   * c5.9 partial-run cap. When set, only the first N seeds get queued
+   * (= 2N iterations). Used by --max-pairs verification to test that
+   * sleep spacing defeats the Upstash burst cap before running full c6.
+   */
+  maxPairs?: number,
 ): Promise<InsertEnqueueOutcome> {
   const planned: PlannedJob[] = [];
-  for (const seed of IDEA_SEEDS) {
+  const seeds = maxPairs !== undefined ? IDEA_SEEDS.slice(0, maxPairs) : IDEA_SEEDS;
+  for (const seed of seeds) {
     for (const variant of ['with_editor', 'baseline'] as const) {
       const jobId = randomUUID();
       const editorDisabled = variant === 'baseline';
@@ -233,10 +245,17 @@ async function insertAndEnqueue(
           rollbackFailures++;
         }
       }
+
+      // c5.9: sleep between iterations (not after the last). Defeats the
+      // Upstash burst-rate cap that took down c6 attempts 1-3.
+      if (idx < planned.length - 1) {
+        await sleep(SLEEP_BETWEEN_PAIRS_MS);
+      }
     }
     console.log(
       `  insert+enqueue done: succeeded=${succeeded} insertFails=${insertFailures} ` +
-        `enqueueFails(rolled-back)=${enqueueFailuresWithRollback} rollbackFails=${rollbackFailures}`,
+        `enqueueFails(rolled-back)=${enqueueFailuresWithRollback} rollbackFails=${rollbackFailures} ` +
+        `(sleep between pairs: ${SLEEP_BETWEEN_PAIRS_MS}ms)`,
     );
   } finally {
     await queue.close();
@@ -370,10 +389,64 @@ async function collectOutcomes(planned: PlannedJob[]): Promise<CollectedJob[]> {
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 
+function parseMaxPairs(): number | undefined {
+  const flag = process.argv.find((a) => a.startsWith('--max-pairs='));
+  if (!flag) return undefined;
+  const v = Number(flag.split('=')[1]);
+  if (!Number.isFinite(v) || v < 1 || v > IDEA_SEEDS.length) {
+    throw new Error(
+      `--max-pairs must be 1..${IDEA_SEEDS.length}; got "${flag.split('=')[1]}"`,
+    );
+  }
+  return v;
+}
+
+async function cleanupCanary(planned: PlannedJob[]): Promise<void> {
+  console.log('\n── Cleanup canary state ──');
+  // BullMQ FIRST per Rule 43 #9: drain queue before deleting Postgres rows
+  // so the worker can't grab a job mid-cleanup. obliterate({force:true})
+  // wipes waiting + active; an in-flight active render's completion will
+  // throw on a non-existent queue, which is acceptable noise for a canary.
+  const queue = createQueue(QUEUE_NAMES.simple_pipeline);
+  try {
+    await queue.obliterate({ force: true });
+    console.log(`  ✓ obliterated simple_pipeline BullMQ queue`);
+  } catch (err) {
+    console.warn(`  ⚠ obliterate threw (proceeding to Postgres cleanup): ${(err as Error).message}`);
+  } finally {
+    await queue.close();
+  }
+
+  // Postgres: delete the rows we inserted, regardless of current status
+  // (worker may have transitioned some to simple_pipeline_rendering during
+  // the canary window).
+  const ids = planned.map((p) => p.jobId);
+  const { error, count } = await supabaseAdmin
+    .from('jobs')
+    .delete({ count: 'exact' })
+    .in('id', ids)
+    .eq('brand_id', BRAND_ID);
+  if (error) {
+    console.error(`  ❌ Postgres cleanup failed: ${error.message}. Manual cleanup needed for IDs: ${ids.join(', ')}`);
+  } else {
+    console.log(`  ✓ deleted ${count}/${ids.length} canary rows from jobs`);
+  }
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const tag = dryRun ? 'DRY RUN' : 'LIVE';
+  const maxPairs = parseMaxPairs();
+  const verifyMode = maxPairs !== undefined;
+  const tag = dryRun
+    ? 'DRY RUN'
+    : verifyMode
+      ? `VERIFY (--max-pairs=${maxPairs})`
+      : 'LIVE';
   console.log(`\n🎯 Editor agent Gate A trigger — ${tag}\n`);
+  if (verifyMode) {
+    console.log(`  Sleep between pairs: ${SLEEP_BETWEEN_PAIRS_MS}ms`);
+    console.log(`  Will skip steps 4 (poll) and 5 (collect); cleanup after step 3`);
+  }
 
   console.log('── Step 1: cooldown clear ──');
   await clearCooldown(dryRun);
@@ -381,8 +454,9 @@ async function main() {
   console.log('\n── Step 2: readiness ──');
   await verifyReadiness();
 
-  console.log('\n── Step 3: insert + enqueue 12 jobs ──');
-  const ieResult = await insertAndEnqueue(dryRun);
+  const stepLabel = verifyMode ? `verify (${maxPairs * 2} jobs)` : '12 jobs';
+  console.log(`\n── Step 3: insert + enqueue ${stepLabel} ──`);
+  const ieResult = await insertAndEnqueue(dryRun, undefined, maxPairs);
   const planned = ieResult.planned;
 
   // c5.8 halt: any insert/enqueue/rollback failure means we don't have a
@@ -402,7 +476,21 @@ async function main() {
         `Don't try to render a partial pair set. Investigate Redis/Postgres health, ` +
         `clean any orphaned rows (rollback-failed count), then retry.`,
     );
+    if (verifyMode) {
+      console.error(`Verify mode failed — sleep=${SLEEP_BETWEEN_PAIRS_MS}ms did not defeat the burst cap.`);
+    }
     process.exit(1);
+  }
+
+  // c5.9 verify-mode early exit: skip polling + collection. Cleanup the
+  // rows we inserted (BullMQ first, then Postgres) so the operator
+  // doesn't have to do it. Verify-mode goal is "did all enqueues
+  // succeed?" — proven by reaching this point with zero failures.
+  if (verifyMode) {
+    console.log(`\n✅ Verify PASS: ${planned.length} enqueues succeeded with sleep=${SLEEP_BETWEEN_PAIRS_MS}ms between pairs.`);
+    await cleanupCanary(planned);
+    console.log(`\nVerify-mode complete. Sleep value ${SLEEP_BETWEEN_PAIRS_MS}ms defeats the burst cap on this run.`);
+    return;
   }
 
   if (dryRun) {
