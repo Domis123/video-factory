@@ -9,9 +9,12 @@
 import {
   applyClamps,
   editorRefinementSchema,
+  renderContextFieldsSchema,
   validateEditorRefinement,
+  validateRenderContextFields,
   type ClampOutcome,
   type EditorRefinement,
+  type RenderContextFields,
 } from '../agents/editor-agent-schema.js';
 
 let passed = 0;
@@ -208,11 +211,70 @@ function testTaggedUnion() {
   }
 }
 
+function testRenderContextFields() {
+  console.log('\n── Render context fields (v1.2.1 input expansion) ──');
+
+  const valid: RenderContextFields = {
+    slotCountTotal: 4,
+    currentRenderDurationS: 28.5,
+    targetRenderDurationS: 30,
+  };
+  const parsed = validateRenderContextFields(valid);
+  assert(
+    'Valid render-context parses',
+    parsed.slotCountTotal === 4 &&
+      parsed.currentRenderDurationS === 28.5 &&
+      parsed.targetRenderDurationS === 30,
+  );
+
+  // Boundary: 1-slot meme bypass would not invoke Editor anyway, but the
+  // schema accepts slotCountTotal=1 since render-context fields apply to
+  // the routine path which has min=2; we keep the floor permissive here.
+  const oneSlot = renderContextFieldsSchema.safeParse({ ...valid, slotCountTotal: 1 });
+  assert('slotCountTotal=1 accepted', oneSlot.success);
+
+  // Reject zero / negative slots
+  const zeroSlot = renderContextFieldsSchema.safeParse({ ...valid, slotCountTotal: 0 });
+  assert('slotCountTotal=0 rejected', !zeroSlot.success);
+
+  // Reject non-integer slot count
+  const fracSlot = renderContextFieldsSchema.safeParse({ ...valid, slotCountTotal: 3.5 });
+  assert('non-integer slotCountTotal rejected', !fracSlot.success);
+
+  // Reject too many slots (sanity ceiling)
+  const tooMany = renderContextFieldsSchema.safeParse({ ...valid, slotCountTotal: 11 });
+  assert('slotCountTotal=11 rejected (ceiling=10)', !tooMany.success);
+
+  // Reject negative duration
+  const negDuration = renderContextFieldsSchema.safeParse({ ...valid, currentRenderDurationS: -1 });
+  assert('negative currentRenderDurationS rejected', !negDuration.success);
+
+  // Accept zero current duration (theoretical: M-O-M picked 0-length segments;
+  // shouldn't happen but the schema doesn't need to enforce it)
+  const zeroDur = renderContextFieldsSchema.safeParse({ ...valid, currentRenderDurationS: 0 });
+  assert('currentRenderDurationS=0 accepted', zeroDur.success);
+
+  // Reject zero target duration (target=0 makes no sense)
+  const zeroTarget = renderContextFieldsSchema.safeParse({ ...valid, targetRenderDurationS: 0 });
+  assert('targetRenderDurationS=0 rejected', !zeroTarget.success);
+
+  // Reject missing field
+  const missingField = { slotCountTotal: 4, currentRenderDurationS: 28.5 };
+  const missingResult = renderContextFieldsSchema.safeParse(missingField);
+  assert('missing targetRenderDurationS rejected', !missingResult.success);
+
+  // Reject wrong type
+  const wrongType = { ...valid, slotCountTotal: '4' };
+  const wrongTypeResult = renderContextFieldsSchema.safeParse(wrongType);
+  assert('string slotCountTotal rejected', !wrongTypeResult.success);
+}
+
 async function main() {
   console.log('🧪 editor-agent-schema unit tests\n');
   testSchema();
   testClamps();
   testTaggedUnion();
+  testRenderContextFields();
 
   console.log(`\n${'─'.repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed out of ${passed + failed} tests`);

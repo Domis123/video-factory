@@ -29,6 +29,36 @@ export function validateEditorRefinement(raw: unknown): EditorRefinement {
   return editorRefinementSchema.parse(raw);
 }
 
+// ─── Input render-context fields (v1.2.1) ──────────────────────────────────
+//
+// v1.2.1 expands the per-call Editor input with 3 render-level context
+// fields. Editor calls remain per-segment-isolated (Promise.all parallel
+// fan-out from the orchestrator); coordination across the N parallel calls
+// happens via these shared values, not via inter-call communication.
+//
+// Validated as a Zod schema for testability + a single source of truth on
+// the new field shape. NOT runtime-parsed inside refineSegmentBoundary
+// (per brief constraint: "no code path changes" — Editor runs the same
+// way it did in v1.2; just with more context). Caller-side correctness
+// is enforced by the TypeScript shape of the EditorAgentInput interface.
+//
+// Same Zod pattern as editorRefinementSchema above.
+
+export const renderContextFieldsSchema = z.object({
+  /** Total picked segments in this render (length of M-O-M's segmentIds). */
+  slotCountTotal: z.number().int().min(1).max(10),
+  /** Sum of all picked segments' (originalEndS - originalStartS) durations. */
+  currentRenderDurationS: z.number().min(0),
+  /** Soft target for the rendered video duration. Default 30. */
+  targetRenderDurationS: z.number().min(1),
+});
+
+export type RenderContextFields = z.infer<typeof renderContextFieldsSchema>;
+
+export function validateRenderContextFields(raw: unknown): RenderContextFields {
+  return renderContextFieldsSchema.parse(raw);
+}
+
 // ─── Clamp logic (post-Zod, pre-render) ────────────────────────────────────
 
 export const MIN_REFINED_DURATION_S = 1.5;
