@@ -59,6 +59,11 @@ async function offlinePhase() {
     keyframeGridR2Key: 'keyframe-grids/nordpilates/abc.jpg',
     ideaSeed: '5-min morning glute flow',
     slotRole: 'body',
+    // v1.2.1 render-context (synthetic values for offline test)
+    slotCountTotal: 4,
+    slotIndex: 1,
+    currentRenderDurationS: 32,
+    targetRenderDurationS: 30,
   };
 
   // Missing keyframe_grid_r2_key
@@ -119,6 +124,8 @@ async function onlinePhase() {
   const row = data[0] as Record<string, unknown>;
   const v2 = (row['segment_v2'] as Record<string, unknown>) ?? {};
 
+  const origDuration =
+    Number(row['end_s']) - Number(row['start_s']);
   const input: EditorAgentInput = {
     segmentId: row['id'] as string,
     originalStartS: Number(row['start_s']),
@@ -130,6 +137,11 @@ async function onlinePhase() {
     keyframeGridR2Key: row['keyframe_grid_r2_key'] as string,
     ideaSeed: '5-min morning routine to wake up your glutes',
     slotRole: 'body',
+    // v1.2.1 render-context (single-segment online smoke; pretend it's slot 1 of 4)
+    slotCountTotal: 4,
+    slotIndex: 1,
+    currentRenderDurationS: origDuration * 4, // approximate; this is just a smoke
+    targetRenderDurationS: 30,
   };
 
   console.log(

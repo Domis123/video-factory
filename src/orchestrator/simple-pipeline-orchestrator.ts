@@ -149,6 +149,9 @@ export async function runSimplePipeline(
       ideaSeed,
       format: input.format,
       editorDisabled: input.editorDisabled === true,
+      // v1.2.1: 30s soft target. ±5s acceptable. Editor uses this to decide
+      // whether to trim more aggressively past pure boundary-quality.
+      targetRenderDurationS: 30,
     });
 
     // 6. Fetch picked segment durations (sum for routine; single for meme)

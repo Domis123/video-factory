@@ -72,7 +72,14 @@ async function pickSegments(): Promise<PickedRow[]> {
   return picked;
 }
 
-function inputFromRow(row: PickedRow, slotRole: SlotRole): EditorAgentInput {
+function inputFromRow(
+  row: PickedRow,
+  slotRole: SlotRole,
+  slotIndex: number,
+  slotCountTotal: number,
+  currentRenderDurationS: number,
+  targetRenderDurationS: number,
+): EditorAgentInput {
   return {
     segmentId: row.id,
     originalStartS: Number(row.start_s),
@@ -84,6 +91,10 @@ function inputFromRow(row: PickedRow, slotRole: SlotRole): EditorAgentInput {
     keyframeGridR2Key: row.keyframe_grid_r2_key,
     ideaSeed: IDEA_SEED,
     slotRole,
+    slotCountTotal,
+    slotIndex,
+    currentRenderDurationS,
+    targetRenderDurationS,
   };
 }
 
@@ -113,8 +124,22 @@ async function main() {
   console.log(`\n  Picked ${rows.length} segments across types: ${rows.map((r) => r.segment_type).join(', ')}\n`);
 
   // Build inputs with synthesized slot_role assignments (hook for first,
-  // close for last, body otherwise).
-  const inputs = rows.map((row, i) => inputFromRow(row, pickSlotRole(i, rows.length)));
+  // close for last, body otherwise) and v1.2.1 render-context.
+  const totalDurationS = rows.reduce(
+    (acc, r) => acc + (Number(r.end_s) - Number(r.start_s)),
+    0,
+  );
+  const targetDurationS = 30;
+  const inputs = rows.map((row, i) =>
+    inputFromRow(
+      row,
+      pickSlotRole(i, rows.length),
+      i,
+      rows.length,
+      totalDurationS,
+      targetDurationS,
+    ),
+  );
 
   // Run in parallel — mirrors orchestrator Promise.all.
   console.log('  Calling refineSegmentBoundary in parallel...\n');

@@ -70,7 +70,19 @@ export interface EditorStepInput {
    * code. Default false; default OFF preserves c4 behavior.
    */
   editorDisabled?: boolean;
+  /**
+   * v1.2.1 render-context fields. Optional with sensible defaults so the
+   * orchestrator (or any caller) can wire them gradually.
+   *
+   * - targetRenderDurationS: soft target render duration. Default 30s.
+   *
+   * currentRenderDurationS is computed from the picked segments' fetched
+   * start_s/end_s; not passed in.
+   */
+  targetRenderDurationS?: number;
 }
+
+const DEFAULT_TARGET_RENDER_DURATION_S = 30;
 
 // ─── Public entry ─────────────────────────────────────────────────────────
 
@@ -94,6 +106,17 @@ export async function runEditorStep(input: EditorStepInput): Promise<EditorStepR
 
   const rows = await fetchSegmentsForEditor(input.segmentIds);
 
+  // v1.2.1 render-context: sum of all original durations for the render.
+  // All Editor calls in this run see the same value — coordination on
+  // global pacing without per-call communication.
+  let currentRenderDurationS = 0;
+  for (const id of input.segmentIds) {
+    const row = rows.get(id);
+    if (row) currentRenderDurationS += row.endS - row.startS;
+  }
+  const targetRenderDurationS =
+    input.targetRenderDurationS ?? DEFAULT_TARGET_RENDER_DURATION_S;
+
   // Build inputs in segment_id order, assigning slot roles by position.
   const inputs: EditorAgentInput[] = input.segmentIds.map((id, idx) => {
     const row = rows.get(id);
@@ -113,6 +136,11 @@ export async function runEditorStep(input: EditorStepInput): Promise<EditorStepR
       keyframeGridR2Key: row.keyframeGridR2Key,
       ideaSeed: input.ideaSeed,
       slotRole: pickSlotRole(idx, input.segmentIds.length),
+      // v1.2.1 render-context (same values for all parallel calls)
+      slotCountTotal: input.segmentIds.length,
+      slotIndex: idx,
+      currentRenderDurationS,
+      targetRenderDurationS,
     };
   });
 

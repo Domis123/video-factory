@@ -58,6 +58,20 @@ export interface EditorAgentInput {
   ideaSeed: string;
   /** Where this segment sits in the routine. */
   slotRole: SlotRole;
+  /**
+   * v1.2.1 render-context fields. All Editor calls in one render receive
+   * the same values; this is how per-segment-isolated parallel calls
+   * coordinate on render-level pacing without inter-call communication.
+   * See editor-agent-schema.ts renderContextFieldsSchema.
+   */
+  /** Total picked segments in this render. */
+  slotCountTotal: number;
+  /** This segment's position within the render (0-indexed). */
+  slotIndex: number;
+  /** Sum of all picked segments' (originalEndS - originalStartS). */
+  currentRenderDurationS: number;
+  /** Soft target render duration. Default 30s, ±5s acceptable. */
+  targetRenderDurationS: number;
 }
 
 export type EditorAgentOutcome =
@@ -315,6 +329,17 @@ function renderPrompt(input: EditorAgentInput): string {
     .replace(
       /\{subject_present\}/g,
       typeof subjectPresent === 'boolean' ? String(subjectPresent) : '(unknown)',
+    )
+    // v1.2.1 render-context placeholders
+    .replace(/\{slot_index\}/g, String(input.slotIndex))
+    .replace(/\{slot_count_total\}/g, String(input.slotCountTotal))
+    .replace(
+      /\{current_render_duration_s\}/g,
+      fmt(input.currentRenderDurationS),
+    )
+    .replace(
+      /\{target_render_duration_s\}/g,
+      fmt(input.targetRenderDurationS),
     );
 }
 
