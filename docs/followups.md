@@ -6,6 +6,16 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
+## mom-v1.0.2-end-to-end-6-slot-coverage-gap — Active
+
+**Discovered:** 2026-05-03, v1.2.2 + v1.0.2 Gate A — job `d4d6f0a4-4bb5-47ae-8fb5-9b7eec642c70` ("pilates stretches that feel like rest") failed at render-time bounds check after M-O-M v1.0.2 vague-branch correctly produced 6 segments and Editor v1.2.2 refined all 6 cleanly.
+**Pattern:** No automated test exercises the full Simple Pipeline routine flow at `slot_count = 6`. The bug (`src/orchestrator/simple-pipeline/render.ts:114` hardcoded `> 5` cap, fixed in c4 errata `8a21f7d`) surfaced at production Gate A on the one specific seed that triggered the new code path. The brief §3 single-gate justification claim — *"every consumer reads `segment_ids.length` and iterates; no hard-coded 5-cap should exist downstream"* — was asserted in the brief but not actually grepped at brief drafting time. Cost of late discovery: $0.0346 of Editor refinement work discarded + ~7.5 min job processing + 1 manual operator-rerun cycle.
+**Workable today:** c4 errata fixed the immediate bug. Subsequent v1.0.2 vague-branch renders at `slot_count=6` should pass cleanly. Post-failure grep audit confirmed `render.ts:114` was the only such guard — no other downstream consumer has a hardcoded routine cap.
+**Long-term fix:** add a slot-count-axis Gate A pre-flight pattern. Before any future routine prompt iteration that changes the slot-count distribution, run 1 standalone render exercising the new max slot count end-to-end (M-O-M → Editor → render → `human_qa`) BEFORE filing the brief. Same shape as Rule 47's per-segment standalone verification template, applied at the slot-count axis. ~$0.05 + ~3 min cost; would have caught this at brief drafting rather than at production Gate A. Also: any future schema cap loosening on `match-or-match-agent.ts` should be paired with a `grep -rn` audit of the changed bound across `src/orchestrator/`, `src/lib/`, and `src/agents/` — assertion in the brief is not the same as a verified scan.
+**Owner:** any future routine prompt iteration that touches slot count distribution. v1.0.3+ briefs should include the slot-count-axis pre-flight in the workstream sequence.
+
+---
+
 ## simple-pipeline-routine-prompt-iteration — Active (post-v1.1)
 
 **Discovered:** 2026-04-29, c10 / Round 2 / Round 3 Gate A reviews.
