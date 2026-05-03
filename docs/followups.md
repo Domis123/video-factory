@@ -58,18 +58,156 @@ New entries go at the top. Resolved entries can be moved to a "Resolved" section
 
 ---
 
-## simple-pipeline-editor-agent-workstream — Active (HEADLINE NEXT WORKSTREAM)
+## editor-v1.2.2-prompt-retune — Active (HEADLINE NEXT WORKSTREAM)
 
-**Discovered:** 2026-04-28, Simple Pipeline c10 visual review (operator flagged "we should go real version" for incision-cut capability)
-**Pattern:** Match-Or-Match picks valid segments, but their `start_s`/`end_s` boundaries are determined at ingestion (Pass 1 segment analysis) without knowledge of the specific creative intent of the rendering job. Result: some renders have preparation footage at start, ending mid-action, or 1-2 seconds of unhelpful content at boundaries. Hard cuts produce visible-but-imperfect edits.
-**Operator-flagged as core to TikTok-volume usage.** Without it, hard cuts at picked boundaries produce some unshippable renders; operator over-generates ~6 idea seeds per actual target video and discards 2-3.
-**Architectural shape (decisions for kickoff Q&A in next planning chat):**
-- Real Editor agent (Gemini Pro call ffprobing each picked segment, refining boundaries) vs deterministic heuristic (drop first/last 0.3s of segments >2s)
-- Latency budget per render (~$0.01-0.02 + ~20s for real-agent version)
-- Scope: just incision cuts, or also re-rank segments, or full creative judgment
-- Where in orchestrator flow Editor sits
-- Output schema, failure handling
-**Owner:** next planning chat — drafts kickoff Q&A, brief, agent kickoff
+**Discovered:** 2026-05-03, c1.2.1.6 Gate A operator visual review.
+**Pattern:** Editor v1.2.1's pacing-aware prompts were tuned against keyframe-snap-padded outputs (the buildTrimCommand bug masked Editor's actual trim — refined boundaries weren't reaching ffmpeg). With c1.2.1.5 + c1.2.1.6 fix landed, refinements now apply correctly. The same v1.2.1 prompt that read appropriately-aggressive against broken trim now over-trims by ~10s on average; 5/6 c1.2.1.6 Gate A renders fell BELOW the 25s target floor (range 15.6-22.4s).
+**Trigger:** operator visual review at c1.2.1.6 reads "moving in right direction, 3/6 solid" but operator wants 4/6 uploadable bar before first TikTok upload. Re-tune prompt to anchor on target=30s soft + tighter under-band protection. Some seeds still need gentler cuts; the v1.2.1 prompt's pacing-tight band logic should fire only on real overshoots, not on segments where Editor is too eager.
+**Workable today:** operator over-generates ~6 idea seeds per target video, discards 2-3 below-band ones. Editor still does useful work; just needs prompt re-tune to stop over-trimming.
+**Long-term fix:** v1.2.2 prompt iteration. Anchor pacing decisions on overshoot magnitude, not on per-segment "this hold could be shorter" judgment. Re-validate with the 6 fresh seeds from v1.2.1 Gate A; mechanical bar threshold remains [25, 35]s; visual bar threshold remains 4/6 uploadable.
+**Owner:** next planning chat — drafts v1.2.2 prompt diff brief.
+
+---
+
+## mom-v1.0.2-seed-vagueness-aware-slot-count — Active (HEADLINE NEXT WORKSTREAM)
+
+**Discovered:** 2026-05-03, c1.2.1.6 Gate A operator visual review.
+**Pattern:** M-O-M v1.0.1 biases all routine seeds toward 4-5 slots. Operator note: vague/feel seeds (morning flow, full body wakeup) benefit from MORE clips (5-7 short, fast cuts to convey breadth without dwelling); concrete seeds (back workout, glute activation) benefit from FEWER (3-4, sustained holds to convey instruction). Current slot-count distribution converges on 4 across all seed shapes.
+**Long-term fix:** v1.0.2 prompt iteration. Add seed-type classification step (vague/feel-shaped vs concrete/exercise-shaped) + scaled slot count target. Concrete seeds: 3-4. Vague seeds: 4-5 (current default). Re-validate with the 6 fresh seeds + 2 concrete additions to the standard test set.
+**Workable today:** operator picks idea seeds knowing the 4-slot tendency.
+**Owner:** next planning chat — likely combined with editor-v1.2.2-prompt-retune as a coordinated workstream (same Gate A retry cycle).
+
+---
+
+## editor-mom-context-expansion — Active (Future, design pending)
+
+**Discovered:** 2026-05-03, c1.2.1.6 Gate A operator visual review.
+**Pattern:** Operator suggested both agents could benefit from richer cross-context — Editor seeing M-O-M's reasoning (why each segment was picked, what the overall narrative arc the routine should hit), M-O-M seeing typical Editor trim patterns (so M-O-M can pick segments knowing what the Editor will trim). Currently both agents operate in mutual blindness.
+**Cost room:** current Editor calls are ~$0.018 total per render across 4-5 parallel calls; doubling to ~$0.036 still well under $1/video ceiling. Adding a single additional Gemini context-passing call between M-O-M and Editor: ~$0.005 more.
+**Long-term fix:** workstream concept; design pending. Open architectural questions: does M-O-M emit a structured "narrative arc" alongside segment_ids? Does Editor emit a "trim signature" the next M-O-M run can read? Is this a separate context-prep agent or just expanded fields in existing agents?
+**Trigger:** revisit when v1.2.2 + v1.0.2 prompt iterations stabilize; if they hit a ceiling, this is the next layer.
+**Owner:** future planning chat when triggered.
+
+---
+
+## per-segment-editor-observability-missing-from-job-events — Active (instrumentation gap)
+
+**Discovered:** 2026-05-02, render-path bug debugging in session 21.
+**Pattern:** Editor's per-segment refined bounds are NOT logged in `job_events.details.editor_outcome`. Only aggregate counts (segments_refined, segments_no_change, segments_fallback) and aggregate cost/wall are persisted. To debug why a render's duration didn't match expectation in session 21, agent had to re-read the worker code to understand what happened to the refined bounds — which surfaced the buildTrimCommand bug, but only after ~6 hours of layer-tracing.
+**Long-term fix:** add per-segment refined_start_s / refined_end_s / clamp_outcomes to `editor_outcome.segments[]` in the orchestrator's emit logic. Schema-additive; existing readers ignore unknown fields. Cost: a few extra KB per `job_events` row, negligible.
+**Workable today:** agents reading worker code as needed; not blocking but a real friction point at debug time.
+**Owner:** small instrumentation chore; could ship as a single-gate per Rule 42 if scoped to schema-additive observability emit only.
+
+---
+
+## mom-same-parent-on-feel-shaped-seeds — Active (low priority, tension between two M-O-M directives)
+
+**Discovered:** 2026-05-03, c1.2.1.6 Gate A render #6 ("pilates stretches that feel like rest").
+**Pattern:** M-O-M v1.0.1 has two directives that can conflict on feel-shaped seeds:
+1. **Same-parent redundancy avoidance:** "do not pick 3+ adjacent segments from the same parent."
+2. **Vague-seed handling:** "for feel-shaped seeds, prefer tonal coherence over variety; pick segments that share a feel even if from one parent."
+On render #6, the model picked 4 holds from parent `57c46b4a` at indices [8,9,10,18] — adjacency run of 3, in violation of (1) but consistent with (2)'s tonal coherence directive.
+**Long-term fix:** add explicit precedence in the v1.0.2 prompt iteration. Either (1) overrides (2) ("redundancy avoidance is hard; tonal coherence is preferred but not at the cost of 3+ adjacent picks"), or (2) overrides (1) on feel-shaped seeds ("feel-shape is rare and this is one of the cases where tonal coherence is worth a redundancy hit"). Operator's call.
+**Workable today:** infrequent; surfaced once in 6 c1.2.1.6 Gate A renders.
+**Owner:** combined with `mom-v1.0.2-seed-vagueness-aware-slot-count` workstream.
+
+---
+
+## first-tiktok-upload-readiness-bar — Active (gating workstream trigger)
+
+**Discovered:** 2026-05-03, c1.2.1.6 Gate A operator visual review.
+**Pattern:** Operator stated session 21 output is "1-2 sessions from uploadable" against the 4/6 uploadable threshold. Editor v1.2.2 + M-O-M v1.0.2 are the next iteration to push toward that bar. After v1.2.2 lands and operator confirms 4/6 uploadable on a fresh Gate A, this followup resolves and the first-TikTok-upload workstream begins.
+**Resolution criteria:** ≥4/6 renders rated "uploadable to TikTok" by operator on a Gate A retry post-v1.2.2 + v1.0.2 ship.
+**Owner:** operator (resolution gate); planning chat (workstream trigger).
+
+---
+
+## upstash-burst-enqueue-rate-investigation — Active (research, not blocking)
+
+**Discovered:** 2026-05-01, session 21 c6 attempts × 3 misdiagnosis loop.
+**Pattern:** Upstash's third internal cap mechanism (burst-rate on tight enqueue loops, NOT visible in dashboard) is documented in CLAUDE.md Rule 44 + VPS-SERVERS.md. Workaround in place (sleep pacing in `run-editor-gate-a.ts`). Underlying mechanism still not authoritatively confirmed.
+**Action:** open Upstash support ticket with: dashboard screenshot showing 1.7M / Unlimited usage, error string verbatim (`ERR max requests limit exceeded — Limit: 500000, Usage: 500001`), redis_version 8.2.0, Eco deprecation banner. Get authoritative answer on what the third cap mechanism actually is, whether it can be disabled or raised on a paid tier, and confirm the workaround is canonical.
+**Workable today:** sleep pacing defends against it in trigger scripts; n8n S1 cadence avoids it naturally.
+**Owner:** operator (Upstash ticket-side); agent (followup if response indicates code change needed).
+
+---
+
+## bullmq-stale-connection-pool-restart-pattern — Active (instrumentation, low priority)
+
+**Discovered:** 2026-05-01, session 21 c6 attempt #2 worker non-consumption.
+**Pattern:** BullMQ Redis connection pool can survive `systemctl restart video-factory` in some failure modes (the cap-fire event is one observed case). Soft restart reuses pool state; the new process inherits the stuck pool. Hard sequence (`stop` + sleep 10s + `start`) clears it. Documented in VPS-SERVERS.md "Worker stuck-state and hard-restart procedure" (session 21 close).
+**Long-term fix:** investigation of the underlying class — does ioredis hold a process-external lock? Is there a systemd PostExecStop hook that should explicitly close Redis connections? Could the worker boot path detect stuck pool state and self-restart?
+**Trigger:** if cap-fire events recur in production; otherwise operational note suffices.
+**Owner:** future-followup; not blocking.
+
+---
+
+## production-enqueue-atomicity-postgres-bullmq-desync — Active (production gap)
+
+**Discovered:** 2026-05-01, session 21 trigger script c5.8 hardening.
+**Pattern:** session 21 c5.8 added per-pair atomicity to `run-editor-gate-a.ts` (insert Postgres + enqueue BullMQ in single try/catch with rollback on enqueue failure). n8n S1 production enqueue path has the SAME desync risk: if `/enqueue` fails after the Postgres insert succeeds, the row is stranded in `simple_pipeline_pending` with no BullMQ counterpart. Worker never picks it up. Manual cleanup required.
+**Workable today:** S1 has implicit retry via n8n's HTTP retry config; if final attempt fails, an orphaned `simple_pipeline_pending` row sits until operator notices.
+**Long-term fix:** incorporate the c5.8 atomicity pattern into n8n S1 (post-merge operator chore). Either a Code node that wraps insert+enqueue with rollback, or a periodic janitor (next followup) that detects orphans.
+**Owner:** operator (n8n-side); agent (orchestration design if needed).
+
+---
+
+## simple-pipeline-orphan-row-janitor — Active (long-term reliability)
+
+**Discovered:** 2026-05-01, session 21 (3 desync incidents).
+**Pattern:** Postgres ↔ BullMQ desync occurred 3 times in session 21 alone (orphan Postgres rows from failed enqueues, orphan BullMQ jobs from cap-fire deletions, mismatched counts). Cron job to detect: query for `simple_pipeline_pending` rows older than 5 min that have no corresponding BullMQ waiting/active/completed job; either mark `simple_pipeline_failed` with reason `orphan_no_bullmq_counterpart` or surface to ops dashboard.
+**Workable today:** manual Postgres queries when desync suspected.
+**Long-term fix:** real workstream when production scale exceeds operator's manual-checking capacity.
+**Owner:** future workstream when triggered (probably post-v1.2.2 + v1.0.2 ship + first multi-week production usage).
+
+---
+
+## brief-drafting-no-new-files-constraint-needs-scope — Active (process improvement)
+
+**Discovered:** 2026-05-01 + 2026-05-03, session 21 v1.2 brief + v1.2.1 brief + session 21 docs brief.
+**Pattern:** "No new files" hard constraint in briefs gets read by agent as either (a) "no new production files in src/agents, src/orchestrator" (correct interpretation; tests + scripts + docs are fine) or (b) "no new files anywhere" (overly strict; would block writing test scripts the brief itself schedules). Three briefs in session 21 had this ambiguity surface as a halt point. Agent's resolution was to interpret it as (a) by default + surface in commit message; operator confirmed correct.
+**Long-term fix:** future briefs explicitly say "no new production files in src/agents, src/orchestrator, src/lib" or "no new schema/migration files" rather than blanket "no new files."
+**Workable today:** agent's "(a) by default + surface in commit" pattern works.
+**Owner:** brief-author convention adoption; not a code change.
+
+---
+
+## brief-drafting-ground-projections-in-real-data — Active (process improvement)
+
+**Discovered:** 2026-05-01, session 21 Editor agent v1.2 brief.
+**Pattern:** v1.2 brief's cost/wall projections (~$0.005-0.01 per segment, ~5-10s wall) were based on pre-c1 estimates that c2 and c3 production-data tests partially falsified (c1.2.1 Gate A revealed actual median Editor cost $0.018, wall ~22s — within projection range but at the high end). Future briefs should pull cost/wall projections from production observations of similar work, not from priors.
+**Long-term fix:** brief-author convention; reference last similar workstream's actual measurements.
+**Workable today:** agents flag projection-vs-actual deltas in Gate A reports.
+**Owner:** brief-author convention adoption.
+
+---
+
+## chat-paste-markdown-autolink-corruption-pattern — Active (recurring transport bug)
+
+**Discovered:** 2026-05-01 onwards, session 21 (recurring on every paste-large-markdown-into-chat operation).
+**Pattern:** Markdown chat-paste corrupts URL-shaped tokens, square-bracket-paren patterns, and JSON-with-special-characters. Recurrent in session 21: v1.2 brief, v1.2.1 brief, c6 cleanup attempts, S8 v2 JSON paste — all hit the pattern. The corruption is silent (no error, just character drops or substitutions).
+**Workaround:** file transport via `Write` tool (agent writes the file, operator confirms md5) bypasses the chat layer. Used successfully in session 21 v1.2.1 + session 21 docs briefs.
+**Long-term fix:** N/A — chat-layer issue, not under code control. Workaround is the canonical pattern.
+**Owner:** brief-author convention adoption.
+
+---
+
+## vps-stale-test-process-cleanup-policy — Active (process improvement)
+
+**Discovered:** 2026-05-03, session 21 docs brief halt-and-report (working tree had 7 scratch- files at session 21 close).
+**Pattern:** Agent-created `scratch-*.ts` diagnostic files accumulate in working tree across a session. Pre-session-21 docs touch had 7 such files. Establish: scratch- files are deleted before new workstream starts (agent housekeeping at workstream-end, not workstream-start).
+**Workable today:** operator instructs cleanup at session-end; agent complies.
+**Long-term fix:** convention adoption; could be enforced by a pre-commit hook checking for `scratch-*.ts` in repo root, but lightweight manual is sufficient.
+**Owner:** agent housekeeping convention.
+
+---
+
+## vps-package-lock-untracked-modifications — Active (low priority)
+
+**Discovered:** 2026-05-03, session 21 close.
+**Pattern:** Each `npm install` on VPS modifies `package-lock.json` untracked. Hasn't caused issues yet (operator commits lockfile changes at deploy time as part of the deploy commit). Deserves either (a) gitignore the lockfile (not standard practice; loses reproducibility) or (b) commit lockfile alongside any package.json change (standard practice; current pattern works).
+**Workable today:** current pattern works; surface this as informational only.
+**Owner:** convention adoption (b) — no action needed unless drift surfaces.
 
 ---
 
@@ -174,7 +312,11 @@ The one load-bearing file in the residue (`docs/diagnostics/w9-2-render-bridge-s
 
 ---
 
-## s8-v2-json-divergence-followup — Active
+## s8-v2-json-divergence-followup — RESOLVED 2026-05-03 (pattern, not the specific JSON)
+
+**Resolved by:** session 21 surfaced the broader doc-vs-reality pattern (CLAUDE.md Rule 45 added — "n8n workflow JSON files in the repo describe routing logic that the live n8n instance does NOT have"). The specific S8 v2 JSON divergence remains in repo (operator can re-export when next in n8n web UI for unrelated work; chat-paste transport for large multi-line JSON is unreliable per `chat-paste-markdown-autolink-corruption-pattern` followup), but the broader class is documented as a rule and the workaround pattern (file transport via Write tool, md5 verify) is canonical.
+
+**Original pattern (kept for reference):**
 
 **Discovered:** 2026-04-28, S8 chore Gate A smoke testing (session 19)
 **Re-attempt 2026-04-29 (session 20):** abandoned twice. Operator hand-pasted n8n export into repo; chat-paste corruption silently lost characters in two Code nodes' jsCode strings (`const name` → `consname`, `'CM': 'carnimeat'` → `'Carnimeat'`). JSON parsed clean both times but would crash at workflow load or item-1 in n8n. Agent caught both via static analysis before commit. Reverted dirty file; followup remains open.
@@ -703,3 +845,37 @@ Combining into one global helper would risk destabilizing W3/W5/W6 responseSchem
 **Cost path now wired emit→accumulate→persist. Q5d cost signal alive.**
 **Per-agent baseline established (forced-structural seed):** planner $0.0114, picks $0.1566, critic $0.0123, copy $0.0152.
 **Total per shadow run baseline:** ~$0.55-0.56 (forced-structural seed including 2 revise loops).
+
+---
+
+## n8n-s1-routing-import — RESOLVED 2026-05-01 (operator-side)
+
+**Resolved by:** session 21 operator-side n8n S1 routing import. Pre-session 21, the live n8n instance had the older S1 with `status: 'planning'` and `queue: 'planning'` hardcoded — Sheet-driven jobs with `Pipeline=simple` silently ran Phase 3.5 (advanced path) instead of Simple Pipeline. Surfaced via `template_id='phase3-parameterized-v1'` on nordpilates jobs that should have been Simple Pipeline (`template_id=null`).
+
+**Operator imported** `n8n-workflows/S1-new-job.json` with Pipeline-aware routing during session 21 stream A (parallel to agent's c5.9 work). Verified end-to-end: smoke-test row reached `human_qa` with `template_id=null` in ~60-90s wall, confirming Simple Pipeline path was now firing on `Pipeline=simple`.
+
+**Class pattern documented as CLAUDE.md Rule 45** — "n8n workflow JSON files in the repo describe routing logic that the live n8n instance does NOT have." Filed as a recurring drift class; operator-side n8n write access remains the canonical fix for any future routing change.
+
+**Common follow-on issue noted:** `$json.__queue` from the Route Decision node is stripped by HTTP Request nodes. Switch on Queue and downstream nodes must reference `$('Route Decision').item.json.__queue` (and other `__` fields) explicitly. Operator handled at import time.
+
+---
+
+## ffmpeg-keyframe-snap-bug-existed-since-v10 — RESOLVED 2026-05-02 (c1.2.1.5 + c1.2.1.6)
+
+**Resolved by:** c1.2.1.5 + c1.2.1.6 fixes in session 21. `src/lib/ffmpeg.ts` `buildTrimCommand` had `-ss`/`-to` placed BEFORE `-i` with `-c copy`, triggering ffmpeg's input-seek behavior — stream-copy at input-seek snaps to the nearest preceding keyframe, NOT the requested timestamp. For Editor's refined boundaries this meant render padded 5-12s of unwanted leading footage. Bug existed since v1.0 but was silent because nothing was producing arbitrary trim starts; only became visible at v1.2.1's aggressive Editor trim.
+
+**c1.2.1.5** moved `-ss`/`-to` AFTER `-i` (output-seek). Frame-accurate when refined start ≥ keyframe; surfaced closed-GOP edge case where output-seek + `-c copy` drops the video stream entirely when refined start < first keyframe of kept range. 4/6 c1.2.1.5 Gate A renders failed Pass A with "Stream specifier ':v' matches no streams" (exit 234).
+
+**c1.2.1.6** replaced `-c copy` with `-c:v libx264 -preset medium -crf 18 -c:a aac`. Re-encode is the canonical fix for frame-accurate trim on closed-GOP content. Cost: ~5-8s/segment of re-encode wall. Quality: visually lossless at CRF 18 (matches Pass C). All 6 c1.2.1.6 Gate A renders reach human_qa with frame-accurate boundaries (max overshoot +0.10s, well under 0.5s tolerance).
+
+**Class pattern documented as CLAUDE.md Rule 46** ("ffmpeg `-ss` placement before `-i` with `-c copy` is input-seek + stream-copy and snaps to keyframes; output-seek + re-encode is the canonical fix") and **Rule 47** (per-segment standalone verification template before judging prompt quality on production renders).
+
+**Three callers benefited:** `src/orchestrator/simple-pipeline/render.ts` Pass A (load-bearing — Editor produces arbitrary timestamps), `src/workers/clip-prep.ts` Phase 3 advanced pipeline (silent benefit — advanced trim was always at original bounds, so input-seek + `-c copy` was usually keyframe-aligned by accident), `src/scripts/test-pipeline.ts` test harness.
+
+**Discovery cost:** ~6 hours (across c1.2.1 Gate A operator visual review + 2 round Editor prompt iterations that appeared to "go backward" because the render-path bug was discarding their refinements). The fix-it-once cost was ~30 min (single commit per fix); the diagnosis cost was the load-bearing tax — lesson captured in Rule 47.
+
+---
+
+## simple-pipeline-editor-agent-workstream — RESOLVED 2026-05-03
+
+**Resolved by:** Editor agent v1.2 + v1.2.1 + render-path fix c1.2.1.6 merged to main (session 21 close, HEAD `c5681da`). Editor step is live in production: per-segment Gemini Pro boundary refinement on routine path, parallel calls via Promise.all, clamps post-Zod, silent fallback. Three Gate A rounds run; mechanical bar PASS at c1.2.1.6 (6/6 reach human_qa, frame-accurate trim verified). Operator visual reading "3/6 solid, moving in right direction." Successor workstream `editor-v1.2.2-prompt-retune` (active) addresses the over-trim issue; not a regression of the editor agent itself.
