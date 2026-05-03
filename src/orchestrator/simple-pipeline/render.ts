@@ -111,9 +111,9 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
       `renderSimplePipeline: meme format requires exactly 1 segment, got ${input.segmentIds.length}`,
     );
   }
-  if (input.format === 'routine' && (input.segmentIds.length < 2 || input.segmentIds.length > 5)) {
+  if (input.format === 'routine' && (input.segmentIds.length < 2 || input.segmentIds.length > 6)) {
     throw new Error(
-      `renderSimplePipeline: routine format requires 2-5 segments, got ${input.segmentIds.length}`,
+      `renderSimplePipeline: routine format requires 2-6 segments, got ${input.segmentIds.length}`,
     );
   }
 
