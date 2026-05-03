@@ -1,9 +1,9 @@
 # Simple Pipeline — Production Reference
 
-**Status:** v1.0 + v1.1 merged to main and deployed (2026-04-29).
-**Production verification:** pending — first end-to-end production render not yet exercised. Editor agent (next workstream) ships before Simple Pipeline is verified through real operator usage.
+**Status:** v1.0 + v1.1 + Editor agent v1.2.1 + render-path fix c1.2.1.6 merged to main and deployed (session 21 close, 2026-05-03, HEAD `c5681da`).
+**Production verification:** Editor agent shipped + 3 Gate A rounds run; mechanical bar passing, operator visual bar reading "moving in right direction" (3/6 solid as of c1.2.1.6 review). Editor v1.2.2 prompt re-tune is the next iteration to push toward 4/6 uploadable.
 **Predecessor:** Phase 3.5 + Part B (advanced pipeline) — still in production for advanced-quality renders. Simple Pipeline runs in parallel; not a replacement.
-**Successor (next workstream):** Editor agent — smart-trim at segment boundaries.
+**Successor (next workstream):** Editor v1.2.2 prompt re-tune (under-band protection, gentler cuts on some seeds) + M-O-M v1.0.2 seed-vagueness-aware slot count.
 
 ---
 
@@ -61,14 +61,34 @@ Orchestrator entry: simple-pipeline-orchestrator.ts
      within that parent — agent chooses N between 2 and 5 based on what fits the parent + idea seed
    - Meme: agent picks 1 segment from any parent (excluding last 2 segments used per brand)
    - Returns: { segment_ids, parent_asset_id, slot_count, reasoning }
-   - Cost: ~$0.015
-   - Wall: 8-12s
+   - Cost: ~$0.04-0.05 (M-O-M v1.0.1 prompt is denser than v1.0)
+   - Wall: 5-15s
   ↓
-4. Cooldown enforcement (post-agent):
+4. Editor Agent (routine flow only — meme bypasses)
+   - One Gemini Pro call PER picked segment, fanned out via Promise.all (parallel)
+   - Per-segment input: keyframe grid (4×3 mosaic) + segment_v2 metadata + idea_seed
+   - Render-context input (same across all parallel calls): slot_count_total, current_render_duration_s
+     (sum of picked segments' original durations), target_render_duration_s (default 30s),
+     this segment's slot_index
+   - Output per segment: refined [start_s, end_s] within original bounds, OR no_change_needed=true,
+     OR fallback (silent — caller falls back to original bounds)
+   - Hard constraints (post-Zod clamps): refined_start_s ≥ original_start_s, refined_end_s ≤
+     original_end_s, refined duration ≥ 1.5s. Violations → fallback to original.
+   - Meme path bypass: editor_invoked=false, refinedBoundsBySegmentId empty, $0 cost, 0ms wall
+   - Per-job override: editorDisabled=true in /enqueue payload bypasses Editor on routine path too
+     (see "API surface" below)
+   - Cost: ~$0.018 total per render (4-5 parallel calls × ~$0.005 each)
+   - Wall: ~22s median (slowest call dominates parallel set)
+   - Schema: src/agents/editor-agent-schema.ts (Zod), src/agents/editor-agent.ts (caller),
+     src/orchestrator/simple-pipeline/editor-step.ts (orchestrator integration)
+   - Observability: editor_outcome payload on human_qa transition includes editor_invoked,
+     segments_refined, segments_no_change_needed, segments_fallback, editor_cost_usd, editor_wall_ms
+  ↓
+5. Cooldown enforcement (post-agent):
    - Routine: log parent + each segment to simple_pipeline_render_history
    - Meme: log segment to simple_pipeline_render_history
   ↓
-5. Overlay text:
+6. Overlay text:
    - If overlay_mode='verbatim' (default for meme):
      - Use operator's idea_seed as overlay text directly
      - Skip Gemini call entirely; cost $0; wall 0s
@@ -79,20 +99,21 @@ Orchestrator entry: simple-pipeline-orchestrator.ts
      - Cost: ~$0.005; wall: 5s
      - Failure: retry once; second failure → fallback to idea_seed verbatim
   ↓
-6. Music Selector
+7. Music Selector
    - Reuses existing music selection logic from advanced pipeline
    - Filter music_tracks by brand-allowed moods
    - Weighted random pick
   ↓
-7. Render (ffmpeg) — see "Render path" below
+8. Render (ffmpeg) — see "Render path" below. Pass A consumes Editor's refined
+   bounds via refinedBoundsBySegmentId map; missing entries fall back to original.
   ↓
-8. Upload to R2 → status = human_qa
+9. Upload to R2 → status = human_qa
   ↓
-9. n8n P1 sync: status update visible in Sheet, preview URL populated
+10. n8n P1 sync: status update visible in Sheet, preview URL populated
   ↓
-10. Operator views, approves/rejects in Sheet
+11. Operator views, approves/rejects in Sheet
   ↓
-11. n8n S3 (existing QA decision workflow) handles approve → delivered;
+12. n8n S3 (existing QA decision workflow) handles approve → delivered;
     reject → operator-side cleanup or re-render
 ```
 
@@ -100,32 +121,69 @@ Orchestrator entry: simple-pipeline-orchestrator.ts
 
 ## Render path
 
-Per v1.0 Round 1 fix + v1.1 polish, the ffmpeg pipeline is:
+Per v1.0 Round 1 fix + v1.1 polish + c1.2.1.5 + c1.2.1.6 frame-accurate trim, the ffmpeg pipeline is:
 
-**Pass A — Per-segment trim from pre-normalized parent:**
+**Pass A — Per-segment trim from pre-normalized parent (frame-accurate, re-encoded):**
 - Read `assets.pre_normalized_r2_key` (1080×1920 30fps libx264, the full-quality normalized parent)
 - Cache parent download across multiple segments from the same parent (routine path hits this; meme always single-parent)
-- ffmpeg-trim each segment by `start_s`/`end_s` with `-c copy` (stream-copy, no re-encode)
+- Trim window: refined bounds from Editor agent (`refinedBoundsBySegmentId.get(segmentId)`) when present;
+  otherwise original `start_s`/`end_s` from `asset_segments`. See `resolveTrimWindow` in
+  `src/orchestrator/simple-pipeline/render.ts`.
+- ffmpeg invocation: `-i <parent> -ss <start> -to <end> -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 192k -ar 44100 -avoid_negative_ts make_zero <out>`
+  - **Output-seek** (`-ss`/`-to` AFTER `-i`): frame-accurate boundaries regardless of input keyframe alignment
+  - **Re-encode video** at CRF 18 medium: required for closed-GOP correctness when the refined start
+    lands before the first keyframe of the kept range (with `-c copy` ffmpeg drops the video stream entirely)
+  - Audio re-encode to AAC 192k 44100 Hz: matches `buildNormalizeCommand`'s audio settings so Pass B's
+    concat demuxer accepts consistent codec across segments
+  - Cost per segment: ~5-8s of re-encode wall on the VPS for typical segment durations
 - Fallback to `clip_r2_key` only if `pre_normalized_r2_key` is null (defensive — none currently exist post-W5 clean-slate)
 - **Critical:** Do NOT read `clip_r2_key` (720p CRF 28 segment files) for render. That was the v1.0 graininess bug — upscaling CRF 28 to 1080p produced visibly grainy output. Always source from pre-normalized parent.
 
+### Frame-accurate trim via output-seek + re-encode (c1.2.1.5 + c1.2.1.6)
+
+Pre-c1.2.1.5: `buildTrimCommand` placed `-ss`/`-to` BEFORE `-i` with `-c copy`, triggering ffmpeg's
+input-seek behavior. Stream-copy at input-seek snaps to the nearest preceding keyframe, NOT the
+requested timestamp. For Editor's refined boundaries this meant the render padded 5-12s of unwanted
+leading footage. Bug existed since v1.0 but was silent because nothing was producing arbitrary trim
+starts; only became visible at v1.2.1's aggressive Editor trim.
+
+c1.2.1.5 fixed by moving `-ss`/`-to` AFTER `-i` (output-seek). Frame-accurate when refined start ≥
+keyframe; surfaced closed-GOP edge case where output-seek + `-c copy` drops the video stream when
+refined start < first keyframe. 4/6 c1.2.1.5 Gate A renders failed Pass A with
+"Stream specifier ':v' matches no streams."
+
+c1.2.1.6 replaced `-c copy` with `-c:v libx264 -preset medium -crf 18 -c:a aac`. Re-encode is the
+canonical fix for frame-accurate trim on closed-GOP content. Cost: ~5-8s/segment of re-encode wall;
+total render wall growth ~30s vs v1.2 era. Quality: visually lossless at CRF 18 (matches Pass C).
+
+Three callers of `buildTrimCommand` benefit from the fix:
+- `src/orchestrator/simple-pipeline/render.ts` Pass A — load-bearing (Editor produces arbitrary timestamps)
+- `src/workers/clip-prep.ts` Phase 3 advanced pipeline — silent benefit (advanced trim was always at
+  original bounds, so input-seek + `-c copy` was usually keyframe-aligned by accident)
+- `src/scripts/test-pipeline.ts` test harness
+
+See CLAUDE.md Rule 46 for the canonical pattern; see `docs/diagnostics/session-21-lessons.md` §3 for
+the discovery sequence.
+
 **Pass B — Concat:**
-- ffmpeg concat demuxer joins trimmed segments
-- No re-encode at this stage
+- ffmpeg concat demuxer joins Pass A's trimmed segments
+- No re-encode at this stage (segments already in identical codec/sample-rate from Pass A)
 
 **Pass C — Overlay text + logo + color grade:**
 - drawtext for overlay text (per-line invocations for multi-line; see overlay sizing below)
 - overlay filter for brand logo (loaded from `brand_configs.logo_r2_key`)
 - color grade LUT applied
 - Single re-encode at libx264 CRF 18 slow (matches Phase 3.5's normalize quality)
-- This is the only re-encode of pixel data in the entire pipeline
 
 **Pass D — Audio mix:**
 - ffprobe + silencedetect on the concatenated UGC overlay
 - If silence_ratio < 0.15 (mostly silent) OR no audio stream at all: music-only mix, no UGC audio
 - Else: sidechain-ducked mix (UGC audio at full level, music at -16dB ducked under speech)
 
-**Output:** 1080×1920 / 30fps / CRF 18 MP4. Wall ~30-60s per render. Net re-encode count of any frame: 2 (one at parent-normalize ingest time, one at Pass C). No upscale ever.
+**Output:** 1080×1920 / 30fps / CRF 18 MP4. Wall ~140s per render median (post-c1.2.1.6; was ~110s
+v1.2 era pre-fix, but v1.2-era output had keyframe-snap padding so the apparent speed was buying
+broken trim). Net re-encode count of any frame: 3 (one at parent-normalize ingest time, one at Pass A,
+one at Pass C). No upscale ever.
 
 ---
 
@@ -204,18 +262,26 @@ If readiness fails at S1: jobs.status will read `simple_pipeline_blocked` with a
 
 ## Cost & latency
 
-| Stage | Cost | Wall time |
-|---|---|---|
-| Match-Or-Match agent (Gemini Pro) | ~$0.015 | 8-12s |
-| Overlay generator (Gemini Pro, generate mode) | ~$0.005 | 5s |
-| Overlay generator (verbatim mode) | $0 | <1s |
-| Music selection | $0 | <1s |
-| Render (ffmpeg) | $0 | 30-60s |
-| **Total per video** | **~$0.015-0.025** | ~50-90s |
+| Stage | Cost | Wall (median) | Notes |
+|---|---|---|---|
+| Match-Or-Match agent (Gemini Pro) | ~$0.04-0.05 | 5-15s | Single Gemini Pro call; v1.0.1 prompt is denser than v1.0 |
+| Editor agent (per-segment, parallel) | ~$0.018 total | ~22s | N parallel Gemini Pro calls; clamps post-Zod; silent fallback. Routine only; meme bypasses. |
+| Overlay generator (generate mode) | ~$0.005 | 5s | Single Gemini Pro call |
+| Overlay generator (verbatim mode) | $0 | <1s | Skips Gemini call entirely |
+| Music selection | $0 | <1s | DB query + weighted random |
+| Pass A render (per-segment trim) | $0 | ~5-8s/segment | Re-encode at libx264 medium CRF 18 (post-c1.2.1.6) |
+| Pass B concat | $0 | ~2s | Concat demuxer, no re-encode |
+| Pass C overlay/grade | $0 | ~30-50s | Single re-encode of full concat at libx264 slow CRF 18 |
+| **Total per video (routine, post-c1.2.1.6)** | **~$0.07** | **~140s median** | Up from ~110s pre-c1.2.1.6 due to Pass A re-encode; pre-fix Pass A was broken-fast (keyframe-snap padding) |
 
 Far below the $1/video cost ceiling. Operator-confirmed cost-irrelevant for v1.
 
-Verbatim mode (now meme default) saves ~$0.005 + 5s per meme render.
+Verbatim mode (meme default) saves ~$0.005 + 5s per meme render. Editor agent does not run on meme path.
+
+The render wall jump from ~110s (pre-c1.2.1.6) to ~140s (post) is the cost of frame-accurate trim:
+~5-8s per segment of Pass A re-encode work, multiplied by 4-5 segments per render. Pre-fix Pass A
+ran in ~5s/segment total (stream-copy) but was producing keyframe-snap-padded output, so the apparent
+speed was buying broken trim. Acceptable trade-off for production-correct frame boundaries.
 
 ---
 
@@ -233,7 +299,15 @@ n8n S1 calls this before enqueueing any Pipeline=simple job.
 
 **`POST /enqueue` (extended)**
 
-Now accepts payload `{queue, jobId, format, slot_count, overlay_mode}` for simple_pipeline routing. Existing planning queue routing unchanged.
+Now accepts payload `{queue, jobId, format, slot_count, overlay_mode, editorDisabled?}` for simple_pipeline routing. Existing planning queue routing unchanged.
+
+The `editorDisabled` field (boolean, default `false`) is a per-job override. When `true`, the routine
+path skips the Editor agent and renders with original Match-Or-Match bounds (same shape as meme bypass:
+`editor_invoked=false`, empty refined map, $0 cost, ~0ms wall). Used by ops for debugging or when
+Editor refinement is suspected of causing issues. Production default is `editor_disabled=false`.
+
+To set per-job: pass `editorDisabled: true` in the /enqueue payload. Sheet column not currently exposed
+to operator; n8n S1 doesn't propagate the field. Set via direct /enqueue call when needed.
 
 ---
 
@@ -264,18 +338,24 @@ These are not bugs; they're scoped-out items that the next workstream(s) address
 
 ## Files (in `src/orchestrator/simple-pipeline/`)
 
-- `simple-pipeline-orchestrator.ts` — entry; format branch; calls agent + overlay + music + render
-- `match-or-match-agent.ts` (in `src/agents/`) — single Gemini Pro library-aware picker
-- `prompts/match-or-match-routine.md`, `prompts/match-or-match-meme.md` — agent prompts (Round 2 iterated)
-- `prompts/overlay-routine.md`, `prompts/overlay-meme.md` — overlay text generator prompts
+- `simple-pipeline-orchestrator.ts` (in `src/orchestrator/`) — entry; format branch; calls agent + Editor + overlay + music + render
+- `match-or-match-agent.ts` (in `src/agents/`) — single Gemini Pro library-aware picker (v1.0.1 prompt)
+- `prompts/match-or-match-routine.md`, `prompts/match-or-match-meme.md` (in `src/agents/`) — picker prompts (M-O-M v1.0.1)
+- `editor-agent.ts` (in `src/agents/`) — per-segment Gemini Pro boundary refinement caller (v1.2.1)
+- `editor-agent-schema.ts` (in `src/agents/`) — Zod schema for refinement output + clamps + render-context input fields
+- `prompts/editor-agent.md` (in `src/agents/`) — Editor pacing-aware prompt (v1.2.1)
+- `editor-step.ts` — orchestrator integration; fans out per-segment Editor calls via Promise.all on routine path; meme bypass
+- `prompts/overlay-routine.md`, `prompts/overlay-meme.md` (in `src/agents/`) — overlay text generator prompts
 - `overlay-routine.ts`, `overlay-meme.ts` — overlay generator modules (called when overlay_mode=generate)
 - `parent-picker.ts` — parent eligibility + cooldown filtering
 - `segment-cooldown-tracker.ts` — render history reads/writes
 - `music-selector.ts` — wraps existing music selection
-- `render.ts` — ffmpeg pipeline (Pass A through D)
+- `render.ts` — ffmpeg pipeline (Pass A through D); consumes refinedBoundsBySegmentId from Editor step
 - `readiness.ts` — readiness endpoint logic
 
-Worker registration: `src/index.ts` registers `simplePipelineWorker` with `concurrency: 1` + `limiter: { max: 500, duration: 1000 }`.
+Trim command builder: `src/lib/ffmpeg.ts` `buildTrimCommand` — output-seek + re-encode (post-c1.2.1.6).
+
+Worker registration: `src/index.ts` registers `simplePipelineWorker` with `concurrency: 1` + `limiter: { max: 500, duration: 1000 }`. All four queue workers (planning, rendering, ingestion, simple_pipeline) carry the limiter as of c5.7.
 
 n8n workflow: `n8n-workflows/S1-new-job.json` — Pipeline-aware routing, calls /simple-pipeline/check-readiness before enqueueing.
 
