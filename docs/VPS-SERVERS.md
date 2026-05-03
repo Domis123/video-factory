@@ -235,6 +235,17 @@ src/index.ts (entry point)
 
 **Watch item — Claude API consumption under dual-run mode (added 2026-04-27):** Phase 3.5 uses Claude Sonnet 4.6 at Creative Director and Copywriter steps (both blocking). Part B uses Gemini exclusively. When a brand is on `pipeline_version='part_b_shadow'` and `PART_B_ROLLOUT_PERCENT=100` (current Phase 1 calibration state for nordpilates), each job runs both pipelines in parallel — Phase 3.5's Claude calls fire alongside Part B's Gemini calls. Effective Claude consumption per dual-run nordpilates job is ~2x what it would be on Phase 3.5 alone (CD + Copywriter both Sonnet × 2 pipelines). 2026-04-27: Anthropic limit was hit during the first calibration run; operator raised it; no production impact (job completed before throttle). Revisit if Anthropic 429s start firing under sustained dual-run load. Logged as `claude-api-limit-watchitem` in followups.
 
+**Known limitation — Upstash burst enqueue rate-limit (added 2026-05-01, session 21 finding):**
+- **Symptom:** enqueue bursts of >6 jobs in <2s trigger `ERR max requests limit exceeded — Limit: 500000, Usage: 500001`
+- **Persistence:** error fires repeatedly across `systemctl restart` until hard-stop+start sequence below
+- **Identical error string** to the per-second cap and monthly cap variants (Limit: 500000, Usage: 500001) — third internal mechanism in Upstash, NOT visible in dashboard. Misdiagnosis loop ×3 burned ~2 hours in session 21 before resolution.
+- **n8n S1's natural cadence** (polling every 30s, ~6 jobs spread across multiple polling cycles) does NOT trigger this. Only triggered by tight-loop trigger scripts.
+- **Dashboard state:** shows 1.7M / Unlimited usage, no error, no rate-limit warning. Not a real plan cap.
+- **Workaround for trigger scripts:** pace enqueues with `await sleep(2000)` between BullMQ adds (see `src/scripts/run-editor-gate-a.ts` `SLEEP_BETWEEN_PAIRS_MS`). 2-pair canary verification at 2s spacing confirms cap-defeat before full run.
+- **Diagnostic note:** Upstash redis_version 8.2.0 + Eco-mode deprecation banner present at session 21 close; suspected interaction not confirmed. Filed as `upstash-burst-enqueue-rate-investigation` followup for an Upstash support ticket.
+- **Per-worker BullMQ limiter** (`{ max: 500, duration: 1000 }` on all 4 workers, c5.7) defends per-render command rate but does NOT defend against trigger-script enqueue bursts — those skip the worker layer entirely.
+- See CLAUDE.md Rule 44 for the canonical pattern.
+
 ### Systemd service
 
 The app runs as a systemd service that auto-starts on boot and auto-restarts on crash.
@@ -250,6 +261,41 @@ systemctl stop video-factory      # Stop
 journalctl -u video-factory -f    # Live logs
 journalctl -u video-factory -n 50 # Last 50 log lines
 ```
+
+### Worker stuck-state and hard-restart procedure (added 2026-05-01)
+
+When the worker process is alive (`systemctl is-active video-factory` = active, `/health` returns 200) but BullMQ queues remain populated and no job state transitions are happening (`SELECT * FROM job_events WHERE created_at > NOW() - INTERVAL '5 minutes'` returns 0 rows), the BullMQ Redis connection pool may be stuck in a failed state from a prior cap-fire event (see "Known limitation — Upstash burst enqueue rate-limit" above).
+
+**Soft `systemctl restart video-factory` may NOT recover** — pooled connection state can be reused across the restart. Hard-stop sequence is required:
+
+```bash
+ssh root@95.216.137.35
+systemctl stop video-factory
+sleep 10
+systemctl start video-factory
+```
+
+The 10s sleep ensures all Redis connections close cleanly before new ones open. Verify post-restart with a multi-op probe (PING alone is insufficient — single-op probes pass even when bulk-op state is stuck; see CLAUDE.md Rule 43 sighting #15):
+
+```bash
+ssh root@95.216.137.35 'cd /home/video-factory && node -e "
+require(\"dotenv\").config();
+const { Queue } = require(\"bullmq\");
+const Redis = require(\"ioredis\");
+const conn = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+(async () => {
+  for (const q of [\"ingestion\",\"planning\",\"rendering\",\"export\",\"simple_pipeline\"]) {
+    const queue = new Queue(q, { connection: conn });
+    const counts = await queue.getJobCounts();
+    console.log(q.padEnd(20), JSON.stringify(counts));
+  }
+  process.exit(0);
+})();"'
+```
+
+If queues show non-zero `waiting` and counts don't decrement over 30s, worker is still stuck and deeper investigation is needed (BullMQ internal state corruption, Upstash account-level state, etc.).
+
+Filed as `bullmq-stale-connection-pool-restart-pattern` followup.
 
 ### Deploying updates
 
@@ -281,6 +327,7 @@ ssh root@95.216.137.35 "cd /home/video-factory && git pull && npm install && npm
 - **CPU**: 4 vCPU on CX32. Spikes during FFmpeg encoding and Remotion rendering, idle otherwise.
 - **Disk**: 80GB SSD. Temp files cleaned after each job. R2 is the permanent store.
 - **Redis**: ~6.5K commands/day idle with drainDelay 120s (Upstash free tier: 500K/month). Was 26K/day at drainDelay 30s.
+- **Render wall (Simple Pipeline, post-c1.2.1.6, 2026-05-02):** Pass A re-encode adds ~5-8s/segment. Total render wall median grew from ~110s (v1.2 era, broken-fast trim path with keyframe-snap padding) to ~140s (v1.2.1 + c1.2.1.6, working trim path). Within current sizing budget at 4 vCPU; would warrant CX42 (8 vCPU) consideration if render volume scaled to >10 concurrent jobs.
 
 ### Environment variables (.env)
 
