@@ -1,6 +1,6 @@
 # Git Workflow — Video Factory
 
-**Last updated:** 2026-04-20
+**Last updated:** 2026-05-03
 **Read this at the start of every agent session.** Keep branches flat, GitHub current, rollbacks one-command.
 
 **Supersedes:** Git guidance previously scattered across `SESSION_GUIDE.md`. Once this doc is stable, trim git content from SESSION_GUIDE and link here.
@@ -333,51 +333,6 @@ If a branch shows as merged but you don't recognize the name — investigate bef
 | "Git revert for rollback" | History becomes a branch graveyard; prod state hard to reason about |
 | "Max stack depth 1" | Literally the problem this doc exists to prevent |
 | "Weekly hygiene" | Branch list becomes unreadable, confusion about in-progress work |
-
----
-
-## Current backlog to flush before this workflow takes effect
-
-As of 2026-04-20, these branches are approved but unmerged:
-
-```
-main (origin) ─ behind ─ feat/architecture-pivot [approved, tested]
-                          └─ fix/quick-wins [approved, tested]
-                              └─ feat/w0a-segment-v2-prototype [approved, output reviewed]
-                                  └─ feat/w0b-segment-v2-integration [in progress]
-```
-
-**Cleanup sequence (Domis on laptop):**
-
-```bash
-# 1. Fetch everything
-git fetch origin
-
-# 2. Confirm branches are on origin (agent should have pushed these — verify)
-git branch -r | grep -E "(architecture-pivot|quick-wins|w0a-segment)"
-
-# 3. Merge in stack order
-git checkout main
-git pull origin main
-
-git merge --no-ff origin/feat/architecture-pivot -m "merge feat/architecture-pivot (Phase 3.5)"
-git merge --no-ff origin/fix/quick-wins -m "merge fix/quick-wins (prep filter + subject_consistency)"
-git merge --no-ff origin/feat/w0a-segment-v2-prototype -m "merge feat/w0a-segment-v2-prototype (Phase 4 W0a schema + analyzer)"
-
-git push origin main
-
-# 4. Delete merged remotes
-git push origin --delete feat/architecture-pivot
-git push origin --delete fix/quick-wins
-git push origin --delete feat/w0a-segment-v2-prototype
-
-# 5. Deploy (unchanged; VPS already runs these — this just aligns GitHub main)
-ssh root@95.216.137.35 "cd /home/video-factory && git fetch && git checkout main && git pull origin main && npm install && npm run build && systemctl restart video-factory"
-```
-
-After this flushes, `feat/w0b-segment-v2-integration` remains in progress. It stacks on `feat/w0a-segment-v2-prototype` (now merged into main), so the branch's base is functionally identical to current main — no rebase needed. The W0b branch will merge cleanly onto main when its work completes.
-
-**From that point forward, every new branch follows this doc.** No more pile-ups.
 
 ---
 
