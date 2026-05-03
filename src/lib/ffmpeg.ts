@@ -25,14 +25,22 @@ export function buildTrimCommand(
   startSec: number,
   endSec: number,
 ): FfCommand {
-  // c1.2.1.5: -ss/-to AFTER -i (output-seek) gives frame-accurate cuts;
-  // -ss/-to BEFORE -i (input-seek) snaps to the nearest preceding keyframe
-  // and renders unwanted footage from the keyframe to the requested start.
-  // Symptom became visible at v1.2.1 trim levels: refined start at 5.2s
-  // with nearest keyframe at 0s rendered 0s..end instead of 5.2s..end.
-  // Output-seek decodes-and-discards up to the requested timestamp, then
-  // copies frames lossless. Cost: ~few hundred ms of decode work per
-  // segment. No re-encode of kept frames.
+  // c1.2.1.6: re-encode video on trim. Output-seek alone (c1.2.1.5) was
+  // frame-accurate but exposed a closed-GOP edge case: when the requested
+  // start landed before the first video keyframe of the relevant range,
+  // -c copy dropped the video stream entirely (4/6 Gate A renders failed
+  // with "Stream specifier ':v' matches no streams"). Re-encoding the
+  // video forces ffmpeg to decode-and-emit every kept frame regardless
+  // of GOP boundaries. Audio stream-copies because audio frames are
+  // independent.
+  //
+  // Encoder params:
+  //   - libx264 + preset medium + CRF 18: matches Pass C's quality target
+  //     (Pass C uses CRF 18 slow; per-segment uses medium for ~3x faster
+  //     encode at marginally larger filesize)
+  //   - AAC 192k 44100: matches buildNormalizeCommand's audio settings,
+  //     ensures Pass B concat demuxer accepts consistent codec across
+  //     segments (concat requires identical codec/sample-rate per stream)
   return {
     command: 'ffmpeg',
     args: [
@@ -40,7 +48,12 @@ export function buildTrimCommand(
       '-i', inputPath,
       '-ss', String(startSec),
       '-to', String(endSec),
-      '-c', 'copy',
+      '-c:v', 'libx264',
+      '-preset', 'medium',
+      '-crf', '18',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ar', '44100',
       '-avoid_negative_ts', 'make_zero',
       outputPath,
     ],
