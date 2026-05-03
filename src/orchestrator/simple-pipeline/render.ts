@@ -49,6 +49,13 @@ export interface RenderInput {
   overlayText: string;
   /** R2 key for the music track. */
   musicR2Key: string;
+  /**
+   * Optional refined boundaries from the editor agent (c4+). Map keyed by
+   * segment_id with refined start/end times in absolute parent seconds.
+   * Plumbed through in c4; consumed in c5. Absent or empty map ⇒ render
+   * uses the segment's original asset_segments.start_s/end_s as before.
+   */
+  refinedBoundsBySegmentId?: Map<string, { startS: number; endS: number; refined: boolean }>;
 }
 
 export interface RenderResult {
@@ -118,8 +125,12 @@ export async function renderSimplePipeline(input: RenderInput): Promise<RenderRe
     console.log(`[render] jobId=${input.jobId} format=${input.format} segments=${input.segmentIds.length}`);
     console.log(`[render] workDir=${workDir} fontFile=${fontFile}`);
 
-    // 1. Fetch segment + brand metadata
-    const segments = await fetchSegmentsInOrder(input.segmentIds);
+    // 1. Fetch segment + brand metadata. fetchSegmentsInOrder consults
+    //    refinedBoundsBySegmentId (from c4 editor step) when present and
+    //    falls back to original asset_segments.start_s/end_s when absent.
+    //    Refined bounds are in absolute parent seconds; pre_trimmed_clip
+    //    fallback path offsets them relative to clip start.
+    const segments = await fetchSegmentsInOrder(input.segmentIds, input.refinedBoundsBySegmentId);
     const brand = await fetchBrandRenderConfig(input.brandId);
 
     // 2. Download unique parent files (cached across same-parent segments) +
@@ -695,7 +706,10 @@ interface FetchedSegment {
   trimEndS: number;
 }
 
-async function fetchSegmentsInOrder(segmentIds: string[]): Promise<FetchedSegment[]> {
+async function fetchSegmentsInOrder(
+  segmentIds: string[],
+  refinedBoundsBySegmentId?: Map<string, { startS: number; endS: number; refined: boolean }>,
+): Promise<FetchedSegment[]> {
   const { data: segs, error: segErr } = await supabaseAdmin
     .from('asset_segments')
     .select('id, parent_asset_id, clip_r2_key, start_s, end_s')
@@ -746,19 +760,75 @@ async function fetchSegmentsInOrder(segmentIds: string[]): Promise<FetchedSegmen
       );
     }
 
+    const origStartS = Number(row.start_s);
+    const origEndS = Number(row.end_s);
+    const refined = refinedBoundsBySegmentId?.get(id);
+    const trim = resolveTrimWindow({
+      origStartS,
+      origEndS,
+      parentSourceKind,
+      refined,
+    });
+    if (trim.usedRefined) {
+      console.log(
+        `[render] segment ${id}: editor-refined bounds applied ` +
+          `(orig=[${origStartS.toFixed(2)}, ${origEndS.toFixed(2)}]s ` +
+          `→ refined=[${refined!.startS.toFixed(2)}, ${refined!.endS.toFixed(2)}]s)`,
+      );
+    }
+
     ordered.push({
       id: row.id,
       parentAssetId: row.parent_asset_id,
       parentR2Key,
       parentSourceKind,
-      trimStartS: parentSourceKind === 'pre_trimmed_clip' ? 0 : Number(row.start_s),
-      trimEndS:
-        parentSourceKind === 'pre_trimmed_clip'
-          ? Number(row.end_s) - Number(row.start_s)
-          : Number(row.end_s),
+      trimStartS: trim.trimStartS,
+      trimEndS: trim.trimEndS,
     });
   }
   return ordered;
+}
+
+/**
+ * Resolve the trim-window args passed to ffmpeg's `-ss`/`-to`-equivalent
+ * given the segment's original bounds, optional editor-refined bounds, and
+ * the parent source kind.
+ *
+ *   - pre_normalized parent     : trim args are absolute parent seconds.
+ *   - pre_trimmed_clip fallback : the clip file's time-axis is relative to
+ *                                  origStartS, so refined absolute bounds
+ *                                  must be subtracted by origStartS.
+ *
+ * Defensive re-clamp inside [origStartS, origEndS] for refined values.
+ * Editor-agent's applyClamps already enforces this contract; the re-clamp
+ * here is render's own contract: "never extend trim beyond original."
+ *
+ * Exported for c5 unit tests; not used outside this file in production.
+ */
+export function resolveTrimWindow(args: {
+  origStartS: number;
+  origEndS: number;
+  parentSourceKind: 'pre_normalized' | 'pre_trimmed_clip';
+  refined?: { startS: number; endS: number; refined: boolean };
+}): { trimStartS: number; trimEndS: number; usedRefined: boolean } {
+  const { origStartS, origEndS, parentSourceKind, refined } = args;
+
+  const absStartS = refined
+    ? Math.max(origStartS, Math.min(origEndS, refined.startS))
+    : origStartS;
+  const absEndS = refined
+    ? Math.max(origStartS, Math.min(origEndS, refined.endS))
+    : origEndS;
+
+  const trimStartS = parentSourceKind === 'pre_trimmed_clip' ? absStartS - origStartS : absStartS;
+  const trimEndS = parentSourceKind === 'pre_trimmed_clip' ? absEndS - origStartS : absEndS;
+
+  // usedRefined reflects "did we apply editor bounds that differ from
+  // original" — false when no refined entry exists, OR when refined.refined
+  // is false (no_change_needed / fallback both record original bounds).
+  const usedRefined = !!(refined && refined.refined);
+
+  return { trimStartS, trimEndS, usedRefined };
 }
 
 interface BrandRenderConfig {

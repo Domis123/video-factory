@@ -25,14 +25,35 @@ export function buildTrimCommand(
   startSec: number,
   endSec: number,
 ): FfCommand {
+  // c1.2.1.6: re-encode video on trim. Output-seek alone (c1.2.1.5) was
+  // frame-accurate but exposed a closed-GOP edge case: when the requested
+  // start landed before the first video keyframe of the relevant range,
+  // -c copy dropped the video stream entirely (4/6 Gate A renders failed
+  // with "Stream specifier ':v' matches no streams"). Re-encoding the
+  // video forces ffmpeg to decode-and-emit every kept frame regardless
+  // of GOP boundaries. Audio stream-copies because audio frames are
+  // independent.
+  //
+  // Encoder params:
+  //   - libx264 + preset medium + CRF 18: matches Pass C's quality target
+  //     (Pass C uses CRF 18 slow; per-segment uses medium for ~3x faster
+  //     encode at marginally larger filesize)
+  //   - AAC 192k 44100: matches buildNormalizeCommand's audio settings,
+  //     ensures Pass B concat demuxer accepts consistent codec across
+  //     segments (concat requires identical codec/sample-rate per stream)
   return {
     command: 'ffmpeg',
     args: [
       '-y',
+      '-i', inputPath,
       '-ss', String(startSec),
       '-to', String(endSec),
-      '-i', inputPath,
-      '-c', 'copy',
+      '-c:v', 'libx264',
+      '-preset', 'medium',
+      '-crf', '18',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-ar', '44100',
       '-avoid_negative_ts', 'make_zero',
       outputPath,
     ],

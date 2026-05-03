@@ -6,6 +6,8 @@
  *     jobId: string,
  *     format: 'routine' | 'meme',
  *     clipsMode: 'fixed_1' | 'agent_picks',
+ *     overlayMode?: 'generate' | 'verbatim',
+ *     editorDisabled?: boolean,
  *   }
  *
  * Validates payload shape, dispatches to the orchestrator, lets BullMQ
@@ -32,6 +34,12 @@ export interface SimplePipelineJobData {
    * Missing → defaulted by format: meme→verbatim, routine→generate.
    */
   overlayMode?: SimplePipelineOverlayMode;
+  /**
+   * c5.5 (2026-04-30). Optional per-job toggle. true → the editor step is
+   * skipped on the routine path (same shape as meme bypass — used by the
+   * c6 Gate A baseline batch). Default false; missing → false.
+   */
+  editorDisabled?: boolean;
 }
 
 function defaultOverlayMode(format: SimplePipelineFormat): SimplePipelineOverlayMode {
@@ -68,10 +76,26 @@ export async function runSimplePipelineWorker(data: SimplePipelineJobData): Prom
     overlayMode = data.overlayMode;
   }
 
+  // editorDisabled defaults to false; only true|false are valid (anything
+  // else is a malformed payload).
+  let editorDisabled = false;
+  if (data.editorDisabled !== undefined && data.editorDisabled !== null) {
+    if (typeof data.editorDisabled !== 'boolean') {
+      throw new Error(
+        `simple-pipeline worker: invalid editorDisabled "${String(data.editorDisabled)}" (expected boolean)`,
+      );
+    }
+    editorDisabled = data.editorDisabled;
+  }
+  if (editorDisabled) {
+    console.log(`[worker:simple_pipeline] editorDisabled=true; routine path will skip Editor`);
+  }
+
   await runSimplePipeline({
     jobId: data.jobId,
     format: data.format,
     clipsMode: data.clipsMode,
     overlayMode,
+    editorDisabled,
   });
 }

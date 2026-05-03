@@ -30,6 +30,7 @@ import {
   logRender,
 } from './simple-pipeline/segment-cooldown-tracker.js';
 import { planRoutineExclusions } from './simple-pipeline/parent-picker.js';
+import { runEditorStep } from './simple-pipeline/editor-step.js';
 
 export type SimplePipelineFormat = 'routine' | 'meme';
 export type SimplePipelineClipsMode = 'fixed_1' | 'agent_picks';
@@ -49,6 +50,16 @@ export interface SimplePipelineInput {
   format: SimplePipelineFormat;
   clipsMode: SimplePipelineClipsMode;
   overlayMode: SimplePipelineOverlayMode;
+  /**
+   * c5.5 per-job toggle. When true, the editor step is skipped on the
+   * routine path (yields the same shape as meme bypass — editor_invoked=false,
+   * empty refined map, zero cost/wall). Defaults to false.
+   *
+   * Used by the c6 Gate A baseline batch to render v1.1-shape outputs from
+   * the same feat-branch deployment that produced the with-Editor batch.
+   * Defensive post-merge — the toggle stays in production for ops use.
+   */
+  editorDisabled?: boolean;
 }
 
 export interface SimplePipelineResult {
@@ -77,6 +88,7 @@ export async function runSimplePipeline(
       format: input.format,
       clips_mode: input.clipsMode,
       overlay_mode: input.overlayMode,
+      editor_disabled: input.editorDisabled === true,
     });
 
     // 2. Read job row
@@ -120,11 +132,33 @@ export async function runSimplePipeline(
       `[simple-pipeline] agent picked parent=${pick.parentAssetId} segments=${pick.segmentIds.length} cost=$${pick.costUsd.toFixed(4)}`,
     );
 
-    // 5. Fetch picked segment durations (sum for routine; single for meme)
+    // 5. Editor agent (routine only). Refines per-segment boundaries inward
+    //    in parallel before render. Meme path bypasses entirely
+    //    (editor_invoked=false). Per-segment isolation: a fallback on one
+    //    segment never affects siblings; bounds revert to original on any
+    //    failure. The refinedBoundsBySegmentId map is held here and threaded
+    //    into renderSimplePipeline below — render consumes it via c5's
+    //    optional RenderInput field.
+    //
+    //    editorDisabled (c5.5): per-job override. Routine + editorDisabled=true
+    //    yields the same shape as meme bypass (editor_invoked=false). Used
+    //    by c6 Gate A baseline batch.
+    const editor = await runEditorStep({
+      jobId: input.jobId,
+      segmentIds: pick.segmentIds,
+      ideaSeed,
+      format: input.format,
+      editorDisabled: input.editorDisabled === true,
+      // v1.2.1: 30s soft target. ±5s acceptable. Editor uses this to decide
+      // whether to trim more aggressively past pure boundary-quality.
+      targetRenderDurationS: 30,
+    });
+
+    // 6. Fetch picked segment durations (sum for routine; single for meme)
     const totalDurationS = await fetchTotalDuration(pick.segmentIds);
     console.log(`[simple-pipeline] picked segments total duration: ${totalDurationS.toFixed(1)}s`);
 
-    // 6. Overlay + music in parallel (independent calls).
+    // 7. Overlay + music in parallel (independent calls).
     //    overlayMode='verbatim' skips the Gemini generator and uses the
     //    operator's idea_seed as the overlay text directly. Saves ~$0.005
     //    + ~5s wall, and (especially for meme) preserves the seed's
@@ -150,7 +184,7 @@ export async function runSimplePipeline(
     }
     console.log(`[simple-pipeline] overlay="${overlay.text}" music="${music.track.title}"`);
 
-    // 7. Render (4-pass ffmpeg)
+    // 8. Render (4-pass ffmpeg)
     const render = await renderSimplePipeline({
       jobId: input.jobId,
       brandId,
@@ -158,10 +192,11 @@ export async function runSimplePipeline(
       segmentIds: pick.segmentIds,
       overlayText: overlay.text,
       musicR2Key: music.track.r2_key,
+      refinedBoundsBySegmentId: editor.refinedBoundsBySegmentId,
     });
     workDir = render.workDir;
 
-    // 8. Log to cooldown history
+    // 9. Log to cooldown history
     await logRender({
       brandId,
       format: input.format,
@@ -170,7 +205,7 @@ export async function runSimplePipeline(
       jobId: input.jobId,
     });
 
-    // 9. Generate 24h presigned URL for the Sheet preview, update job row,
+    // 10. Generate 24h presigned URL for the Sheet preview, update job row,
     //    and transition to human_qa.
     let previewUrl: string;
     try {
@@ -188,6 +223,8 @@ export async function runSimplePipeline(
       })
       .eq('id', input.jobId);
 
+    const totalCostUsd = pick.costUsd + overlay.costUsd + editor.outcome.editor_cost_usd;
+
     await transitionJob(input.jobId, 'simple_pipeline_rendering', 'human_qa', {
       r2_key: render.r2Key,
       duration_s: render.durationS,
@@ -200,17 +237,18 @@ export async function runSimplePipeline(
       fallback_triggered: fallbackTriggered,
       agent_cost_usd: pick.costUsd,
       overlay_cost_usd: overlay.costUsd,
-      total_cost_usd: pick.costUsd + overlay.costUsd,
+      editor_cost_usd: editor.outcome.editor_cost_usd,
+      editor_disabled: input.editorDisabled === true,
+      total_cost_usd: totalCostUsd,
       wall_time_s: ((Date.now() - t0) / 1000).toFixed(1),
+      editor_outcome: editor.outcome,
     });
-
-    const totalCostUsd = pick.costUsd + overlay.costUsd;
     console.log(
       `[simple-pipeline] DONE jobId=${input.jobId} duration=${render.durationS.toFixed(1)}s ` +
         `wall=${((Date.now() - t0) / 1000).toFixed(1)}s cost=$${totalCostUsd.toFixed(4)}`,
     );
 
-    // 10. Cleanup workdir (R2 already uploaded; local files no longer needed)
+    // 11. Cleanup workdir (R2 already uploaded; local files no longer needed)
     if (workDir) await cleanupRenderWorkdir(workDir);
 
     return {

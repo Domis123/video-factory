@@ -38,7 +38,13 @@ const planningWorker = createWorker(
     await runPlanning(jobId);
     dispatchPartBIfEnabled(jobId);
   },
-  { concurrency: 1 }, // One planning job at a time (API rate limits)
+  {
+    concurrency: 1, // One planning job at a time (API rate limits)
+    // c5.7: Match the simple_pipeline limiter shape — Upstash 1000 cmd/sec
+    // ceiling can be tripped by combined idle polling + enqueue bursts
+    // when only one of four workers is rate-limited (Rule 43 sighting #13).
+    limiter: { max: 500, duration: 1000 },
+  },
 );
 
 /**
@@ -99,7 +105,11 @@ const renderingWorker = createWorker(
     console.log(`[worker:rendering] Processing job ${job.data.jobId}`);
     await runRenderPipeline(job.data.jobId);
   },
-  { concurrency: env.WORKER_CONCURRENCY },
+  {
+    concurrency: env.WORKER_CONCURRENCY,
+    // c5.7: see planningWorker comment.
+    limiter: { max: 500, duration: 1000 },
+  },
 );
 
 renderingWorker.on('completed', (job) => {
@@ -120,6 +130,10 @@ const ingestionWorker = createWorker(
     console.log(`[worker:ingestion] Processing ${job.data.filename ?? job.data.filePath}`);
     await ingestAsset(job.data);
   },
+  {
+    // c5.7: see planningWorker comment.
+    limiter: { max: 500, duration: 1000 },
+  },
 );
 
 ingestionWorker.on('completed', (job) => {
@@ -136,7 +150,7 @@ ingestionWorker.on('failed', (job, err) => {
 // → overlay → music → ffmpeg render → human_qa.
 const simplePipelineWorker = createWorker(
   QUEUE_NAMES.simple_pipeline,
-  async (job: BullJob<{ jobId: string; format: 'routine' | 'meme'; clipsMode: 'fixed_1' | 'agent_picks'; overlayMode?: 'generate' | 'verbatim' }>) => {
+  async (job: BullJob<{ jobId: string; format: 'routine' | 'meme'; clipsMode: 'fixed_1' | 'agent_picks'; overlayMode?: 'generate' | 'verbatim'; editorDisabled?: boolean }>) => {
     const { runSimplePipelineWorker } = await import('./workers/simple-pipeline.js');
     console.log(`[worker:simple_pipeline] Processing ${job.data.jobId} format=${job.data.format} overlayMode=${job.data.overlayMode ?? '(default)'}`);
     await runSimplePipelineWorker(job.data);
