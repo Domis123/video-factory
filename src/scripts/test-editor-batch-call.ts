@@ -364,14 +364,16 @@ async function testRealGemini() {
     }
   }
 
-  // Real-Gemini assertions are loose by design. Per brief c3, prompt is
-  // still v1.2.1 (per-segment shape) so a batch-shaped Zod parse is
-  // EXPECTED to fail. The verification is that the FALLBACK PATH RUNS
-  // CLEANLY — not that the model produces valid batch output. c4 re-runs
-  // this script after shipping the v1.3 prompt to verify the happy path.
+  // Post-c4 the prompt file is v1.3 (single-call holistic with drop
+  // authority). Real-Gemini assertions are still loose by design: the
+  // production happy path is judged by Gate A on full operator review,
+  // not by this standalone test. The test verifies (a) the call runs
+  // cleanly and produces the expected output shape, and (b) when the
+  // input is below the under-band floor, the model correctly defaults
+  // to no_change rather than manufacturing trim.
   assert('real Gemini call did not throw', outcome !== undefined);
   assert(
-    'real Gemini cost recorded (>0 if call happened, =0 if pre-call fallback)',
+    'real Gemini cost recorded',
     typeof outcome.costUsd === 'number',
   );
   assert(
@@ -379,18 +381,36 @@ async function testRealGemini() {
     outcome.perSegment.length === input.segments.length,
   );
   if (outcome.batchFallback) {
-    console.log(
-      `  → expected pre-c4 outcome: batch fallback (current prompt is v1.2.1 per-segment shape, won't produce batch output)`,
-    );
-    assert('batch fallback handled cleanly (no per-segment data corruption)',
+    console.log(`  → batch fallback fired with reason=${outcome.batchFallbackReason}`);
+    assert(
+      'batch fallback handled cleanly (no per-segment data corruption)',
       outcome.perSegment.every(
         (s) =>
           s.kind === 'fallback' && s.perSegmentFallbackReason === 'batch_fallback',
       ),
     );
   } else {
-    console.log(`  → unexpected: batch parse succeeded against v1.2.1 prompt`);
-    assert('batch parse against v1.2.1 prompt unexpectedly succeeded', true);
+    console.log(`  → batch parse succeeded; model produced wrapper-shaped output`);
+    assert('batch parse succeeded', true);
+    assert(
+      'globalReasoning surfaced',
+      outcome.globalReasoning !== null && outcome.globalReasoning.length > 0,
+    );
+    // Below-floor input: model should default to no_change, not refine.
+    // (picks_sum 22.6 < 25s floor; trimming further would breach.)
+    if (picksSum < 25) {
+      const noChangeCount = outcome.perSegment.filter((s) => s.kind === 'no_change').length;
+      const refineCount = outcome.perSegment.filter((s) => s.kind === 'refined').length;
+      assert(
+        `below-floor input (${picksSum.toFixed(1)}s): no refines proposed (got ${refineCount})`,
+        refineCount === 0,
+        `${refineCount} refine(s) on below-floor input would breach the 25s floor`,
+      );
+      assert(
+        `below-floor input: at least one no_change recorded (got ${noChangeCount})`,
+        noChangeCount >= 1,
+      );
+    }
   }
 }
 
