@@ -30,7 +30,12 @@ import {
   logRender,
 } from './simple-pipeline/segment-cooldown-tracker.js';
 import { planRoutineExclusions } from './simple-pipeline/parent-picker.js';
-import { runEditorStep } from './simple-pipeline/editor-step.js';
+import {
+  runEditorStep,
+  type EditorOutcomePayload,
+  type ProposedDrop,
+  type RefinedBounds,
+} from './simple-pipeline/editor-step.js';
 
 export type SimplePipelineFormat = 'routine' | 'meme';
 export type SimplePipelineClipsMode = 'fixed_1' | 'agent_picks';
@@ -132,31 +137,62 @@ export async function runSimplePipeline(
       `[simple-pipeline] agent picked parent=${pick.parentAssetId} segments=${pick.segmentIds.length} cost=$${pick.costUsd.toFixed(4)}`,
     );
 
-    // 5. Editor agent (routine only). Refines per-segment boundaries inward
-    //    in parallel before render. Meme path bypasses entirely
-    //    (editor_invoked=false). Per-segment isolation: a fallback on one
-    //    segment never affects siblings; bounds revert to original on any
-    //    failure. The refinedBoundsBySegmentId map is held here and threaded
-    //    into renderSimplePipeline below — render consumes it via c5's
-    //    optional RenderInput field.
+    // 5. Editor agent (routine only). Single-call holistic batch (v1.3):
+    //    one Gemini Pro multimodal call with N keyframe grids returns
+    //    refinements for all N segments + a global_reasoning string.
+    //    Meme path bypasses entirely (editor_invoked=false). All-or-nothing
+    //    batch fallback per brief Q3: if the batch call fails (transient,
+    //    Zod parse, completeness mismatch), every segment falls back to
+    //    original boundaries together.
     //
-    //    editorDisabled (c5.5): per-job override. Routine + editorDisabled=true
-    //    yields the same shape as meme bypass (editor_invoked=false). Used
-    //    by c6 Gate A baseline batch.
+    //    editorDisabled per-job toggle: yields meme-bypass shape.
     const editor = await runEditorStep({
       jobId: input.jobId,
       segmentIds: pick.segmentIds,
       ideaSeed,
       format: input.format,
       editorDisabled: input.editorDisabled === true,
-      // v1.2.1: 30s soft target. ±5s acceptable. Editor uses this to decide
-      // whether to trim more aggressively past pure boundary-quality.
       targetRenderDurationS: 30,
     });
 
-    // 6. Fetch picked segment durations (sum for routine; single for meme)
-    const totalDurationS = await fetchTotalDuration(pick.segmentIds);
-    console.log(`[simple-pipeline] picked segments total duration: ${totalDurationS.toFixed(1)}s`);
+    // 6. Apply drop guards (v1.3 §5b): floor projection + slot-count
+    //    minimum. Editor's drop authority is real but bounded — drops
+    //    that would push the projected sum below the 25s floor or the
+    //    remaining segment count below 2 are rejected in priority order
+    //    (lowest-confidence drop rejected first). The model's prompt
+    //    teaches the same projection so well-behaved Editor calls
+    //    won't cause rejections; this is a safety net not a feature.
+    const dropDecision = applyDropGuards(
+      pick.segmentIds,
+      editor.proposedDrops,
+      editor.refinedBoundsBySegmentId,
+      DROP_GUARD_FLOOR_S,
+      DROP_GUARD_MIN_SEGMENTS,
+    );
+    if (dropDecision.acceptedDrops.length > 0 || dropDecision.rejectedDrops.length > 0) {
+      console.log(
+        `[simple-pipeline] drop guard: proposed=${editor.proposedDrops.length} ` +
+          `accepted=${dropDecision.acceptedDrops.length} rejected=${dropDecision.rejectedDrops.length} ` +
+          `final_segments=${dropDecision.finalSegmentIds.length} ` +
+          `projected_sum=${dropDecision.projectedSumS.toFixed(1)}s`,
+      );
+    }
+
+    // Filter the refined-bounds map to the final (post-drops) segment set.
+    // Render must NEVER see dropped segments — both in the segment_ids
+    // list and in the bounds map.
+    const finalSegmentIds = dropDecision.finalSegmentIds;
+    const finalBoundsBySegmentId = new Map<string, RefinedBounds>();
+    for (const id of finalSegmentIds) {
+      const b = editor.refinedBoundsBySegmentId.get(id);
+      if (b) finalBoundsBySegmentId.set(id, b);
+    }
+
+    // 7. Compute total duration AFTER drops for music-track length matching.
+    const totalDurationS = computeProjectedSumS(finalSegmentIds, finalBoundsBySegmentId);
+    console.log(
+      `[simple-pipeline] post-Editor total duration: ${totalDurationS.toFixed(1)}s (${finalSegmentIds.length} segments)`,
+    );
 
     // 7. Overlay + music in parallel (independent calls).
     //    overlayMode='verbatim' skips the Gemini generator and uses the
@@ -184,19 +220,24 @@ export async function runSimplePipeline(
     }
     console.log(`[simple-pipeline] overlay="${overlay.text}" music="${music.track.title}"`);
 
-    // 8. Render (4-pass ffmpeg)
+    // 8. Render (4-pass ffmpeg). Uses POST-DROPS segment list and bounds
+    //    map. Render never sees dropped segments.
     const render = await renderSimplePipeline({
       jobId: input.jobId,
       brandId,
       format: input.format,
-      segmentIds: pick.segmentIds,
+      segmentIds: finalSegmentIds,
       overlayText: overlay.text,
       musicR2Key: music.track.r2_key,
-      refinedBoundsBySegmentId: editor.refinedBoundsBySegmentId,
+      refinedBoundsBySegmentId: finalBoundsBySegmentId,
     });
     workDir = render.workDir;
 
-    // 9. Log to cooldown history
+    // 9. Log to cooldown history. Use the FULL pick.segmentIds (not
+    //    post-drops) so dropped segments enter cooldown along with rendered
+    //    ones — the picker considered all of them and the operator-facing
+    //    cooldown logic should reflect "what was just used by this brand"
+    //    in the broadest sense, not the post-Editor sliver.
     await logRender({
       brandId,
       format: input.format,
@@ -225,6 +266,22 @@ export async function runSimplePipeline(
 
     const totalCostUsd = pick.costUsd + overlay.costUsd + editor.outcome.editor_cost_usd;
 
+    // editor_outcome augmented with orchestrator-side drop-guard counts
+    // (v1.3 §5b). The Editor reports drops PROPOSED; the orchestrator
+    // is the authority on drops ACCEPTED vs REJECTED.
+    const augmentedEditorOutcome: EditorOutcomePayload & {
+      segments_dropped_accepted: number;
+      segments_drops_rejected: number;
+      drops_rejected_reason: string | null;
+    } = {
+      ...editor.outcome,
+      segments_dropped_accepted: dropDecision.acceptedDrops.length,
+      segments_drops_rejected: dropDecision.rejectedDrops.length,
+      drops_rejected_reason: dropDecision.rejectedDrops.length > 0
+        ? dropDecision.rejectionReason
+        : null,
+    };
+
     await transitionJob(input.jobId, 'simple_pipeline_rendering', 'human_qa', {
       r2_key: render.r2Key,
       duration_s: render.durationS,
@@ -232,8 +289,13 @@ export async function runSimplePipeline(
       overlay_mode: input.overlayMode,
       music_track_id: music.track.id,
       parent_asset_id: pick.parentAssetId,
-      segment_ids: pick.segmentIds,
-      slot_count: pick.segmentIds.length,
+      // segment_ids reflects the FINAL (post-drops) set rendered. The
+      // original pick is recoverable via job_events by joining on the
+      // pre-Editor pick payload if needed for diagnostics.
+      segment_ids: finalSegmentIds,
+      original_pick_segment_ids: pick.segmentIds,
+      slot_count: finalSegmentIds.length,
+      original_slot_count: pick.segmentIds.length,
       fallback_triggered: fallbackTriggered,
       agent_cost_usd: pick.costUsd,
       overlay_cost_usd: overlay.costUsd,
@@ -241,7 +303,7 @@ export async function runSimplePipeline(
       editor_disabled: input.editorDisabled === true,
       total_cost_usd: totalCostUsd,
       wall_time_s: ((Date.now() - t0) / 1000).toFixed(1),
-      editor_outcome: editor.outcome,
+      editor_outcome: augmentedEditorOutcome,
     });
     console.log(
       `[simple-pipeline] DONE jobId=${input.jobId} duration=${render.durationS.toFixed(1)}s ` +
@@ -294,20 +356,144 @@ export async function runSimplePipeline(
   }
 }
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// ─── Drop-guard constants + helpers (v1.3 §5b) ─────────────────────────────
 
-async function fetchTotalDuration(segmentIds: string[]): Promise<number> {
-  const { data, error } = await supabaseAdmin
-    .from('asset_segments')
-    .select('start_s, end_s')
-    .in('id', segmentIds);
-  if (error) {
-    throw new Error(`fetchTotalDuration: ${error.message}`);
+/** Lower edge of the target band; drops that breach this are rejected. */
+const DROP_GUARD_FLOOR_S = 25.0;
+/** Minimum segment count after drops; matches min(2) Zod floor. */
+const DROP_GUARD_MIN_SEGMENTS = 2;
+
+interface DropDecision {
+  /** Segment IDs surviving after drops applied. */
+  finalSegmentIds: string[];
+  /** Drops the orchestrator honored. */
+  acceptedDrops: ProposedDrop[];
+  /** Drops the orchestrator overrode (with reason). */
+  rejectedDrops: ProposedDrop[];
+  /** Why drops were rejected (null when none rejected). */
+  rejectionReason: 'floor_breach' | 'slot_min' | 'mixed' | null;
+  /** Sum of remaining segments' durations after drops. */
+  projectedSumS: number;
+}
+
+/**
+ * Apply drop guards in priority order: lowest-confidence drop rejected
+ * first when guards fail. Returns the final segment list + accepted /
+ * rejected drop arrays + reason + projected sum.
+ *
+ * Algorithm:
+ *   1. Start with all proposed drops accepted.
+ *   2. Compute remaining segment count + projected sum.
+ *   3. If both guards pass, return.
+ *   4. Otherwise, find the lowest-confidence drop currently accepted
+ *      and reject it. Loop.
+ *   5. Stops when all guards pass OR all drops have been rejected.
+ *
+ * If no drops were proposed, returns a no-op decision.
+ */
+export function applyDropGuards(
+  pickedSegmentIds: string[],
+  proposedDrops: ProposedDrop[],
+  boundsBySegmentId: Map<string, RefinedBounds>,
+  floorS: number,
+  minSegments: number,
+): DropDecision {
+  if (proposedDrops.length === 0) {
+    return {
+      finalSegmentIds: [...pickedSegmentIds],
+      acceptedDrops: [],
+      rejectedDrops: [],
+      rejectionReason: null,
+      projectedSumS: computeProjectedSumS(pickedSegmentIds, boundsBySegmentId),
+    };
   }
-  if (!data || data.length === 0) {
-    throw new Error('fetchTotalDuration: no segment rows returned');
+
+  const confidenceRank: Record<'low' | 'medium' | 'high', number> = {
+    low: 0,
+    medium: 1,
+    high: 2,
+  };
+
+  // Stable sort by confidence ascending. We'll evict from the FRONT
+  // (lowest-confidence) when guards fail.
+  const dropsByConfidenceAsc = [...proposedDrops].sort(
+    (a, b) => confidenceRank[a.confidence] - confidenceRank[b.confidence],
+  );
+
+  const acceptedSet = new Set(dropsByConfidenceAsc.map((d) => d.segmentId));
+  const rejected: ProposedDrop[] = [];
+  let rejectionReason: 'floor_breach' | 'slot_min' | 'mixed' | null = null;
+
+  while (true) {
+    const remainingIds = pickedSegmentIds.filter((id) => !acceptedSet.has(id));
+    const slotMinOk = remainingIds.length >= minSegments;
+    const projectedSum = computeProjectedSumS(remainingIds, boundsBySegmentId);
+    const floorOk = projectedSum >= floorS;
+
+    if (slotMinOk && floorOk) {
+      const accepted = dropsByConfidenceAsc.filter((d) => acceptedSet.has(d.segmentId));
+      return {
+        finalSegmentIds: remainingIds,
+        acceptedDrops: accepted,
+        rejectedDrops: rejected,
+        rejectionReason,
+        projectedSumS: projectedSum,
+      };
+    }
+
+    // Reject the lowest-confidence drop still accepted.
+    const evict = dropsByConfidenceAsc.find((d) => acceptedSet.has(d.segmentId));
+    if (!evict) {
+      // No more drops to reject and guards still failing — return current
+      // state. This is the degenerate case where even keeping all picks
+      // doesn't satisfy the floor (M-O-M produced too-short pick); we
+      // can't fix that here, render proceeds with full pick.
+      const finalIds = pickedSegmentIds.filter((id) => !acceptedSet.has(id));
+      return {
+        finalSegmentIds: finalIds,
+        acceptedDrops: dropsByConfidenceAsc.filter((d) => acceptedSet.has(d.segmentId)),
+        rejectedDrops: rejected,
+        rejectionReason,
+        projectedSumS: projectedSum,
+      };
+    }
+    acceptedSet.delete(evict.segmentId);
+    rejected.push(evict);
+    // Track which guard caused the rejection (cumulative).
+    const causedByFloor = !floorOk;
+    const causedBySlotMin = !slotMinOk;
+    if (rejectionReason === null) {
+      rejectionReason = causedByFloor && causedBySlotMin
+        ? 'mixed'
+        : causedByFloor
+          ? 'floor_breach'
+          : 'slot_min';
+    } else if (
+      (rejectionReason === 'floor_breach' && causedBySlotMin) ||
+      (rejectionReason === 'slot_min' && causedByFloor)
+    ) {
+      rejectionReason = 'mixed';
+    }
   }
-  return data.reduce((sum: number, row: any) => {
-    return sum + (Number(row.end_s) - Number(row.start_s));
-  }, 0);
+}
+
+/**
+ * Sum durations across the given segment IDs, reading from the bounds map
+ * (which contains either refined or original bounds depending on the
+ * Editor's per-segment outcome).
+ *
+ * If a segment_id is missing from the bounds map (shouldn't happen in
+ * normal flow but defensive), it contributes 0 — better than throwing
+ * and aborting the render path.
+ */
+export function computeProjectedSumS(
+  segmentIds: string[],
+  boundsBySegmentId: Map<string, RefinedBounds>,
+): number {
+  let sum = 0;
+  for (const id of segmentIds) {
+    const b = boundsBySegmentId.get(id);
+    if (b) sum += b.endS - b.startS;
+  }
+  return sum;
 }
