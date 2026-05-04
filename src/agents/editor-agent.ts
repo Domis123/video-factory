@@ -33,9 +33,15 @@ import { computeGeminiCost } from '../lib/llm-cost.js';
 import { fetchKeyframeGrid } from '../lib/r2-fetch.js';
 
 import {
+  applyBatchClamps,
   applyClamps,
+  editorBatchOutputSchema,
   editorRefinementSchema,
+  validateBatchCompleteness,
+  type BatchClampOutcome,
   type ClampOutcome,
+  type EditorBatchOutput,
+  type EditorBatchRefinement,
   type EditorRefinement,
 } from './editor-agent-schema.js';
 
@@ -444,4 +450,396 @@ function messageOf(err: unknown): string {
   } catch {
     return String(err);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.3 BATCH ARCHITECTURE (single-call holistic with drop authority)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Replaces v1.2.x's per-segment Promise.all parallel calls with ONE Gemini
+// multimodal call that sees all N segments at once and returns refinements
+// for all N in one response. New `drop` action: model can exclude weak
+// segments from the render. Drop GUARDS (under-band floor projection,
+// slot count minimum) are orchestrator-side per brief §5b.
+//
+// The legacy `refineSegmentBoundary` above remains exported until c6
+// swaps the orchestrator to use `refineSegmentBatch`. Both functions
+// read the same `editor-agent.md` prompt file (system instruction);
+// c4 rewrites that file's content for batch use.
+//
+// Failure model per brief Q3: all-or-nothing batch fallback. If the
+// single call fails (transient, Zod, completeness mismatch), the entire
+// batch falls back to original boundaries — no per-segment partial
+// success/fail mixing.
+
+// ─── v1.3 input / outcome types ────────────────────────────────────────────
+
+/** One segment's input within a batch. */
+export interface EditorBatchSegmentInput {
+  segmentId: string;
+  originalStartS: number;
+  originalEndS: number;
+  segmentType: string;
+  description: string | null;
+  /** Raw segment_v2 JSONB blob; the agent reads selected fields. */
+  segmentV2: Record<string, unknown> | null;
+  /** R2 key for the 4×3 keyframe grid mosaic (1024×1365 JPEG). */
+  keyframeGridR2Key: string | null;
+}
+
+/** Top-level batch input. Render-context fields are once per batch. */
+export interface EditorBatchAgentInput {
+  segments: EditorBatchSegmentInput[];
+  ideaSeed: string;
+  slotCountTotal: number;
+  /** Sum of all picked segments' original (endS - startS). */
+  currentRenderDurationS: number;
+  /** Soft target render duration. Default 30s. */
+  targetRenderDurationS: number;
+}
+
+export type BatchFallbackReason =
+  | 'empty_input'
+  | 'missing_keyframe_grid'
+  | 'missing_segment_v2'
+  | 'transient_exhausted'
+  | 'empty_response'
+  | 'json_parse_failed'
+  | 'zod_parse_failed'
+  | 'completeness_failed'
+  | 'unknown_error';
+
+/** One segment's outcome within a batch. */
+export type EditorBatchPerSegmentOutcome =
+  | {
+      kind: 'refined';
+      segmentId: string;
+      refinedStartS: number;
+      refinedEndS: number;
+      reasoning: string;
+      confidence: 'high' | 'medium' | 'low';
+      clamps: string[];
+    }
+  | {
+      kind: 'no_change';
+      segmentId: string;
+      refinedStartS: number;
+      refinedEndS: number;
+      reasoning: string;
+      confidence: 'high' | 'medium' | 'low';
+      clamps: string[];
+    }
+  | {
+      kind: 'drop';
+      segmentId: string;
+      reasoning: string;
+      confidence: 'high' | 'medium' | 'low';
+      clamps: string[];
+    }
+  | {
+      kind: 'fallback';
+      segmentId: string;
+      /** Original bounds preserved when batch falls back. */
+      refinedStartS: number;
+      refinedEndS: number;
+      /** Reason inherited from batch-level fallback OR per-segment clamp failure. */
+      perSegmentFallbackReason: 'duration_floor_violated' | 'invalid_range' | 'missing_refined_bounds' | 'batch_fallback';
+      clamps: string[];
+    };
+
+export interface EditorBatchAgentOutcome {
+  perSegment: EditorBatchPerSegmentOutcome[];
+  /** Model's batch-level reasoning. Null when the batch fell back. */
+  globalReasoning: string | null;
+  /** True when the entire batch fell back (Q3: all-or-nothing). */
+  batchFallback: boolean;
+  /** Set when batchFallback=true. Null otherwise. */
+  batchFallbackReason: BatchFallbackReason | null;
+  costUsd: number;
+  wallMs: number;
+}
+
+// ─── v1.3 public entry point ───────────────────────────────────────────────
+
+/**
+ * Single-call batch boundary refinement.
+ *
+ * Returns an outcome wrapper with per-segment results + global_reasoning.
+ * NEVER throws. All failure paths return a batch-fallback outcome where
+ * every segment's outcome is `kind: 'fallback'` with original bounds
+ * preserved.
+ */
+export async function refineSegmentBatch(
+  input: EditorBatchAgentInput,
+): Promise<EditorBatchAgentOutcome> {
+  const t0 = Date.now();
+
+  if (input.segments.length === 0) {
+    return makeBatchFallback(input, 'empty_input', 0, Date.now() - t0);
+  }
+
+  // Defensive: every segment must have keyframe grid + segment_v2.
+  for (const s of input.segments) {
+    if (!s.keyframeGridR2Key) {
+      return makeBatchFallback(input, 'missing_keyframe_grid', 0, Date.now() - t0);
+    }
+    if (!s.segmentV2) {
+      return makeBatchFallback(input, 'missing_segment_v2', 0, Date.now() - t0);
+    }
+  }
+
+  let costUsd = 0;
+  let rawText = '';
+
+  try {
+    // Fetch N keyframe grids in parallel (network I/O, not Gemini cost).
+    const grids = await Promise.all(
+      input.segments.map((s) => fetchKeyframeGrid(s.keyframeGridR2Key as string)),
+    );
+    const systemInstruction = PROMPT_TEMPLATE; // c4 swaps this file's content for v1.3
+    const structuredInput = buildStructuredBatchInput(input);
+    const result = await callGeminiBatch(grids, systemInstruction, structuredInput);
+    costUsd = result.costUsd;
+    rawText = result.rawText;
+  } catch (err) {
+    const reason: BatchFallbackReason = isTransientLike(err)
+      ? 'transient_exhausted'
+      : 'unknown_error';
+    console.warn(`[editor-batch] ${reason}: ${messageOf(err)}`);
+    return makeBatchFallback(input, reason, costUsd, Date.now() - t0);
+  }
+
+  return assembleBatchOutcome(rawText, input, costUsd, Date.now() - t0);
+}
+
+/**
+ * Pure function: parse + validate + clamp + assemble per-segment outcomes
+ * from a raw model response string + the batch input. Exported for
+ * standalone testing (see src/scripts/test-editor-batch-call.ts) without
+ * requiring a live Gemini call.
+ */
+export function assembleBatchOutcome(
+  rawText: string,
+  input: EditorBatchAgentInput,
+  costUsd: number,
+  wallMs: number,
+): EditorBatchAgentOutcome {
+  if (!rawText) {
+    return makeBatchFallback(input, 'empty_response', costUsd, wallMs);
+  }
+
+  // 1. JSON parse (with brace-extraction fallback for prose-prefixed responses)
+  let raw: unknown;
+  try {
+    raw = JSON.parse(rawText);
+  } catch {
+    const match = rawText.match(/\{[\s\S]*\}/);
+    if (!match) {
+      console.warn(`[editor-batch] json_parse_failed: ${rawText.slice(0, 200)}`);
+      return makeBatchFallback(input, 'json_parse_failed', costUsd, wallMs);
+    }
+    try {
+      raw = JSON.parse(match[0]);
+    } catch (err2) {
+      console.warn(`[editor-batch] json_parse_failed (after brace extraction): ${messageOf(err2)}`);
+      return makeBatchFallback(input, 'json_parse_failed', costUsd, wallMs);
+    }
+  }
+
+  // 2. Zod parse
+  const zodResult = editorBatchOutputSchema.safeParse(raw);
+  if (!zodResult.success) {
+    console.warn(
+      `[editor-batch] zod_parse_failed: ${zodResult.error.issues
+        .map((i) => `${i.path.join('.')}=${i.message}`)
+        .slice(0, 5)
+        .join('; ')}`,
+    );
+    return makeBatchFallback(input, 'zod_parse_failed', costUsd, wallMs);
+  }
+  const batch: EditorBatchOutput = zodResult.data;
+
+  // 3. Completeness check (every input segment_id present once in output)
+  const expectedIds = input.segments.map((s) => s.segmentId);
+  const completeness = validateBatchCompleteness(batch, expectedIds);
+  if (!completeness.ok) {
+    console.warn(
+      `[editor-batch] completeness_failed: ${completeness.issues
+        .slice(0, 5)
+        .map((i) => `${i.kind}:${i.segmentId.slice(0, 8)}`)
+        .join('; ')}`,
+    );
+    return makeBatchFallback(input, 'completeness_failed', costUsd, wallMs);
+  }
+
+  // 4. Per-segment clamp + projection.
+  const inputBySegmentId = new Map(input.segments.map((s) => [s.segmentId, s]));
+  const refinementBySegmentId = new Map(batch.refinements.map((r) => [r.segment_id, r]));
+
+  const perSegment: EditorBatchPerSegmentOutcome[] = input.segments.map((seg) => {
+    const refinement = refinementBySegmentId.get(seg.segmentId) as EditorBatchRefinement;
+    const original = { startS: seg.originalStartS, endS: seg.originalEndS };
+    const clamp: BatchClampOutcome = applyBatchClamps(refinement, original);
+    return projectBatchPerSegmentOutcome(seg.segmentId, original, refinement, clamp);
+  });
+
+  void inputBySegmentId; // reserved for future cross-segment logic
+
+  return {
+    perSegment,
+    globalReasoning: batch.global_reasoning,
+    batchFallback: false,
+    batchFallbackReason: null,
+    costUsd,
+    wallMs,
+  };
+}
+
+// ─── v1.3 internal helpers ─────────────────────────────────────────────────
+
+function makeBatchFallback(
+  input: EditorBatchAgentInput,
+  reason: BatchFallbackReason,
+  costUsd: number,
+  wallMs: number,
+): EditorBatchAgentOutcome {
+  return {
+    perSegment: input.segments.map((s) => ({
+      kind: 'fallback' as const,
+      segmentId: s.segmentId,
+      refinedStartS: s.originalStartS,
+      refinedEndS: s.originalEndS,
+      perSegmentFallbackReason: 'batch_fallback' as const,
+      clamps: [],
+    })),
+    globalReasoning: null,
+    batchFallback: true,
+    batchFallbackReason: reason,
+    costUsd,
+    wallMs,
+  };
+}
+
+function projectBatchPerSegmentOutcome(
+  segmentId: string,
+  original: { startS: number; endS: number },
+  refinement: EditorBatchRefinement,
+  clamp: BatchClampOutcome,
+): EditorBatchPerSegmentOutcome {
+  switch (clamp.kind) {
+    case 'refined_ok':
+      return {
+        kind: 'refined',
+        segmentId,
+        refinedStartS: clamp.refinedStartS,
+        refinedEndS: clamp.refinedEndS,
+        reasoning: refinement.reasoning,
+        confidence: refinement.confidence,
+        clamps: clamp.clamps,
+      };
+    case 'no_change':
+      return {
+        kind: 'no_change',
+        segmentId,
+        refinedStartS: clamp.refinedStartS,
+        refinedEndS: clamp.refinedEndS,
+        reasoning: refinement.reasoning,
+        confidence: refinement.confidence,
+        clamps: clamp.clamps,
+      };
+    case 'drop':
+      return {
+        kind: 'drop',
+        segmentId,
+        reasoning: clamp.reasoning,
+        confidence: refinement.confidence,
+        clamps: clamp.clamps,
+      };
+    case 'fallback':
+      return {
+        kind: 'fallback',
+        segmentId,
+        refinedStartS: original.startS,
+        refinedEndS: original.endS,
+        perSegmentFallbackReason: clamp.reason,
+        clamps: clamp.clamps,
+      };
+  }
+}
+
+function buildStructuredBatchInput(input: EditorBatchAgentInput): string {
+  // Emits a JSON text block paired with the N keyframe grid images.
+  // Image at index i corresponds to segments[i]; the prompt explains.
+  const segments = input.segments.map((s, i) => {
+    const v2 = s.segmentV2 ?? {};
+    return {
+      image_index: i,
+      segment_id: s.segmentId,
+      original_start_s: Number(s.originalStartS.toFixed(2)),
+      original_end_s: Number(s.originalEndS.toFixed(2)),
+      original_duration_s: Number((s.originalEndS - s.originalStartS).toFixed(2)),
+      segment_type: s.segmentType,
+      description: s.description ?? null,
+      motion: pickPath<unknown>(v2, ['motion']) ?? null,
+      audio: pickPath<unknown>(v2, ['audio']) ?? null,
+      quality: pickPath<unknown>(v2, ['quality']) ?? null,
+      editorial: pickPath<unknown>(v2, ['editorial']) ?? null,
+      on_screen_text: pickPath<unknown>(v2, ['setting', 'on_screen_text']) ?? null,
+      subject_present: pickPath<boolean>(v2, ['subject', 'present']) ?? null,
+    };
+  });
+  const renderContext = {
+    idea_seed: input.ideaSeed,
+    slot_count_total: input.slotCountTotal,
+    current_render_duration_s: Number(input.currentRenderDurationS.toFixed(2)),
+    target_render_duration_s: Number(input.targetRenderDurationS.toFixed(2)),
+  };
+  return [
+    'BATCH INPUT — N segments to refine in one call.',
+    `Image at index i corresponds to segments[i] (i = 0..${segments.length - 1}).`,
+    '',
+    'render_context:',
+    JSON.stringify(renderContext, null, 2),
+    '',
+    'segments:',
+    JSON.stringify(segments, null, 2),
+  ].join('\n');
+}
+
+async function callGeminiBatch(
+  grids: Buffer[],
+  systemInstruction: string,
+  structuredInput: string,
+): Promise<{ rawText: string; costUsd: number }> {
+  const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+
+  // Rule 35: images first, then text. N image parts followed by the
+  // structured input + system instruction text.
+  const parts: Array<
+    | { text: string }
+    | { inlineData: { mimeType: string; data: string } }
+  > = grids.map((g) => ({
+    inlineData: { mimeType: 'image/jpeg', data: g.toString('base64') },
+  }));
+  parts.push({ text: `${structuredInput}\n\n---\n\n${systemInstruction}` });
+
+  const response = await withLLMRetry(
+    () =>
+      ai.models.generateContent({
+        model: MODEL_ID,
+        contents: [{ role: 'user', parts }],
+        config: {
+          responseMimeType: 'application/json',
+          temperature: TEMPERATURE,
+        },
+      }),
+    { label: `editor-batch n=${grids.length}`, maxAttempts: MAX_ATTEMPTS },
+  );
+
+  const text = response.text ?? '';
+  if (!text) {
+    throw new Error('editor-batch: Gemini returned empty text');
+  }
+  const usage = computeGeminiCost(MODEL_ID, response);
+  return { rawText: text, costUsd: usage.cost_usd };
 }
