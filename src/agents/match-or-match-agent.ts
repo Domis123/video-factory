@@ -98,8 +98,8 @@ const MEME_PROMPT_TEMPLATE = readFileSync(
 const routineSchema = z
   .object({
     parent_asset_id: z.string().uuid(),
-    segment_ids: z.array(z.string().uuid()).min(2).max(5),
-    slot_count: z.number().int().min(2).max(5),
+    segment_ids: z.array(z.string().uuid()).min(2).max(6),
+    slot_count: z.number().int().min(2).max(6),
     reasoning: z.string().min(1),
   })
   .superRefine((v, ctx) => {
